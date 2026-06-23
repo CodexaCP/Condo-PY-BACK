@@ -2,6 +2,24 @@ using Condo.Domain.Enums;
 
 namespace Condo.Application.Models;
 
+public class RolloverIncomeRequest
+{
+    public Guid BuildingId { get; set; }
+    public Guid SourcePeriodId { get; set; }
+    public Guid TargetPeriodId { get; set; }
+}
+
+public class RolloverIncomeResultDto
+{
+    public string SourcePeriodName { get; set; } = string.Empty;
+    public string TargetPeriodName { get; set; } = string.Empty;
+    public decimal TotalIngresos { get; set; }
+    public decimal TotalGastos { get; set; }
+    public decimal Saldo { get; set; }
+    public bool RolloverCreated { get; set; }
+    public BuildingIncomeDto? CreatedIncome { get; set; }
+}
+
 public class BuildingIncomeUpsertRequest
 {
     public Guid BuildingId { get; set; }

@@ -226,6 +226,119 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
         return NoContent();
     }
 
+    [HttpPost("rollover")]
+    public async Task<ActionResult<RolloverIncomeResultDto>> Rollover([FromBody] RolloverIncomeRequest request, CancellationToken cancellationToken)
+    {
+        if (request.BuildingId == Guid.Empty || request.SourcePeriodId == Guid.Empty || request.TargetPeriodId == Guid.Empty)
+        {
+            return BadRequest("BuildingId, SourcePeriodId y TargetPeriodId son obligatorios.");
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(request.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var source = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.SourcePeriodId && x.BuildingId == request.BuildingId, cancellationToken);
+
+        if (source is null)
+        {
+            return BadRequest("El periodo origen no existe o no pertenece al edificio indicado.");
+        }
+
+        var target = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.TargetPeriodId && x.BuildingId == request.BuildingId, cancellationToken);
+
+        if (target is null)
+        {
+            return BadRequest("El periodo destino no existe o no pertenece al edificio indicado.");
+        }
+
+        if (target.Status != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("El periodo destino debe estar en estado Borrador para recibir el saldo.");
+        }
+
+        if (request.SourcePeriodId == request.TargetPeriodId)
+        {
+            return BadRequest("El periodo origen y destino deben ser diferentes.");
+        }
+
+        var alreadyExists = await dbContext.BuildingIncomes
+            .AnyAsync(x => !x.IsDeleted && x.ExpensePeriodId == request.TargetPeriodId
+                && x.BuildingId == request.BuildingId
+                && x.Category == BuildingIncomeCategory.AccumulatedBalance, cancellationToken);
+
+        if (alreadyExists)
+        {
+            return Conflict("El periodo destino ya tiene un ingreso de tipo 'Saldo acumulado'. Elimínalo antes de aplicar el rollover.");
+        }
+
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId, cancellationToken);
+
+        if (building is null)
+        {
+            return BadRequest("Edificio no encontrado.");
+        }
+
+        var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
+        if (!effectiveCompanyId.HasValue)
+        {
+            return BadRequest("El edificio no tiene empresa asignada.");
+        }
+
+        var totalIngresos = await dbContext.BuildingIncomes
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == request.SourcePeriodId && x.BuildingId == request.BuildingId)
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
+        var totalGastos = await dbContext.BuildingExpenses
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == request.SourcePeriodId && x.BuildingId == request.BuildingId)
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
+        var saldo = totalIngresos - totalGastos;
+
+        var result = new RolloverIncomeResultDto
+        {
+            SourcePeriodName = source.Name,
+            TargetPeriodName = target.Name,
+            TotalIngresos = totalIngresos,
+            TotalGastos = totalGastos,
+            Saldo = saldo,
+            RolloverCreated = false
+        };
+
+        if (saldo <= 0)
+        {
+            return Ok(result);
+        }
+
+        var entity = new BuildingIncome
+        {
+            CompanyId = effectiveCompanyId.Value,
+            BuildingId = request.BuildingId,
+            ExpensePeriodId = request.TargetPeriodId,
+            Category = BuildingIncomeCategory.AccumulatedBalance,
+            Description = $"Saldo anterior período {source.Name}",
+            IncomeDate = target.StartDate,
+            Amount = saldo,
+            Notes = $"Rollover automático: ingresos {totalIngresos:N0} - gastos {totalGastos:N0}"
+        };
+
+        dbContext.BuildingIncomes.Add(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        result.RolloverCreated = true;
+        result.CreatedIncome = ToDto(entity, building, target);
+
+        return Ok(result);
+    }
+
     private async Task<(ActionResult? Error, Building? Building, ExpensePeriod? Period)> ValidateContextAsync(
         BuildingIncomeUpsertRequest request,
         CancellationToken cancellationToken)
