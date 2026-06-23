@@ -57,6 +57,7 @@ public class ExpensePeriodsController(
                 StartDate = x.StartDate,
                 EndDate = x.EndDate,
                 DueDate = x.DueDate,
+                LateFeeDate = x.LateFeeDate,
                 Status = x.Status,
                 Notes = x.Notes
             })
@@ -83,6 +84,7 @@ public class ExpensePeriodsController(
                 StartDate = x.StartDate,
                 EndDate = x.EndDate,
                 DueDate = x.DueDate,
+                LateFeeDate = x.LateFeeDate,
                 Status = x.Status,
                 Notes = x.Notes
             })
@@ -147,6 +149,7 @@ public class ExpensePeriodsController(
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             DueDate = request.DueDate,
+            LateFeeDate = request.LateFeeDate,
             Status = ExpensePeriodStatus.Draft,
             Notes = request.Notes.Trim()
         };
@@ -235,6 +238,7 @@ public class ExpensePeriodsController(
         entity.StartDate = request.StartDate;
         entity.EndDate = request.EndDate;
         entity.DueDate = request.DueDate;
+        entity.LateFeeDate = request.LateFeeDate;
         entity.Status = ExpensePeriodStatus.Draft;
         entity.Notes = request.Notes.Trim();
 
@@ -623,9 +627,10 @@ public class ExpensePeriodsController(
         }
 
         var referenceDate = request.ReferenceDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        if (period.DueDate >= referenceDate)
+        var lateFeeThreshold = period.LateFeeDate ?? period.DueDate;
+        if (lateFeeThreshold >= referenceDate)
         {
-            return BadRequest("Los recargos por mora solo se pueden aplicar despues del vencimiento.");
+            return BadRequest("Los recargos por mora solo se pueden aplicar despues de la fecha de corte de mora.");
         }
 
         if (period.Status != ExpensePeriodStatus.Published)
@@ -1151,8 +1156,206 @@ public class ExpensePeriodsController(
 
     private static string ResolveName(ExpensePeriodUpsertRequest request) =>
         string.IsNullOrWhiteSpace(request.Name)
-            ? $"{request.Year:D4}-{request.Month:D2}"
+            ? ResolveName(request.Year, request.Month)
             : request.Name.Trim();
+
+    [HttpPost("bulk-create")]
+    public async Task<ActionResult<BulkCreateExpensePeriodsResultDto>> BulkCreate(
+        [FromBody] BulkCreateExpensePeriodsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Year < 2000 || request.Year > 2100)
+        {
+            return BadRequest("El anio debe estar entre 2000 y 2100.");
+        }
+
+        if (request.Month < 1 || request.Month > 12)
+        {
+            return BadRequest("El mes debe estar entre 1 y 12.");
+        }
+
+        if (request.StartDate > request.EndDate)
+        {
+            return BadRequest("La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        if (request.DueDate < request.EndDate)
+        {
+            return BadRequest("La fecha de vencimiento no puede ser anterior a la fecha de fin del periodo.");
+        }
+
+        if (request.LateFeeDate.HasValue && request.LateFeeDate.Value < request.DueDate)
+        {
+            return BadRequest("La fecha de corte de mora no puede ser anterior al vencimiento.");
+        }
+
+        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+
+        List<Guid> targetIds = request.BuildingIds.Count > 0
+            ? request.BuildingIds.Where(id => accessibleBuildingIds.Contains(id)).ToList()
+            : accessibleBuildingIds.ToList();
+
+        if (targetIds.Count == 0)
+        {
+            return BadRequest("No hay edificios accesibles para crear periodos.");
+        }
+
+        var buildings = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .Where(x => !x.IsDeleted && targetIds.Contains(x.Id))
+            .ToListAsync(cancellationToken);
+
+        var existingPeriodBuildingIds = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted &&
+                targetIds.Contains(x.BuildingId) &&
+                x.Year == request.Year &&
+                x.Month == request.Month)
+            .Select(x => x.BuildingId)
+            .ToListAsync(cancellationToken);
+
+        var existingSet = existingPeriodBuildingIds.ToHashSet();
+        var result = new BulkCreateExpensePeriodsResultDto();
+        var newPeriods = new List<ExpensePeriod>();
+        var name = string.IsNullOrWhiteSpace(request.Name)
+            ? ResolveName(request.Year, request.Month)
+            : request.Name.Trim();
+
+        foreach (var building in buildings)
+        {
+            if (existingSet.Contains(building.Id))
+            {
+                result.SkippedBuildings.Add(building.Name);
+                continue;
+            }
+
+            var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
+            if (!effectiveCompanyId.HasValue)
+            {
+                result.SkippedBuildings.Add(building.Name);
+                continue;
+            }
+
+            newPeriods.Add(new ExpensePeriod
+            {
+                CompanyId = effectiveCompanyId.Value,
+                BuildingId = building.Id,
+                Year = request.Year,
+                Month = request.Month,
+                Name = name,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                DueDate = request.DueDate,
+                LateFeeDate = request.LateFeeDate,
+                Status = ExpensePeriodStatus.Draft,
+                Notes = request.Notes.Trim()
+            });
+            result.CreatedBuildings.Add(building.Name);
+        }
+
+        if (newPeriods.Count > 0)
+        {
+            dbContext.ExpensePeriods.AddRange(newPeriods);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        result.Created = newPeriods.Count;
+        result.Skipped = result.SkippedBuildings.Count;
+        return Ok(result);
+    }
+
+    [HttpPost("{id:guid}/clone")]
+    public async Task<ActionResult<CloneExpensePeriodResultDto>> Clone(Guid id, CancellationToken cancellationToken)
+    {
+        var source = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (source is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(source.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var (targetYear, targetMonth) = source.Month == 12
+            ? (source.Year + 1, 1)
+            : (source.Year, source.Month + 1);
+
+        var exists = await dbContext.ExpensePeriods.AnyAsync(
+            x => !x.IsDeleted &&
+                x.BuildingId == source.BuildingId &&
+                x.Year == targetYear &&
+                x.Month == targetMonth,
+            cancellationToken);
+
+        if (exists)
+        {
+            return Conflict($"Ya existe un periodo para {source.Building?.Name ?? "ese edificio"} en {targetYear}-{targetMonth:D2}.");
+        }
+
+        var monthDiff = source.Month == 12 ? 12 : 0;
+        var yearDiff = source.Month == 12 ? 1 : 0;
+        var startDate = source.StartDate.AddMonths(1);
+        var endDate = source.EndDate.AddMonths(1);
+        var dueDate = source.DueDate.AddMonths(1);
+        var lateFeeDate = source.LateFeeDate?.AddMonths(1);
+
+        var cloned = new ExpensePeriod
+        {
+            CompanyId = source.CompanyId,
+            BuildingId = source.BuildingId,
+            Year = targetYear,
+            Month = targetMonth,
+            Name = ResolveName(targetYear, targetMonth),
+            StartDate = startDate,
+            EndDate = endDate,
+            DueDate = dueDate,
+            LateFeeDate = lateFeeDate,
+            Status = ExpensePeriodStatus.Draft,
+            Notes = string.Empty
+        };
+
+        dbContext.ExpensePeriods.Add(cloned);
+
+        var sourceExpenses = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == source.Id)
+            .ToListAsync(cancellationToken);
+
+        var copiedExpenses = sourceExpenses.Select(e => new BuildingExpense
+        {
+            CompanyId = e.CompanyId,
+            BuildingId = e.BuildingId,
+            ExpensePeriodId = cloned.Id,
+            Category = e.Category,
+            SupplierName = e.SupplierName,
+            Description = e.Description,
+            ExpenseDate = startDate,
+            Amount = e.Amount,
+            DistributionType = e.DistributionType,
+            TargetUnitId = e.TargetUnitId,
+            Notes = e.Notes
+        }).ToList();
+
+        if (copiedExpenses.Count > 0)
+        {
+            dbContext.BuildingExpenses.AddRange(copiedExpenses);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new CloneExpensePeriodResultDto
+        {
+            Period = ToDto(cloned, source.Building?.Name),
+            CopiedExpenses = copiedExpenses.Count
+        });
+    }
 
     private static ExpensePeriodDto ToDto(ExpensePeriod entity, string? buildingName = null) =>
         new()
@@ -1167,7 +1370,10 @@ public class ExpensePeriodsController(
             StartDate = entity.StartDate,
             EndDate = entity.EndDate,
             DueDate = entity.DueDate,
+            LateFeeDate = entity.LateFeeDate,
             Status = entity.Status,
             Notes = entity.Notes
         };
+
+    private static string ResolveName(int year, int month) => $"{year:D4}-{month:D2}";
 }

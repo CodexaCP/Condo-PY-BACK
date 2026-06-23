@@ -12,6 +12,7 @@ public class ExpensePeriod : CompanyScopedEntity
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
     public DateOnly DueDate { get; set; }
+    public DateOnly? LateFeeDate { get; set; }
     public ExpensePeriodStatus Status { get; set; } = ExpensePeriodStatus.Draft;
     public string Notes { get; set; } = string.Empty;
 

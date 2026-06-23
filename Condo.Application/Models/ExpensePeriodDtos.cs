@@ -11,6 +11,7 @@ public class ExpensePeriodUpsertRequest
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
     public DateOnly DueDate { get; set; }
+    public DateOnly? LateFeeDate { get; set; }
     public ExpensePeriodStatus Status { get; set; } = ExpensePeriodStatus.Draft;
     public string Notes { get; set; } = string.Empty;
 }
@@ -27,8 +28,36 @@ public class ExpensePeriodDto
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
     public DateOnly DueDate { get; set; }
+    public DateOnly? LateFeeDate { get; set; }
     public ExpensePeriodStatus Status { get; set; }
     public string Notes { get; set; } = string.Empty;
+}
+
+public class BulkCreateExpensePeriodsRequest
+{
+    public List<Guid> BuildingIds { get; set; } = [];
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public DateOnly DueDate { get; set; }
+    public DateOnly? LateFeeDate { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
+public class BulkCreateExpensePeriodsResultDto
+{
+    public int Created { get; set; }
+    public int Skipped { get; set; }
+    public List<string> CreatedBuildings { get; set; } = [];
+    public List<string> SkippedBuildings { get; set; } = [];
+}
+
+public class CloneExpensePeriodResultDto
+{
+    public ExpensePeriodDto Period { get; set; } = null!;
+    public int CopiedExpenses { get; set; }
 }
 
 public class GenerateExpenseChargesRequest
