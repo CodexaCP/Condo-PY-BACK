@@ -7,5 +7,6 @@ public enum UserRole
     CompanyOperator = 3,
     BuildingManager = 4,
     Resident = 5,
-    Porter = 6
+    Porter = 6,
+    Owner = 7
 }
