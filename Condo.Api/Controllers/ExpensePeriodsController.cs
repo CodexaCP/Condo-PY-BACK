@@ -1,3 +1,4 @@
+using Condo.Api.Documents;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -5,6 +6,7 @@ using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
 
 namespace Condo.Api.Controllers;
 
@@ -709,6 +711,147 @@ public class ExpensePeriodsController(
             UnitsAffected = charges.Select(x => x.UnitId).Distinct().Count(),
             TotalLateFeeAmount = charges.Sum(x => x.Amount)
         });
+    }
+
+    [HttpPost("{id:guid}/void-settlement")]
+    public async Task<ActionResult<VoidSettlementResultDto>> VoidSettlement(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        if (period.Status == ExpensePeriodStatus.Published)
+        {
+            return BadRequest("No se puede anular una liquidación ya publicada.");
+        }
+
+        if (period.Status != ExpensePeriodStatus.Closed)
+        {
+            return BadRequest("Solo se puede anular la liquidación de un período en estado Cerrado.");
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null)
+        {
+            return BadRequest("El período no tiene una liquidación para anular.");
+        }
+
+        if (settlement.Status != ExpenseSettlementStatus.Approved)
+        {
+            return BadRequest("Solo se puede anular una liquidación en estado Aprobada.");
+        }
+
+        var settlementCharges = await dbContext.ExpenseCharges
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId != null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var charge in settlementCharges)
+        {
+            charge.IsDeleted = true;
+        }
+
+        settlement.Status = ExpenseSettlementStatus.Calculated;
+        settlement.ApprovedAtUtc = null;
+        settlement.ApprovedByUserId = null;
+        period.Status = ExpensePeriodStatus.Draft;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new VoidSettlementResultDto
+        {
+            ExpensePeriodName = period.Name,
+            DeletedChargeCount = settlementCharges.Count
+        });
+    }
+
+    [HttpGet("{id:guid}/settlement-pdf")]
+    public async Task<IActionResult> DownloadSettlementPdf(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var summary = await BuildSettlementSummaryAsync(period, cancellationToken);
+
+        if (!summary.IsCalculated)
+        {
+            return BadRequest("El período todavía no tiene una liquidación calculada para exportar.");
+        }
+
+        List<SettlementPdfChargeRow> chargeRows;
+
+        if (period.Status == ExpensePeriodStatus.Draft)
+        {
+            var settlement = await dbContext.ExpenseSettlements
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+            if (settlement is null)
+            {
+                return BadRequest("No se encontró la liquidación.");
+            }
+
+            ExpenseSettlementChargePreviewDto preview;
+            try
+            {
+                preview = await distributionService.PreviewAsync(period, settlement, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+
+            chargeRows = preview.Items.Select(x => new SettlementPdfChargeRow(
+                x.UnitCode, x.Concept, x.ChargeType.ToString(), x.Amount)).ToList();
+        }
+        else
+        {
+            chargeRows = await dbContext.ExpenseCharges
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId != null)
+                .OrderBy(x => x.Unit!.Code)
+                .ThenBy(x => x.Concept)
+                .Select(x => new SettlementPdfChargeRow(
+                    x.Unit != null ? x.Unit.Code : string.Empty,
+                    x.Concept,
+                    x.ChargeType.ToString(),
+                    x.Amount))
+                .ToListAsync(cancellationToken);
+        }
+
+        var document = new SettlementPdfDocument(
+            summary,
+            chargeRows,
+            period.StartDate.ToString("dd/MM/yyyy"),
+            period.EndDate.ToString("dd/MM/yyyy"),
+            period.DueDate.ToString("dd/MM/yyyy"));
+
+        var pdfBytes = document.GeneratePdf();
+        var fileName = $"liquidacion_{summary.ExpensePeriodName.Replace(" ", "_")}_{summary.BuildingName.Replace(" ", "_")}.pdf";
+
+        return File(pdfBytes, "application/pdf", fileName);
     }
 
     [HttpGet("operational-alerts")]

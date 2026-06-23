@@ -2,12 +2,15 @@ using System.Text.Json.Serialization;
 using System.Text;
 using System.Reflection;
 using Condo.Api.Services;
+using QuestPDF.Infrastructure;
 using Condo.Application.Services;
 using Condo.Infrastructure;
 using Condo.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 

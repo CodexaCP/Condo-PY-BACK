@@ -54,6 +54,12 @@ public class ExpenseSettlementChargePreviewItemDto
     public Guid SourceSettlementId { get; set; }
 }
 
+public class VoidSettlementResultDto
+{
+    public string ExpensePeriodName { get; set; } = string.Empty;
+    public int DeletedChargeCount { get; set; }
+}
+
 public class ApplyLateFeesRequest
 {
     public decimal RatePercentage { get; set; }
