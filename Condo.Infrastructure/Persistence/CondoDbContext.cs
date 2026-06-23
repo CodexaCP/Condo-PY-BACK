@@ -14,6 +14,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<UserBuildingAccess> UserBuildingAccesses => Set<UserBuildingAccess>();
     public DbSet<Building> Buildings => Set<Building>();
     public DbSet<BuildingExpense> BuildingExpenses => Set<BuildingExpense>();
+    public DbSet<RecurringBuildingExpense> RecurringBuildingExpenses => Set<RecurringBuildingExpense>();
     public DbSet<BuildingIncome> BuildingIncomes => Set<BuildingIncome>();
     public DbSet<ExpenseCharge> ExpenseCharges => Set<ExpenseCharge>();
     public DbSet<ExpenseSettlement> ExpenseSettlements => Set<ExpenseSettlement>();
@@ -105,6 +106,25 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BuildingExpense>()
             .HasOne(x => x.TargetUnit)
             .WithMany(x => x.BuildingExpenses)
+            .HasForeignKey(x => x.TargetUnitId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Category).HasConversion<string>();
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.DistributionType).HasConversion<string>();
+        modelBuilder.Entity<RecurringBuildingExpense>()
+            .HasOne(x => x.Company)
+            .WithMany()
+            .HasForeignKey(x => x.CompanyId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<RecurringBuildingExpense>()
+            .HasOne(x => x.Building)
+            .WithMany()
+            .HasForeignKey(x => x.BuildingId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<RecurringBuildingExpense>()
+            .HasOne(x => x.TargetUnit)
+            .WithMany()
             .HasForeignKey(x => x.TargetUnitId)
             .OnDelete(DeleteBehavior.Restrict);
 

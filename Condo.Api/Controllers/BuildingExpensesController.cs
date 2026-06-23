@@ -11,8 +11,14 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/building-expenses")]
-public class BuildingExpensesController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class BuildingExpensesController(
+    ICondoDbContext dbContext,
+    IAccessScopeService accessScope,
+    IWebHostEnvironment env) : ControllerBase
 {
+    private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
+    private const long MaxReceiptSizeBytes = 10 * 1024 * 1024; // 10 MB
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingExpenseDto>>> GetAll(
         [FromQuery] Guid? buildingId,
@@ -69,7 +75,9 @@ public class BuildingExpensesController(ICondoDbContext dbContext, IAccessScopeS
                 DistributionType = x.DistributionType,
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
-                Notes = x.Notes
+                Notes = x.Notes,
+                HasReceipt = x.ReceiptStoredName != null,
+                ReceiptFileName = x.ReceiptFileName
             })
             .ToListAsync(cancellationToken);
 
@@ -98,7 +106,9 @@ public class BuildingExpensesController(ICondoDbContext dbContext, IAccessScopeS
                 DistributionType = x.DistributionType,
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
-                Notes = x.Notes
+                Notes = x.Notes,
+                HasReceipt = x.ReceiptStoredName != null,
+                ReceiptFileName = x.ReceiptFileName
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -365,6 +375,146 @@ public class BuildingExpensesController(ICondoDbContext dbContext, IAccessScopeS
         return true;
     }
 
+    [HttpPost("{id:guid}/receipt")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<ActionResult<BuildingExpenseDto>> UploadReceipt(
+        Guid id,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("No se recibio ningun archivo.");
+        }
+
+        if (file.Length > MaxReceiptSizeBytes)
+        {
+            return BadRequest("El archivo no puede superar los 10 MB.");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AllowedReceiptExtensions.Contains(ext))
+        {
+            return BadRequest("Solo se permiten archivos PDF, JPG o PNG.");
+        }
+
+        var entity = await dbContext.BuildingExpenses
+            .Include(x => x.Building).ThenInclude(b => b!.Condominium)
+            .Include(x => x.ExpensePeriod)
+            .Include(x => x.TargetUnit)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var uploadsDir = Path.Combine(env.ContentRootPath, "uploads", "receipts");
+        Directory.CreateDirectory(uploadsDir);
+
+        if (!string.IsNullOrEmpty(entity.ReceiptStoredName))
+        {
+            var oldPath = Path.Combine(uploadsDir, entity.ReceiptStoredName);
+            if (System.IO.File.Exists(oldPath))
+            {
+                System.IO.File.Delete(oldPath);
+            }
+        }
+
+        var storedName = $"{Guid.NewGuid()}{ext}";
+        var filePath = Path.Combine(uploadsDir, storedName);
+
+        await using (var stream = new FileStream(filePath, FileMode.Create))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+
+        entity.ReceiptFileName = file.FileName;
+        entity.ReceiptStoredName = storedName;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToDto(entity, entity.Building!, entity.ExpensePeriod!, entity.TargetUnit));
+    }
+
+    [HttpGet("{id:guid}/receipt")]
+    public async Task<IActionResult> DownloadReceipt(Guid id, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrEmpty(entity.ReceiptStoredName))
+        {
+            return NotFound("Este gasto no tiene comprobante adjunto.");
+        }
+
+        var filePath = Path.Combine(env.ContentRootPath, "uploads", "receipts", entity.ReceiptStoredName);
+        if (!System.IO.File.Exists(filePath))
+        {
+            return NotFound("El archivo del comprobante no se encontro en el servidor.");
+        }
+
+        var ext = Path.GetExtension(entity.ReceiptStoredName).ToLowerInvariant();
+        var contentType = ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            _ => "image/jpeg"
+        };
+
+        var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath, cancellationToken);
+        return File(fileBytes, contentType, entity.ReceiptFileName ?? entity.ReceiptStoredName);
+    }
+
+    [HttpDelete("{id:guid}/receipt")]
+    public async Task<IActionResult> DeleteReceipt(Guid id, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.BuildingExpenses
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrEmpty(entity.ReceiptStoredName))
+        {
+            return BadRequest("Este gasto no tiene comprobante adjunto.");
+        }
+
+        var filePath = Path.Combine(env.ContentRootPath, "uploads", "receipts", entity.ReceiptStoredName);
+        if (System.IO.File.Exists(filePath))
+        {
+            System.IO.File.Delete(filePath);
+        }
+
+        entity.ReceiptFileName = null;
+        entity.ReceiptStoredName = null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
     private static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit) =>
         new()
         {
@@ -382,6 +532,8 @@ public class BuildingExpensesController(ICondoDbContext dbContext, IAccessScopeS
             DistributionType = entity.DistributionType,
             TargetUnitId = entity.TargetUnitId,
             TargetUnitCode = targetUnit?.Code ?? string.Empty,
-            Notes = entity.Notes
+            Notes = entity.Notes,
+            HasReceipt = entity.ReceiptStoredName != null,
+            ReceiptFileName = entity.ReceiptFileName
         };
 }
