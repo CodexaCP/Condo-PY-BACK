@@ -1,0 +1,20 @@
+## .NET / C# build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.swp
+
+## Secrets / config overrides
+appsettings.Development.json
+appsettings.Local.json
+*.pfx
+*.p12
+
+## JetBrains
+.idea/
+
+## OS
+.DS_Store
+Thumbs.db

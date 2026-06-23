@@ -1,0 +1,36 @@
+using Condo.Domain.Enums;
+
+namespace Condo.Application.Models;
+
+public class BuildingExpenseUpsertRequest
+{
+    public Guid BuildingId { get; set; }
+    public Guid ExpensePeriodId { get; set; }
+    public BuildingExpenseCategory Category { get; set; } = BuildingExpenseCategory.Other;
+    public string SupplierName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateOnly ExpenseDate { get; set; }
+    public decimal Amount { get; set; }
+    public BuildingExpenseDistributionType DistributionType { get; set; } = BuildingExpenseDistributionType.ByCoefficient;
+    public Guid? TargetUnitId { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
+public class BuildingExpenseDto
+{
+    public Guid Id { get; set; }
+    public Guid CompanyId { get; set; }
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public Guid ExpensePeriodId { get; set; }
+    public string ExpensePeriodName { get; set; } = string.Empty;
+    public BuildingExpenseCategory Category { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateOnly ExpenseDate { get; set; }
+    public decimal Amount { get; set; }
+    public BuildingExpenseDistributionType DistributionType { get; set; }
+    public Guid? TargetUnitId { get; set; }
+    public string TargetUnitCode { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+}
