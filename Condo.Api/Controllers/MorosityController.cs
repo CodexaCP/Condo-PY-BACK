@@ -15,6 +15,7 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
     [HttpGet]
     public async Task<ActionResult<MorosityReportDto>> GetReport(
         [FromQuery] Guid? buildingId,
+        [FromQuery] string? agingBucket,
         CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -155,13 +156,18 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                     CreditBalanceAmount = breakdown.CreditBalanceAmount,
                     IsOccupied = assignedResident is not null,
                     ResponsibleType = assignedResident is not null ? "ResidentAssigned" : "OwnerAdministration",
-                    ResponsibleName = assignedResident?.ResidentName ?? "Propietario / administracion"
+                    ResponsibleName = assignedResident?.ResidentName ?? "Propietario / administracion",
+                    AgingBucket = ComputeAgingBucket(today.DayNumber - group.Key.DueDate.DayNumber)
                 };
             })
             .ToList();
 
-        var items = allItems
-            .Where(x => x.Balance > 0m)
+        var overdueItems = allItems.Where(x => x.Balance > 0m).ToList();
+
+        // Apply aging bucket filter after computing all items (summary always uses full dataset)
+        var items = (string.IsNullOrWhiteSpace(agingBucket)
+            ? overdueItems
+            : overdueItems.Where(x => x.AgingBucket == agingBucket))
             .OrderByDescending(x => x.Balance)
             .ThenByDescending(x => x.DaysOverdue)
             .ThenBy(x => x.BuildingName)
@@ -172,23 +178,39 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
         {
             Summary = new MorositySummaryDto
             {
-                TotalUnitsInArrears = items.Select(x => x.UnitId).Distinct().Count(),
-                TotalOverduePeriods = items.Count,
-                TotalOverdueAmount = items.Sum(x => x.Balance),
-                OrdinaryOverdueAmount = items.Sum(x => x.OrdinaryBalance),
-                ReserveFundOverdueAmount = items.Sum(x => x.ReserveFundBalance),
-                ExtraordinaryOverdueAmount = items.Sum(x => x.ExtraordinaryBalance),
-                IndividualOverdueAmount = items.Sum(x => x.IndividualBalance),
-                AdjustmentOverdueAmount = items.Sum(x => x.AdjustmentBalance),
+                TotalUnitsInArrears = overdueItems.Select(x => x.UnitId).Distinct().Count(),
+                TotalOverduePeriods = overdueItems.Count,
+                TotalOverdueAmount = overdueItems.Sum(x => x.Balance),
+                OrdinaryOverdueAmount = overdueItems.Sum(x => x.OrdinaryBalance),
+                ReserveFundOverdueAmount = overdueItems.Sum(x => x.ReserveFundBalance),
+                ExtraordinaryOverdueAmount = overdueItems.Sum(x => x.ExtraordinaryBalance),
+                IndividualOverdueAmount = overdueItems.Sum(x => x.IndividualBalance),
+                AdjustmentOverdueAmount = overdueItems.Sum(x => x.AdjustmentBalance),
                 TotalCreditBalanceAmount = allItems.Sum(x => x.CreditBalanceAmount),
-                OccupiedUnitsInArrears = items.Where(x => x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
-                VacantUnitsInArrears = items.Where(x => !x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
-                OccupiedOverdueAmount = items.Where(x => x.IsOccupied).Sum(x => x.Balance),
-                VacantOverdueAmount = items.Where(x => !x.IsOccupied).Sum(x => x.Balance)
+                OccupiedUnitsInArrears = overdueItems.Where(x => x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
+                VacantUnitsInArrears = overdueItems.Where(x => !x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
+                OccupiedOverdueAmount = overdueItems.Where(x => x.IsOccupied).Sum(x => x.Balance),
+                VacantOverdueAmount = overdueItems.Where(x => !x.IsOccupied).Sum(x => x.Balance),
+                Units0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Select(x => x.UnitId).Distinct().Count(),
+                Amount0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Sum(x => x.Balance),
+                Units31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Select(x => x.UnitId).Distinct().Count(),
+                Amount31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Sum(x => x.Balance),
+                Units61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Select(x => x.UnitId).Distinct().Count(),
+                Amount61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Sum(x => x.Balance),
+                UnitsOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Select(x => x.UnitId).Distinct().Count(),
+                AmountOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Sum(x => x.Balance)
             },
             Items = items
         });
     }
+
+    private static string ComputeAgingBucket(int daysOverdue) => daysOverdue switch
+    {
+        <= 30 => "0-30",
+        <= 60 => "31-60",
+        <= 90 => "61-90",
+        _ => "+90"
+    };
 
     private static AllocationResult AllocatePaymentsByType(
         IReadOnlyDictionary<ExpenseChargeType, decimal> chargedByType,

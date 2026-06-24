@@ -48,6 +48,7 @@ public class CollectionItemDto
     public decimal OwnerChargedAmount { get; set; }
     public decimal OwnerCollectedAmount { get; set; }
     public decimal OwnerPendingAmount { get; set; }
+    public decimal? PreviousPeriodCollectionRatePercentage { get; set; }
 }
 
 public class CollectionReportDto

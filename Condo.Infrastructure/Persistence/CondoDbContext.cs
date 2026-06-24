@@ -20,9 +20,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<ExpenseSettlement> ExpenseSettlements => Set<ExpenseSettlement>();
     public DbSet<ExpensePeriod> ExpensePeriods => Set<ExpensePeriod>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
     public DbSet<Unit> Units => Set<Unit>();
     public DbSet<Resident> Residents => Set<Resident>();
     public DbSet<UnitResident> UnitResidents => Set<UnitResident>();
+    public DbSet<UnitOwner> UnitOwners => Set<UnitOwner>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -212,6 +214,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.ExpenseCharges)
             .HasForeignKey(x => x.SourceSettlementId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseCharge>()
+            .HasOne(x => x.ReversalOfCharge)
+            .WithMany()
+            .HasForeignKey(x => x.ReversalOfChargeId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Payment>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<Payment>().Property(x => x.Method).HasConversion<string>();
@@ -229,6 +237,23 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Unit)
             .WithMany(x => x.Payments)
             .HasForeignKey(x => x.UnitId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PaymentAllocation>().Property(x => x.AllocatedAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<PaymentAllocation>()
+            .HasOne(x => x.Payment)
+            .WithMany(x => x.Allocations)
+            .HasForeignKey(x => x.PaymentId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentAllocation>()
+            .HasOne(x => x.Charge)
+            .WithMany(x => x.Allocations)
+            .HasForeignKey(x => x.ExpenseChargeId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentAllocation>()
+            .HasOne(x => x.Company)
+            .WithMany()
+            .HasForeignKey(x => x.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<UserBuildingAccess>().HasIndex(x => new { x.ApplicationUserId, x.BuildingId }).IsUnique();
@@ -279,6 +304,17 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.UnitResidents)
             .HasForeignKey(x => x.ResidentId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<UnitOwner>().HasIndex(x => new { x.UnitId, x.OwnerId }).IsUnique();
+        modelBuilder.Entity<UnitOwner>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<UnitOwner>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<UnitOwner>()
+            .HasOne(x => x.Owner).WithMany()
+            .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }

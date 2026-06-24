@@ -17,6 +17,15 @@ public class MorositySummaryDto
     public int VacantUnitsInArrears { get; set; }
     public decimal OccupiedOverdueAmount { get; set; }
     public decimal VacantOverdueAmount { get; set; }
+    // Aging buckets
+    public int Units0To30 { get; set; }
+    public decimal Amount0To30 { get; set; }
+    public int Units31To60 { get; set; }
+    public decimal Amount31To60 { get; set; }
+    public int Units61To90 { get; set; }
+    public decimal Amount61To90 { get; set; }
+    public int UnitsOver90 { get; set; }
+    public decimal AmountOver90 { get; set; }
 }
 
 public class MorosityItemDto
@@ -41,6 +50,7 @@ public class MorosityItemDto
     public bool IsOccupied { get; set; }
     public string ResponsibleType { get; set; } = string.Empty;
     public string ResponsibleName { get; set; } = string.Empty;
+    public string AgingBucket { get; set; } = string.Empty;
 }
 
 public class MorosityReportDto

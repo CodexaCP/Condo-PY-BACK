@@ -16,4 +16,5 @@ public class Payment : CompanyScopedEntity
     public Company? Company { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
     public Unit? Unit { get; set; }
+    public ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
 }

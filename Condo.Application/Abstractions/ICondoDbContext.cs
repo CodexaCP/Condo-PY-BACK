@@ -17,9 +17,11 @@ public interface ICondoDbContext
     DbSet<ExpenseSettlement> ExpenseSettlements { get; }
     DbSet<ExpensePeriod> ExpensePeriods { get; }
     DbSet<Payment> Payments { get; }
+    DbSet<PaymentAllocation> PaymentAllocations { get; }
     DbSet<Unit> Units { get; }
     DbSet<Resident> Residents { get; }
     DbSet<UnitResident> UnitResidents { get; }
+    DbSet<UnitOwner> UnitOwners { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -15,6 +15,8 @@ public class AccountStatementPeriodDto
     public decimal TotalCharges { get; set; }
     public decimal TotalPayments { get; set; }
     public decimal Balance { get; set; }
+    public decimal PreviousBalance { get; set; }
+    public decimal RunningBalance { get; set; }
 }
 
 public class AccountStatementChargeDto
@@ -72,12 +74,15 @@ public class ExpenseReceiptDto
     public string HolderDocumentNumber { get; set; } = string.Empty;
     public decimal UnitCoefficient { get; set; }
     public IReadOnlyList<ExpenseReceiptChargeDto> Charges { get; set; } = [];
+    public IReadOnlyList<AccountStatementPaymentDto> Payments { get; set; } = [];
     public decimal OrdinaryAmount { get; set; }
     public decimal ReserveFundAmount { get; set; }
     public decimal ExtraordinaryAmount { get; set; }
     public decimal IndividualAmount { get; set; }
     public decimal AdjustmentAmount { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal TotalPayments { get; set; }
+    public decimal Balance { get; set; }
 }
 
 public class ExpenseReceiptChargeDto

@@ -4,6 +4,7 @@ using Condo.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Condo.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CondoDbContext))]
-    partial class CondoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260623214315_AddExpenseChargeReversalFields")]
+    partial class AddExpenseChargeReversalFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -673,44 +676,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.ToTable("Payments");
                 });
 
-            modelBuilder.Entity("Condo.Domain.Entities.PaymentAllocation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("AllocatedAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("ExpenseChargeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("PaymentId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("ExpenseChargeId");
-
-                    b.HasIndex("PaymentId");
-
-                    b.ToTable("PaymentAllocations");
-                });
-
             modelBuilder.Entity("Condo.Domain.Entities.RecurringBuildingExpense", b =>
                 {
                     b.Property<Guid>("Id")
@@ -863,48 +828,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Units");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.UnitOwner", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date");
-
-                    b.Property<Guid>("UnitId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("OwnerId");
-
-                    b.HasIndex("UnitId", "OwnerId")
-                        .IsUnique();
-
-                    b.ToTable("UnitOwners");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.UnitResident", b =>
@@ -1237,33 +1160,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Unit");
                 });
 
-            modelBuilder.Entity("Condo.Domain.Entities.PaymentAllocation", b =>
-                {
-                    b.HasOne("Condo.Domain.Entities.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.ExpenseCharge", "Charge")
-                        .WithMany("Allocations")
-                        .HasForeignKey("ExpenseChargeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.Payment", "Payment")
-                        .WithMany("Allocations")
-                        .HasForeignKey("PaymentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Charge");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Payment");
-                });
-
             modelBuilder.Entity("Condo.Domain.Entities.RecurringBuildingExpense", b =>
                 {
                     b.HasOne("Condo.Domain.Entities.Building", "Building")
@@ -1318,33 +1214,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Building");
 
                     b.Navigation("Company");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.UnitOwner", b =>
-                {
-                    b.HasOne("Condo.Domain.Entities.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "Owner")
-                        .WithMany()
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.Unit", "Unit")
-                        .WithMany()
-                        .HasForeignKey("UnitId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Owner");
-
-                    b.Navigation("Unit");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.UnitResident", b =>
@@ -1446,11 +1315,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Buildings");
                 });
 
-            modelBuilder.Entity("Condo.Domain.Entities.ExpenseCharge", b =>
-                {
-                    b.Navigation("Allocations");
-                });
-
             modelBuilder.Entity("Condo.Domain.Entities.ExpensePeriod", b =>
                 {
                     b.Navigation("BuildingExpenses");
@@ -1467,11 +1331,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Condo.Domain.Entities.ExpenseSettlement", b =>
                 {
                     b.Navigation("ExpenseCharges");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.Payment", b =>
-                {
-                    b.Navigation("Allocations");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.Resident", b =>

@@ -15,6 +15,9 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
     [HttpGet]
     public async Task<ActionResult<CollectionReportDto>> GetReport(
         [FromQuery] Guid? buildingId,
+        [FromQuery] int? year,
+        [FromQuery] int? fromMonth,
+        [FromQuery] int? toMonth,
         CancellationToken cancellationToken)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
@@ -59,6 +62,21 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             periodsQuery = periodsQuery.Where(x => x.BuildingId == buildingId.Value);
             chargesQuery = chargesQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
             paymentsQuery = paymentsQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
+        }
+
+        if (year.HasValue)
+        {
+            periodsQuery = periodsQuery.Where(x => x.Year == year.Value);
+        }
+
+        if (fromMonth.HasValue)
+        {
+            periodsQuery = periodsQuery.Where(x => x.Month >= fromMonth.Value);
+        }
+
+        if (toMonth.HasValue)
+        {
+            periodsQuery = periodsQuery.Where(x => x.Month <= toMonth.Value);
         }
 
         var periods = await periodsQuery
@@ -221,6 +239,18 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             .ThenByDescending(x => x.Month)
             .ThenBy(x => x.BuildingName)
             .ToList();
+
+        // Compute previous-period collection rate for each item using the already-loaded dataset
+        var rateIndex = items.ToDictionary(x => (x.BuildingId, x.Year, x.Month), x => x.CollectionRatePercentage);
+        foreach (var item in items)
+        {
+            var prevYear = item.Month == 1 ? item.Year - 1 : item.Year;
+            var prevMonth = item.Month == 1 ? 12 : item.Month - 1;
+            if (rateIndex.TryGetValue((item.BuildingId, prevYear, prevMonth), out var prevRate))
+            {
+                item.PreviousPeriodCollectionRatePercentage = prevRate;
+            }
+        }
 
         var totalCharged = items.Sum(x => x.TotalChargedAmount);
         var totalCollected = items.Sum(x => x.TotalCollectedAmount);

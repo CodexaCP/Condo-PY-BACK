@@ -15,9 +15,14 @@ public class ExpenseCharge : CompanyScopedEntity
     public decimal Amount { get; set; }
     public string Notes { get; set; } = string.Empty;
 
+    public bool IsReversal { get; set; } = false;
+    public Guid? ReversalOfChargeId { get; set; }
+
     public Company? Company { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
     public Unit? Unit { get; set; }
     public BuildingExpense? SourceBuildingExpense { get; set; }
     public ExpenseSettlement? SourceSettlement { get; set; }
+    public ExpenseCharge? ReversalOfCharge { get; set; }
+    public ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
 }

@@ -14,7 +14,11 @@ namespace Condo.Api.Controllers;
 public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<ExpenseChargeDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<ExpenseChargeDto>>> GetAll(
+        [FromQuery] Guid? buildingId,
+        [FromQuery] Guid? expensePeriodId,
+        [FromQuery] Guid? unitId,
+        CancellationToken cancellationToken)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
@@ -34,6 +38,21 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             }
         }
 
+        if (buildingId.HasValue)
+        {
+            query = query.Where(x => x.Unit!.BuildingId == buildingId.Value);
+        }
+
+        if (expensePeriodId.HasValue)
+        {
+            query = query.Where(x => x.ExpensePeriodId == expensePeriodId.Value);
+        }
+
+        if (unitId.HasValue)
+        {
+            query = query.Where(x => x.UnitId == unitId.Value);
+        }
+
         var charges = await query
             .OrderByDescending(x => x.ExpensePeriod!.Year)
             .ThenByDescending(x => x.ExpensePeriod!.Month)
@@ -51,11 +70,18 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
                 ChargeType = x.ChargeType,
                 SourceBuildingExpenseId = x.SourceBuildingExpenseId,
+                SourceBuildingExpenseDescription = x.SourceBuildingExpense != null ? x.SourceBuildingExpense.Description : string.Empty,
                 SourceSettlementId = x.SourceSettlementId,
+                SourceSettlementName = x.SourceSettlement != null ? x.SourceSettlement.ExpensePeriod!.Name : string.Empty,
                 IsLateFee = x.IsLateFee,
                 Concept = x.Concept,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversal = x.IsReversal,
+                ReversalOfChargeId = x.ReversalOfChargeId,
+                IsReversed = dbContext.ExpenseCharges.Any(r => !r.IsDeleted && r.ReversalOfChargeId == x.Id),
+                TotalAllocated = dbContext.PaymentAllocations.Where(a => !a.IsDeleted && a.ExpenseChargeId == x.Id).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m,
+                PendingAmount = x.Amount - (dbContext.PaymentAllocations.Where(a => !a.IsDeleted && a.ExpenseChargeId == x.Id).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m)
             })
             .ToListAsync(cancellationToken);
 
@@ -80,11 +106,18 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
                 ChargeType = x.ChargeType,
                 SourceBuildingExpenseId = x.SourceBuildingExpenseId,
+                SourceBuildingExpenseDescription = x.SourceBuildingExpense != null ? x.SourceBuildingExpense.Description : string.Empty,
                 SourceSettlementId = x.SourceSettlementId,
+                SourceSettlementName = x.SourceSettlement != null ? x.SourceSettlement.ExpensePeriod!.Name : string.Empty,
                 IsLateFee = x.IsLateFee,
                 Concept = x.Concept,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversal = x.IsReversal,
+                ReversalOfChargeId = x.ReversalOfChargeId,
+                IsReversed = dbContext.ExpenseCharges.Any(r => !r.IsDeleted && r.ReversalOfChargeId == x.Id),
+                TotalAllocated = dbContext.PaymentAllocations.Where(a => !a.IsDeleted && a.ExpenseChargeId == x.Id).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m,
+                PendingAmount = x.Amount - (dbContext.PaymentAllocations.Where(a => !a.IsDeleted && a.ExpenseChargeId == x.Id).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m)
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -110,12 +143,12 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
 
         if (period is null)
         {
-            return BadRequest("Expense period not found.");
+            return BadRequest("El periodo de expensas no existe.");
         }
 
         if (period.Status != ExpensePeriodStatus.Draft)
         {
-            return BadRequest("Charges can only be created while the expense period is in draft status.");
+            return BadRequest("Los cargos solo se pueden crear mientras el periodo esta en borrador.");
         }
 
         var unit = await dbContext.Units
@@ -125,12 +158,12 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
 
         if (unit is null)
         {
-            return BadRequest("Unit not found.");
+            return BadRequest("La unidad no existe.");
         }
 
         if (unit.BuildingId != period.BuildingId)
         {
-            return BadRequest("The unit must belong to the same building as the expense period.");
+            return BadRequest("La unidad debe pertenecer al mismo edificio que el periodo.");
         }
 
         if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
@@ -172,18 +205,23 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             return NotFound();
         }
 
+        if (entity.IsReversal)
+        {
+            return BadRequest("Un cargo de reversión no se puede modificar directamente.");
+        }
+
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.ExpensePeriodId, cancellationToken);
 
         if (period is null)
         {
-            return BadRequest("Expense period not found.");
+            return BadRequest("El periodo de expensas no existe.");
         }
 
         if (period.Status != ExpensePeriodStatus.Draft)
         {
-            return BadRequest("Charges can only be modified while the expense period is in draft status.");
+            return BadRequest("Los cargos solo se pueden modificar mientras el periodo esta en borrador.");
         }
 
         var unit = await dbContext.Units
@@ -193,12 +231,12 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
 
         if (unit is null)
         {
-            return BadRequest("Unit not found.");
+            return BadRequest("La unidad no existe.");
         }
 
         if (unit.BuildingId != period.BuildingId)
         {
-            return BadRequest("The unit must belong to the same building as the expense period.");
+            return BadRequest("La unidad debe pertenecer al mismo edificio que el periodo.");
         }
 
         if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
@@ -230,13 +268,18 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             return NotFound();
         }
 
+        if (entity.IsReversal)
+        {
+            return BadRequest("Un cargo de reversión no se puede eliminar directamente.");
+        }
+
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == entity.ExpensePeriodId, cancellationToken);
 
         if (period is null)
         {
-            return BadRequest("Expense period not found.");
+            return BadRequest("El periodo de expensas no existe.");
         }
 
         if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
@@ -246,7 +289,7 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
 
         if (period.Status != ExpensePeriodStatus.Draft)
         {
-            return BadRequest("Charges can only be deleted while the expense period is in draft status.");
+            return BadRequest("Los cargos solo se pueden eliminar mientras el periodo esta en borrador.");
         }
 
         entity.IsDeleted = true;
@@ -254,29 +297,90 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
         return NoContent();
     }
 
+    [HttpPost("{id:guid}/reverse")]
+    public async Task<ActionResult<ExpenseChargeDto>> Reverse(Guid id, CancellationToken cancellationToken)
+    {
+        var original = await dbContext.ExpenseCharges
+            .Include(x => x.Unit)
+            .ThenInclude(x => x!.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (original is null)
+        {
+            return NotFound();
+        }
+
+        if (original.IsReversal)
+        {
+            return BadRequest("No se puede revertir un cargo que ya es una reversión.");
+        }
+
+        var alreadyReversed = await dbContext.ExpenseCharges
+            .AnyAsync(x => !x.IsDeleted && x.ReversalOfChargeId == id, cancellationToken);
+
+        if (alreadyReversed)
+        {
+            return BadRequest("Este cargo ya fue revertido.");
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(original.Unit!.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var period = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == original.ExpensePeriodId, cancellationToken);
+
+        var reversal = new ExpenseCharge
+        {
+            CompanyId = original.CompanyId,
+            ExpensePeriodId = original.ExpensePeriodId,
+            UnitId = original.UnitId,
+            ChargeType = ExpenseChargeType.Adjustment,
+            IsLateFee = false,
+            Concept = $"Reversión: {original.Concept}",
+            Amount = -original.Amount,
+            Notes = $"Reversión del cargo #{original.Id}",
+            IsReversal = true,
+            ReversalOfChargeId = original.Id
+        };
+
+        dbContext.ExpenseCharges.Add(reversal);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToDto(reversal, period?.Name ?? string.Empty, original.Unit!));
+    }
+
     private static bool IsValidRequest(ExpenseChargeUpsertRequest request, out string error)
     {
         if (request.ExpensePeriodId == Guid.Empty)
         {
-            error = "ExpensePeriodId is required.";
+            error = "El periodo es obligatorio.";
             return false;
         }
 
         if (request.UnitId == Guid.Empty)
         {
-            error = "UnitId is required.";
+            error = "La unidad es obligatoria.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(request.Concept))
         {
-            error = "Concept is required.";
+            error = "El concepto es obligatorio.";
+            return false;
+        }
+
+        if (request.Concept.Trim().Length > 200)
+        {
+            error = "El concepto no puede superar los 200 caracteres.";
             return false;
         }
 
         if (request.Amount <= 0)
         {
-            error = "Amount must be greater than zero.";
+            error = "El monto debe ser mayor que cero.";
             return false;
         }
 
@@ -297,10 +401,15 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             UnitCode = unit.Code,
             ChargeType = entity.ChargeType,
             SourceBuildingExpenseId = entity.SourceBuildingExpenseId,
+            SourceBuildingExpenseDescription = string.Empty,
             SourceSettlementId = entity.SourceSettlementId,
+            SourceSettlementName = string.Empty,
             IsLateFee = entity.IsLateFee,
             Concept = entity.Concept,
             Amount = entity.Amount,
-            Notes = entity.Notes
+            Notes = entity.Notes,
+            IsReversal = entity.IsReversal,
+            ReversalOfChargeId = entity.ReversalOfChargeId,
+            IsReversed = false
         };
 }
