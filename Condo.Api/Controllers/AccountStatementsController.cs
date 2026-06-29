@@ -13,8 +13,32 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/account-statements")]
-public class AccountStatementsController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class AccountStatementsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
 {
+    private async Task<bool> CanAccessUnitAsync(Unit unit, CancellationToken cancellationToken)
+    {
+        if (await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
+            return true;
+
+        var uid = tenantContext.UserId;
+
+        if (await dbContext.UnitOwners.AnyAsync(x => !x.IsDeleted && x.UnitId == unit.Id && x.OwnerId == uid, cancellationToken))
+            return true;
+
+        var email = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => x.Id == uid && !x.IsDeleted)
+            .Select(x => x.Email)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (email is null) return false;
+
+        return await dbContext.UnitResidents.AnyAsync(
+            x => !x.IsDeleted && x.UnitId == unit.Id && x.EndDate == null
+              && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == email,
+            cancellationToken);
+    }
+
     [HttpGet("units/{unitId:guid}")]
     public async Task<ActionResult<IReadOnlyList<AccountStatementPeriodDto>>> GetUnitStatements(Guid unitId, CancellationToken cancellationToken)
     {
@@ -28,7 +52,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
+        if (!await CanAccessUnitAsync(unit, cancellationToken))
         {
             return Forbid();
         }
@@ -50,7 +74,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 Status = x.Status,
                 TotalCharges = 0m,
                 TotalPayments = dbContext.Payments
-                    .Where(p => !p.IsDeleted && p.ExpensePeriodId == x.Id && p.UnitId == unitId)
+                    .Where(p => !p.IsDeleted && !p.IsReversed && p.ExpensePeriodId == x.Id && p.UnitId == unitId)
                     .Sum(p => (decimal?)p.Amount) ?? 0m
             })
             .ToListAsync(cancellationToken);
@@ -84,6 +108,74 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         return Ok(statements);
     }
 
+    [HttpGet("units/{unitId:guid}/statement-pdf")]
+    [AllowAnonymous]
+    public async Task<IActionResult> DownloadStatementPdf(
+        Guid unitId,
+        [FromQuery(Name = "access_token")] string? _,
+        CancellationToken cancellationToken)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized();
+
+        var unit = await dbContext.Units
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == unitId, cancellationToken);
+
+        if (unit is null) return NotFound();
+        if (!await CanAccessUnitAsync(unit, cancellationToken)) return Forbid();
+
+        var statements = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId)
+            .OrderByDescending(x => x.Year)
+            .ThenByDescending(x => x.Month)
+            .Select(x => new AccountStatementPeriodDto
+            {
+                ExpensePeriodId = x.Id,
+                ExpensePeriodName = x.Name,
+                Year = x.Year,
+                Month = x.Month,
+                StartDate = x.StartDate,
+                EndDate = x.EndDate,
+                DueDate = x.DueDate,
+                Status = x.Status,
+                TotalCharges = 0m,
+                TotalPayments = dbContext.Payments
+                    .Where(p => !p.IsDeleted && !p.IsReversed && p.ExpensePeriodId == x.Id && p.UnitId == unitId)
+                    .Sum(p => (decimal?)p.Amount) ?? 0m
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var s in statements)
+        {
+            if (s.Status != ExpensePeriodStatus.Draft)
+            {
+                s.TotalCharges = await dbContext.ExpenseCharges
+                    .AsNoTracking()
+                    .Where(x => !x.IsDeleted && x.ExpensePeriodId == s.ExpensePeriodId && x.UnitId == unitId)
+                    .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+            }
+            s.Balance = s.TotalCharges - s.TotalPayments;
+        }
+
+        var ordered = statements.OrderBy(x => x.Year).ThenBy(x => x.Month).ToList();
+        var running = 0m;
+        foreach (var s in ordered)
+        {
+            s.PreviousBalance = running;
+            running += s.Balance;
+            s.RunningBalance = running;
+        }
+
+        var buildingName = unit.Building?.Name ?? string.Empty;
+        var document = new AccountStatementPdfDocument(unit.Code, buildingName, statements);
+        var bytes = document.GeneratePdf();
+        var fileName = $"estado-cuenta_{unit.Code}_{DateTime.Now:yyyyMMdd}.pdf";
+        return File(bytes, "application/pdf", fileName);
+    }
+
     [HttpGet("units/{unitId:guid}/periods/{expensePeriodId:guid}")]
     public async Task<ActionResult<AccountStatementDetailDto>> GetUnitStatementDetail(Guid unitId, Guid expensePeriodId, CancellationToken cancellationToken)
     {
@@ -97,7 +189,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
+        if (!await CanAccessUnitAsync(unit, cancellationToken))
         {
             return Forbid();
         }
@@ -124,12 +216,14 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 Amount = x.Amount,
                 Method = x.Method,
                 Reference = x.Reference,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt
             })
             .ToListAsync(cancellationToken);
 
         var totalCharges = charges.Sum(x => x.Amount);
-        var totalPayments = payments.Sum(x => x.Amount);
+        var totalPayments = payments.Where(x => !x.IsReversed).Sum(x => x.Amount);
 
         return Ok(new AccountStatementDetailDto
         {
@@ -166,7 +260,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
+        if (!await CanAccessUnitAsync(unit, cancellationToken))
         {
             return Forbid();
         }
@@ -207,7 +301,8 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 ChargeType = x.ChargeType,
                 Concept = x.Concept,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversal = x.IsReversal
             })
             .ToListAsync(cancellationToken);
 
@@ -222,12 +317,14 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 Amount = x.Amount,
                 Method = x.Method,
                 Reference = x.Reference,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt
             })
             .ToListAsync(cancellationToken);
 
         var totalAmount = charges.Sum(x => x.Amount);
-        var totalPaid = receiptPayments.Sum(x => x.Amount);
+        var totalPaid = receiptPayments.Where(x => !x.IsReversed).Sum(x => x.Amount);
 
         return Ok(new ExpenseReceiptDto
         {
@@ -265,7 +362,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == unitId, cancellationToken);
 
         if (unit is null) return NotFound();
-        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) return Forbid();
+        if (!await CanAccessUnitAsync(unit, cancellationToken)) return Forbid();
 
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
@@ -295,7 +392,8 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 ChargeType = x.ChargeType,
                 Concept = x.Concept,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversal = x.IsReversal
             })
             .ToListAsync(cancellationToken);
 
@@ -310,12 +408,14 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 Amount = x.Amount,
                 Method = x.Method,
                 Reference = x.Reference,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt
             })
             .ToListAsync(cancellationToken);
 
         var totalAmount = charges.Sum(x => x.Amount);
-        var totalPaid = payments.Sum(x => x.Amount);
+        var totalPaid = payments.Where(x => !x.IsReversed).Sum(x => x.Amount);
 
         var receipt = new ExpenseReceiptDto
         {
@@ -388,7 +488,8 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 ChargeType = x.ChargeType,
                 Concept = x.Concept,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                IsReversal = x.IsReversal
             })
             .ToListAsync(cancellationToken);
     }

@@ -8,13 +8,13 @@ namespace Condo.Api.Documents;
 
 public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
 {
-    private const string ColorPrimary = "#14363d";
-    private const string ColorAccent = "#1a8c5b";
-    private const string ColorGray = "#6b878d";
-    private const string ColorBorder = "#dbe7e3";
-    private const string ColorRowAlt = "#f5faf9";
+    private const string ColorPrimary = "#1385B6";
+    private const string ColorAccent = "#1AB7AF";
+    private const string ColorGray = "#637b88";
+    private const string ColorBorder = "#d7e5ea";
+    private const string ColorRowAlt = "#f4f9fc";
     private const string ColorWhite = "#ffffff";
-    private const string ColorCredit = "#1a7f37";
+    private const string ColorCredit = "#6AC64A";
 
     public DocumentMetadata GetMetadata() => new()
     {
@@ -53,7 +53,7 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
                     c.Item().Text($"#{payment.Id.ToString()[..8].ToUpper()}").FontColor(ColorGray).FontSize(8);
                 });
             });
-            col.Item().PaddingTop(8).LineHorizontal(1).LineColor(ColorBorder);
+            col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(ColorPrimary);
         });
     }
 

@@ -13,7 +13,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/users")]
-public class UsersController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class UsersController(ICondoDbContext dbContext, IAccessScopeService accessScope, IPasswordHasher passwordHasher) : ControllerBase
 {
     private static readonly Regex EmailRegex    = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
     private static readonly Regex UsernameRegex = new(@"^[a-z0-9][a-z0-9.\-_]*$",  RegexOptions.Compiled);
@@ -103,20 +103,31 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
     [HttpPost]
     public async Task<ActionResult<UserDto>> Create([FromBody] UserUpsertRequest request, CancellationToken cancellationToken)
     {
-        var companyId = accessScope.IsSuperAdmin ? request.CompanyId : accessScope.CompanyId;
-        if (!companyId.HasValue || !await accessScope.CanManageCompanyAsync(companyId.Value, cancellationToken))
-            return Forbid();
-
-        var validationError = await ValidateRequestAsync(request, companyId.Value, null, cancellationToken);
-        if (validationError is not null) return validationError;
-
         if (!Enum.TryParse<UserRole>(request.Role, true, out var role))
             return BadRequest("El rol indicado no es válido.");
 
         if (!accessScope.IsSuperAdmin && (role == UserRole.SuperAdmin || role == UserRole.CompanyAdmin))
             return BadRequest("Un administrador de empresa solo puede crear usuarios con alcance acotado.");
 
-        if (!accessScope.IsSuperAdmin)
+        bool isSuperAdminRole = role == UserRole.SuperAdmin;
+
+        Guid? companyId;
+        if (isSuperAdminRole)
+        {
+            if (!accessScope.IsSuperAdmin) return Forbid();
+            companyId = null;
+        }
+        else
+        {
+            companyId = accessScope.IsSuperAdmin ? request.CompanyId : accessScope.CompanyId;
+            if (!companyId.HasValue || !await accessScope.CanManageCompanyAsync(companyId.Value, cancellationToken))
+                return Forbid();
+        }
+
+        var validationError = await ValidateRequestAsync(request, companyId, null, cancellationToken);
+        if (validationError is not null) return validationError;
+
+        if (!isSuperAdminRole && !accessScope.IsSuperAdmin)
         {
             var accessibleIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
             if (!request.BuildingIds.All(id => accessibleIds.Contains(id)))
@@ -129,32 +140,36 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         var normalizedEmail    = request.Email.Trim().ToLowerInvariant();
         var normalizedUsername = request.Username.Trim().ToLowerInvariant();
 
-        if (await EmailExistsAsync(companyId.Value, normalizedEmail, null, cancellationToken))
-            return Conflict("Ya existe un usuario con ese correo dentro de la empresa.");
+        if (await EmailExistsAsync(companyId, normalizedEmail, null, cancellationToken))
+            return Conflict(isSuperAdminRole
+                ? "Ya existe un SuperAdmin con ese correo."
+                : "Ya existe un usuario con ese correo dentro de la empresa.");
 
-        if (await UsernameExistsAsync(companyId.Value, normalizedUsername, null, cancellationToken))
-            return Conflict("Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
+        if (await UsernameExistsAsync(companyId, normalizedUsername, null, cancellationToken))
+            return Conflict(isSuperAdminRole
+                ? "Ya existe un SuperAdmin con ese nombre de usuario."
+                : "Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
 
         var firstName = request.FirstName.Trim();
         var lastName  = request.LastName.Trim();
 
         var user = new ApplicationUser
         {
-            CompanyId        = companyId.Value,
-            CondominiumId    = request.CondominiumId,
-            FirstName        = firstName,
-            LastName         = lastName,
-            FullName         = string.IsNullOrWhiteSpace(request.FullName)
-                                 ? $"{firstName} {lastName}".Trim()
-                                 : request.FullName.Trim(),
-            Username         = normalizedUsername,
-            Email            = normalizedEmail,
-            PasswordHash     = string.IsNullOrWhiteSpace(request.Password) ? "123456" : request.Password,
-            PhonePrefix      = request.PhonePrefix?.Trim() ?? null,
-            Phone            = request.Phone?.Trim() ?? null,
-            Address          = request.Address?.Trim() ?? null,
-            Role             = role,
-            IsActive         = request.IsActive,
+            CompanyId          = companyId,
+            CondominiumId      = isSuperAdminRole ? null : request.CondominiumId,
+            FirstName          = firstName,
+            LastName           = lastName,
+            FullName           = string.IsNullOrWhiteSpace(request.FullName)
+                                   ? $"{firstName} {lastName}".Trim()
+                                   : request.FullName.Trim(),
+            Username           = normalizedUsername,
+            Email              = normalizedEmail,
+            PasswordHash       = passwordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "Condo*Temp1" : request.Password),
+            PhonePrefix        = request.PhonePrefix?.Trim() ?? null,
+            Phone              = request.Phone?.Trim() ?? null,
+            Address            = request.Address?.Trim() ?? null,
+            Role               = role,
+            IsActive           = request.IsActive,
             MustChangePassword = true
         };
 
@@ -162,8 +177,12 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
-            var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
-            if (syncError is not null) return syncError;
+
+            if (!isSuperAdminRole && request.BuildingIds.Count > 0)
+            {
+                var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
+                if (syncError is not null) return syncError;
+            }
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
@@ -183,18 +202,16 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
 
         if (user is null) return NotFound();
 
-        if (user.CompanyId is null || !await accessScope.CanManageCompanyAsync(user.CompanyId.Value, cancellationToken))
+        bool isExistingSuperAdmin = user.CompanyId is null;
+
+        // SuperAdmin users can only be edited by SuperAdmins
+        if (isExistingSuperAdmin && !accessScope.IsSuperAdmin)
             return Forbid();
 
-        var targetCompanyId = accessScope.IsSuperAdmin
-            ? request.CompanyId ?? user.CompanyId
-            : user.CompanyId;
-
-        if (!targetCompanyId.HasValue || !await accessScope.CanManageCompanyAsync(targetCompanyId.Value, cancellationToken))
+        // Company-scoped users: verify caller can manage that company
+        if (!isExistingSuperAdmin &&
+            (user.CompanyId is null || !await accessScope.CanManageCompanyAsync(user.CompanyId.Value, cancellationToken)))
             return Forbid();
-
-        var validationError = await ValidateRequestAsync(request, targetCompanyId.Value, user.Id, cancellationToken);
-        if (validationError is not null) return validationError;
 
         if (!Enum.TryParse<UserRole>(request.Role, true, out var role))
             return BadRequest("El rol indicado no es válido.");
@@ -202,10 +219,24 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         if (!accessScope.IsSuperAdmin && (role == UserRole.SuperAdmin || role == UserRole.CompanyAdmin))
             return BadRequest("Un administrador de empresa solo puede asignar roles con alcance acotado.");
 
-        if (!accessScope.IsSuperAdmin)
+        // Determine target company (SuperAdmin users stay without company)
+        Guid? targetCompanyId = isExistingSuperAdmin
+            ? null
+            : (accessScope.IsSuperAdmin ? request.CompanyId ?? user.CompanyId : user.CompanyId);
+
+        if (!isExistingSuperAdmin)
+        {
+            if (!targetCompanyId.HasValue || !await accessScope.CanManageCompanyAsync(targetCompanyId.Value, cancellationToken))
+                return Forbid();
+        }
+
+        var validationError = await ValidateRequestAsync(request, targetCompanyId, user.Id, cancellationToken);
+        if (validationError is not null) return validationError;
+
+        if (!isExistingSuperAdmin && !accessScope.IsSuperAdmin)
         {
             var accessibleIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-            if (!request.BuildingIds.All(id => accessibleIds.Contains(id)))
+            if (!request.BuildingIds.All(bid => accessibleIds.Contains(bid)))
                 return BadRequest("Uno o más edificios están fuera del alcance de su cuenta.");
 
             var limitsError = await ValidateBuildingRoleLimitsAsync(role, request.BuildingIds, user.Id, cancellationToken);
@@ -215,17 +246,21 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         var normalizedEmail    = request.Email.Trim().ToLowerInvariant();
         var normalizedUsername = request.Username.Trim().ToLowerInvariant();
 
-        if (await EmailExistsAsync(targetCompanyId.Value, normalizedEmail, user.Id, cancellationToken))
-            return Conflict("Ya existe un usuario con ese correo dentro de la empresa.");
+        if (await EmailExistsAsync(targetCompanyId, normalizedEmail, user.Id, cancellationToken))
+            return Conflict(isExistingSuperAdmin
+                ? "Ya existe un SuperAdmin con ese correo."
+                : "Ya existe un usuario con ese correo dentro de la empresa.");
 
-        if (await UsernameExistsAsync(targetCompanyId.Value, normalizedUsername, user.Id, cancellationToken))
-            return Conflict("Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
+        if (await UsernameExistsAsync(targetCompanyId, normalizedUsername, user.Id, cancellationToken))
+            return Conflict(isExistingSuperAdmin
+                ? "Ya existe un SuperAdmin con ese nombre de usuario."
+                : "Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
 
         var firstName = request.FirstName.Trim();
         var lastName  = request.LastName.Trim();
 
-        user.CompanyId     = targetCompanyId.Value;
-        user.CondominiumId = request.CondominiumId;
+        user.CompanyId     = targetCompanyId;
+        user.CondominiumId = isExistingSuperAdmin ? null : request.CondominiumId;
         user.FirstName     = firstName;
         user.LastName      = lastName;
         user.FullName      = string.IsNullOrWhiteSpace(request.FullName)
@@ -241,15 +276,19 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
 
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
-            user.PasswordHash      = request.Password;
+            user.PasswordHash       = passwordHasher.Hash(request.Password);
             user.MustChangePassword = true;
         }
 
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
-            var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
-            if (syncError is not null) return syncError;
+
+            if (!isExistingSuperAdmin && request.BuildingIds.Count > 0)
+            {
+                var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
+                if (syncError is not null) return syncError;
+            }
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
@@ -269,8 +308,16 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
 
         if (user is null) return NotFound();
 
-        if (user.CompanyId is null || !await accessScope.CanManageCompanyAsync(user.CompanyId.Value, cancellationToken))
-            return Forbid();
+        if (user.CompanyId is null)
+        {
+            // SuperAdmin users can only be deleted by SuperAdmins
+            if (!accessScope.IsSuperAdmin) return Forbid();
+        }
+        else
+        {
+            if (!await accessScope.CanManageCompanyAsync(user.CompanyId.Value, cancellationToken))
+                return Forbid();
+        }
 
         foreach (var access in user.BuildingAccesses.Where(x => !x.IsDeleted))
             access.IsDeleted = true;
@@ -283,7 +330,7 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
     // ─── HELPERS ────────────────────────────────────────────────────────────
 
     private async Task<ActionResult?> ValidateRequestAsync(
-        UserUpsertRequest request, Guid companyId, Guid? excludeUserId, CancellationToken ct)
+        UserUpsertRequest request, Guid? companyId, Guid? excludeUserId, CancellationToken ct)
     {
         if (request is null) return BadRequest("La solicitud es obligatoria.");
 
@@ -318,24 +365,28 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         if (string.IsNullOrWhiteSpace(request.Role))
             return BadRequest("El rol es obligatorio.");
 
-        if (!Enum.TryParse<UserRole>(request.Role, true, out _))
+        if (!Enum.TryParse<UserRole>(request.Role, true, out var parsedRole))
             return BadRequest("El rol indicado no es válido.");
 
-        if (request.BuildingIds is null || request.BuildingIds.Count == 0)
-            return BadRequest("Debes asignar al menos un edificio.");
-
-        if (request.BuildingIds.Any(x => x == Guid.Empty))
-            return BadRequest("La lista de edificios contiene identificadores inválidos.");
-
-        if (request.BuildingIds.Count != request.BuildingIds.Distinct().Count())
-            return BadRequest("La lista de edificios no puede contener duplicados.");
-
-        if (request.CondominiumId.HasValue)
+        // SuperAdmin users don't have company/building scope
+        if (companyId.HasValue)
         {
-            var condoExists = await dbContext.Condominiums
-                .AnyAsync(x => !x.IsDeleted && x.Id == request.CondominiumId.Value && x.CompanyId == companyId, ct);
-            if (!condoExists)
-                return BadRequest("El condominio indicado no existe o no pertenece a la empresa.");
+            if (request.BuildingIds is null || request.BuildingIds.Count == 0)
+                return BadRequest("Debes asignar al menos un edificio.");
+
+            if (request.BuildingIds.Any(x => x == Guid.Empty))
+                return BadRequest("La lista de edificios contiene identificadores inválidos.");
+
+            if (request.BuildingIds.Count != request.BuildingIds.Distinct().Count())
+                return BadRequest("La lista de edificios no puede contener duplicados.");
+
+            if (request.CondominiumId.HasValue)
+            {
+                var condoExists = await dbContext.Condominiums
+                    .AnyAsync(x => !x.IsDeleted && x.Id == request.CondominiumId.Value && x.CompanyId == companyId.Value, ct);
+                if (!condoExists)
+                    return BadRequest("El condominio indicado no existe o no pertenece a la empresa.");
+            }
         }
 
         return null;
@@ -425,12 +476,12 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         return null;
     }
 
-    private async Task<bool> EmailExistsAsync(Guid companyId, string email, Guid? excludeId, CancellationToken ct) =>
+    private async Task<bool> EmailExistsAsync(Guid? companyId, string email, Guid? excludeId, CancellationToken ct) =>
         await dbContext.ApplicationUsers.AnyAsync(
             x => !x.IsDeleted && x.CompanyId == companyId && x.Email == email
                  && (!excludeId.HasValue || x.Id != excludeId.Value), ct);
 
-    private async Task<bool> UsernameExistsAsync(Guid companyId, string username, Guid? excludeId, CancellationToken ct) =>
+    private async Task<bool> UsernameExistsAsync(Guid? companyId, string username, Guid? excludeId, CancellationToken ct) =>
         !string.IsNullOrWhiteSpace(username) &&
         await dbContext.ApplicationUsers.AnyAsync(
             x => !x.IsDeleted && x.CompanyId == companyId && x.Username == username

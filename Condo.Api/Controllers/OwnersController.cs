@@ -16,7 +16,8 @@ namespace Condo.Api.Controllers;
 public class OwnersController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
-    ITenantContext tenantContext) : ControllerBase
+    ITenantContext tenantContext,
+    Condo.Application.Abstractions.IPasswordHasher passwordHasher) : ControllerBase
 {
     private static readonly Regex EmailRegex    = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
     private static readonly Regex UsernameRegex = new(@"^[a-z0-9][a-z0-9.\-_]*$",  RegexOptions.Compiled);
@@ -94,7 +95,7 @@ public class OwnersController(
                                  : request.FullName.Trim(),
             Username         = normalizedUsername,
             Email            = normalizedEmail,
-            PasswordHash     = string.IsNullOrWhiteSpace(request.Password) ? "123456" : request.Password,
+            PasswordHash     = passwordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "Condo*Temp1" : request.Password),
             PhonePrefix      = request.PhonePrefix?.Trim() ?? null,
             Phone            = request.Phone?.Trim() ?? null,
             Address          = request.Address?.Trim() ?? null,
@@ -162,7 +163,7 @@ public class OwnersController(
 
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
-            owner.PasswordHash       = request.Password;
+            owner.PasswordHash       = passwordHasher.Hash(request.Password);
             owner.MustChangePassword = true;
         }
 

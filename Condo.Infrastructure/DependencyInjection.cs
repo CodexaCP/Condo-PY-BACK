@@ -1,5 +1,6 @@
 using Condo.Application.Abstractions;
 using Condo.Infrastructure.Persistence;
+using Condo.Infrastructure.Security;
 using Condo.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -21,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantContext, JwtTenantContext>();
         services.AddScoped<IAccessScopeService, AccessScopeService>();
         services.AddScoped<IExpenseSettlementDistributionService, ExpenseSettlementDistributionService>();
+        services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
 
         return services;
     }

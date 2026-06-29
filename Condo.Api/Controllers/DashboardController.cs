@@ -43,7 +43,8 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
 
         var paymentsQuery = dbContext.Payments
             .AsNoTracking()
-            .Where(x => !x.IsDeleted);
+            .Where(x => !x.IsDeleted && !x.IsReversed);
+
 
         if (!accessScope.IsSuperAdmin)
         {
@@ -82,6 +83,16 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
         var activeResidents = await residentsQuery.CountAsync(x => x.IsActive, cancellationToken);
         var activeAssignments = await assignmentsQuery.CountAsync(cancellationToken);
         var occupiedUnits = await assignmentsQuery.Select(x => x.UnitId).Distinct().CountAsync(cancellationToken);
+
+        var unitOwnersQuery = dbContext.UnitOwners.AsNoTracking().Where(x => !x.IsDeleted);
+        if (!accessScope.IsSuperAdmin)
+        {
+            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
+                unitOwnersQuery = unitOwnersQuery.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+            else
+                unitOwnersQuery = unitOwnersQuery.Where(x => accessibleBuildingIds.Contains(x.Unit!.BuildingId));
+        }
+        var unitsWithOwners = await unitOwnersQuery.Select(x => x.UnitId).Distinct().CountAsync(cancellationToken);
         var unitsWithoutPrimaryResident = await unitsQuery
             .Where(x => x.IsActive)
             .CountAsync(unit =>
@@ -92,9 +103,16 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
                     (link.EndDate == null || link.EndDate >= today)), cancellationToken);
         var totalExpensePeriods = await expensePeriodsQuery.CountAsync(cancellationToken);
         var draftExpensePeriods = await expensePeriodsQuery.CountAsync(x => x.Status == Condo.Domain.Enums.ExpensePeriodStatus.Draft, cancellationToken);
-        var totalChargedAmount = await expenseChargesQuery.SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+        // Solo cargos originales (lo que salió en la liquidación, sin reversiones)
+        var totalChargedAmount = await expenseChargesQuery
+            .Where(x => !x.IsReversal)
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
+        // Neto real (incluye los ajustes negativos de reversiones de cargos)
+        var netChargedAmount = await expenseChargesQuery.SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
         var totalCollectedAmount = await paymentsQuery.SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
-        var pendingBalanceAmount = totalChargedAmount - totalCollectedAmount;
+        var pendingBalanceAmount = netChargedAmount - totalCollectedAmount;
 
         var chargeSnapshots = await expenseChargesQuery
             .Select(x => new
@@ -156,9 +174,17 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
             .Where(x => x.DueDate.HasValue && x.DueDate.Value < today)
             .Sum(x => x.Balance);
 
-        var collectionRatePercentage = totalChargedAmount <= 0m
+        var collectionRatePercentage = netChargedAmount <= 0m
             ? 0m
-            : Math.Round((totalCollectedAmount / totalChargedAmount) * 100m, 2);
+            : Math.Round((totalCollectedAmount / netChargedAmount) * 100m, 2);
+
+        // Reversiones de cargos: Amount es negativo, lo invertimos para mostrar positivo en el dashboard
+        var totalReversedAmount = -(await expenseChargesQuery
+            .Where(x => x.IsReversal)
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m);
+        var totalReversedPayments = await expenseChargesQuery
+            .Where(x => x.IsReversal)
+            .CountAsync(cancellationToken);
 
         return Ok(new DashboardSummaryDto
         {
@@ -169,6 +195,7 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
             TotalResidents = totalResidents,
             ActiveResidents = activeResidents,
             ActiveAssignments = activeAssignments,
+            UnitsWithOwners = unitsWithOwners,
             OccupiedUnits = occupiedUnits,
             UnitsWithoutPrimaryResident = unitsWithoutPrimaryResident,
             TotalExpensePeriods = totalExpensePeriods,
@@ -178,7 +205,9 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
             TotalCollectedAmount = totalCollectedAmount,
             PendingBalanceAmount = pendingBalanceAmount,
             OverdueBalanceAmount = overdueBalanceAmount,
-            CollectionRatePercentage = collectionRatePercentage
+            CollectionRatePercentage = collectionRatePercentage,
+            TotalReversedAmount = totalReversedAmount,
+            TotalReversedPayments = totalReversedPayments
         });
     }
 }

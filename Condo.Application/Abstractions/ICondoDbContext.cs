@@ -22,6 +22,11 @@ public interface ICondoDbContext
     DbSet<Resident> Residents { get; }
     DbSet<UnitResident> UnitResidents { get; }
     DbSet<UnitOwner> UnitOwners { get; }
+    DbSet<Claim> Claims { get; }
+    DbSet<Announcement> Announcements { get; }
+    DbSet<Vote> Votes { get; }
+    DbSet<VoteOption> VoteOptions { get; }
+    DbSet<VoteCast> VoteCasts { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

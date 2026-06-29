@@ -2,7 +2,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Condo.Application.Services;
-using Condo.Domain.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 
@@ -10,7 +9,7 @@ namespace Condo.Api.Services;
 
 public class JwtTokenService(IConfiguration configuration) : IJwtTokenService
 {
-    public string CreateToken(ApplicationUser user)
+    public string CreateToken(Condo.Domain.Entities.ApplicationUser user)
     {
         var key = configuration["Jwt:Key"] ?? throw new InvalidOperationException("Missing Jwt:Key configuration.");
         var issuer = configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Missing Jwt:Issuer configuration.");

@@ -341,7 +341,7 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             IsLateFee = false,
             Concept = $"Reversión: {original.Concept}",
             Amount = -original.Amount,
-            Notes = $"Reversión del cargo #{original.Id}",
+            Notes = $"Reversión del cargo: {original.Concept}",
             IsReversal = true,
             ReversalOfChargeId = original.Id
         };

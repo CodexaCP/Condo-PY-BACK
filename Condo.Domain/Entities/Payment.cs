@@ -12,6 +12,8 @@ public class Payment : CompanyScopedEntity
     public PaymentMethod Method { get; set; } = PaymentMethod.BankTransfer;
     public string Reference { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    public bool IsReversed { get; set; }
+    public DateTime? ReversedAt { get; set; }
 
     public Company? Company { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }

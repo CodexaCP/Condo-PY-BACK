@@ -9,6 +9,7 @@ public class DashboardSummaryDto
     public int TotalResidents { get; set; }
     public int ActiveResidents { get; set; }
     public int ActiveAssignments { get; set; }
+    public int UnitsWithOwners { get; set; }
     public int OccupiedUnits { get; set; }
     public int UnitsWithoutPrimaryResident { get; set; }
     public int TotalExpensePeriods { get; set; }
@@ -19,4 +20,6 @@ public class DashboardSummaryDto
     public decimal PendingBalanceAmount { get; set; }
     public decimal OverdueBalanceAmount { get; set; }
     public decimal CollectionRatePercentage { get; set; }
+    public decimal TotalReversedAmount { get; set; }
+    public int TotalReversedPayments { get; set; }
 }

@@ -78,6 +78,8 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
                 Method = x.Method,
                 Reference = x.Reference,
                 Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt,
                 Allocations = dbContext.PaymentAllocations
                     .Where(a => !a.IsDeleted && a.PaymentId == x.Id)
                     .Select(a => new PaymentAllocationDto
@@ -118,6 +120,8 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
                 Method = x.Method,
                 Reference = x.Reference,
                 Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt,
                 Allocations = dbContext.PaymentAllocations
                     .Where(a => !a.IsDeleted && a.PaymentId == x.Id)
                     .Select(a => new PaymentAllocationDto
@@ -191,10 +195,10 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
         var entity = await dbContext.Payments
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
-        if (entity is null)
-        {
-            return NotFound();
-        }
+        if (entity is null) return NotFound();
+
+        if (entity.IsReversed)
+            return Conflict("No se puede editar un pago revertido.");
 
         var (contextError, period, unit) = await LoadAndValidateContextAsync(request, cancellationToken);
         if (contextError is not null) return contextError;
@@ -258,6 +262,8 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
                 Method = x.Method,
                 Reference = x.Reference,
                 Notes = x.Notes,
+                IsReversed = x.IsReversed,
+                ReversedAt = x.ReversedAt,
                 Allocations = dbContext.PaymentAllocations
                     .Where(a => !a.IsDeleted && a.PaymentId == x.Id)
                     .Select(a => new PaymentAllocationDto
@@ -286,35 +292,32 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
         var entity = await dbContext.Payments
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
-        if (entity is null)
-        {
-            return NotFound();
-        }
+        if (entity is null) return NotFound();
+
+        if (entity.IsReversed)
+            return Conflict("El pago ya fue revertido.");
 
         var unit = await dbContext.Units
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == entity.UnitId, cancellationToken);
 
-        if (unit is null)
-        {
-            return BadRequest("La unidad no existe.");
-        }
+        if (unit is null) return BadRequest("La unidad no existe.");
 
         if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
-        {
             return Forbid();
-        }
 
+        // Soft-delete allocations to free up the charges
         var allocations = await dbContext.PaymentAllocations
             .Where(a => !a.IsDeleted && a.PaymentId == id)
             .ToListAsync(cancellationToken);
 
         foreach (var alloc in allocations)
-        {
             alloc.IsDeleted = true;
-        }
 
-        entity.IsDeleted = true;
+        // Mark as reversed, not deleted — keeps audit trail
+        entity.IsReversed = true;
+        entity.ReversedAt = DateTime.UtcNow;
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -462,6 +465,8 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
             Method = entity.Method,
             Reference = entity.Reference,
             Notes = entity.Notes,
+            IsReversed = entity.IsReversed,
+            ReversedAt = entity.ReversedAt,
             Allocations = allocations
         };
     }

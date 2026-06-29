@@ -1,9 +1,11 @@
+using Condo.Api.Documents;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
 
 namespace Condo.Api.Controllers;
 
@@ -18,6 +20,42 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
         [FromQuery] int? year,
         [FromQuery] int? fromMonth,
         [FromQuery] int? toMonth,
+        CancellationToken cancellationToken)
+    {
+        var report = await BuildReportAsync(buildingId, year, fromMonth, toMonth, cancellationToken);
+        if (report is null) return Forbid();
+        return Ok(report);
+    }
+
+    [HttpGet("report-pdf")]
+    [AllowAnonymous]
+    public async Task<IActionResult> DownloadReportPdf(
+        [FromQuery(Name = "access_token")] string? _,
+        [FromQuery] Guid? buildingId,
+        [FromQuery] int? year,
+        [FromQuery] int? fromMonth,
+        [FromQuery] int? toMonth,
+        CancellationToken cancellationToken)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized();
+
+        var report = await BuildReportAsync(buildingId, year, fromMonth, toMonth, cancellationToken);
+        if (report is null) return Forbid();
+
+        var filterDescription = BuildFilterDescription(buildingId, year, fromMonth, toMonth);
+        var document = new CollectionReportPdfDocument(report, filterDescription);
+        var bytes = document.GeneratePdf();
+
+        var filename = $"cobranza_{DateTime.Now:yyyyMMdd_HHmm}.pdf";
+        return File(bytes, "application/pdf", filename);
+    }
+
+    private async Task<CollectionReportDto?> BuildReportAsync(
+        Guid? buildingId,
+        int? year,
+        int? fromMonth,
+        int? toMonth,
         CancellationToken cancellationToken)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
@@ -55,9 +93,7 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
         {
             var canAccess = await periodsQuery.AnyAsync(x => x.BuildingId == buildingId.Value, cancellationToken);
             if (!canAccess)
-            {
-                return Forbid();
-            }
+                return null;
 
             periodsQuery = periodsQuery.Where(x => x.BuildingId == buildingId.Value);
             chargesQuery = chargesQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
@@ -65,19 +101,13 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
         }
 
         if (year.HasValue)
-        {
             periodsQuery = periodsQuery.Where(x => x.Year == year.Value);
-        }
 
         if (fromMonth.HasValue)
-        {
             periodsQuery = periodsQuery.Where(x => x.Month >= fromMonth.Value);
-        }
 
         if (toMonth.HasValue)
-        {
             periodsQuery = periodsQuery.Where(x => x.Month <= toMonth.Value);
-        }
 
         var periods = await periodsQuery
             .Select(x => new
@@ -240,23 +270,20 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             .ThenBy(x => x.BuildingName)
             .ToList();
 
-        // Compute previous-period collection rate for each item using the already-loaded dataset
         var rateIndex = items.ToDictionary(x => (x.BuildingId, x.Year, x.Month), x => x.CollectionRatePercentage);
         foreach (var item in items)
         {
             var prevYear = item.Month == 1 ? item.Year - 1 : item.Year;
             var prevMonth = item.Month == 1 ? 12 : item.Month - 1;
             if (rateIndex.TryGetValue((item.BuildingId, prevYear, prevMonth), out var prevRate))
-            {
                 item.PreviousPeriodCollectionRatePercentage = prevRate;
-            }
         }
 
         var totalCharged = items.Sum(x => x.TotalChargedAmount);
         var totalCollected = items.Sum(x => x.TotalCollectedAmount);
         var totalPending = items.Sum(x => x.PendingAmount);
 
-        return Ok(new CollectionReportDto
+        return new CollectionReportDto
         {
             Summary = new CollectionSummaryDto
             {
@@ -278,7 +305,25 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
                 OwnerPendingAmount = items.Sum(x => x.OwnerPendingAmount)
             },
             Items = items
-        });
+        };
+    }
+
+    private string BuildFilterDescription(Guid? buildingId, int? year, int? fromMonth, int? toMonth)
+    {
+        var parts = new List<string>();
+        if (year.HasValue) parts.Add($"Año {year}");
+        if (fromMonth.HasValue || toMonth.HasValue)
+        {
+            var monthNames = new[] { "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre" };
+            if (fromMonth.HasValue && toMonth.HasValue)
+                parts.Add($"{monthNames[fromMonth.Value]} – {monthNames[toMonth.Value]}");
+            else if (fromMonth.HasValue)
+                parts.Add($"Desde {monthNames[fromMonth.Value]}");
+            else
+                parts.Add($"Hasta {monthNames[toMonth!.Value]}");
+        }
+        if (!parts.Any()) parts.Add("Todos los periodos");
+        return string.Join("  ·  ", parts);
     }
 
     private static AllocationResult AllocatePaymentsByType(
@@ -291,9 +336,7 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
         var totalCharged = effectiveBuckets.Values.Sum();
 
         if (totalCharged <= 0m)
-        {
             return new AllocationResult(decimal.Max(totalPayments, 0m), 0m);
-        }
 
         var appliedPayments = decimal.Min(totalPayments, totalCharged);
         var pending = decimal.Round(totalCharged - appliedPayments, 2, MidpointRounding.AwayFromZero);

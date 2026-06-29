@@ -25,20 +25,51 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Resident> Residents => Set<Resident>();
     public DbSet<UnitResident> UnitResidents => Set<UnitResident>();
     public DbSet<UnitOwner> UnitOwners => Set<UnitOwner>();
+    public DbSet<Claim> Claims => Set<Claim>();
+    public DbSet<Announcement> Announcements => Set<Announcement>();
+    public DbSet<Vote> Votes => Set<Vote>();
+    public DbSet<VoteOption> VoteOptions => Set<VoteOption>();
+    public DbSet<VoteCast> VoteCasts => Set<VoteCast>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // ── Company ────────────────────────────────────────────────────────────
         modelBuilder.Entity<Company>().HasIndex(x => x.Slug).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<Company>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<Company>().Property(x => x.Slug).HasMaxLength(100);
+        modelBuilder.Entity<Company>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Company>().Property(x => x.ContactPhonePrefix).HasMaxLength(10);
+        modelBuilder.Entity<Company>().Property(x => x.ContactPhone).HasMaxLength(30);
+        modelBuilder.Entity<Company>().Property(x => x.ContactEmail).HasMaxLength(160);
 
+        // ── ApplicationUser ────────────────────────────────────────────────────
         modelBuilder.Entity<ApplicationUser>()
             .HasIndex(x => new { x.CompanyId, x.Email })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0");
+            .HasFilter("[IsDeleted] = 0 AND [CompanyId] IS NOT NULL");
         modelBuilder.Entity<ApplicationUser>()
             .HasIndex(x => new { x.CompanyId, x.Username })
             .IsUnique()
-            .HasFilter("[IsDeleted] = 0 AND [Username] != ''");
-        modelBuilder.Entity<ApplicationUser>().Property(x => x.Role).HasConversion<string>();
+            .HasFilter("[IsDeleted] = 0 AND [CompanyId] IS NOT NULL AND [Username] != ''");
+        // Global uniqueness for platform users (SuperAdmin, no company)
+        modelBuilder.Entity<ApplicationUser>()
+            .HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [CompanyId] IS NULL");
+        modelBuilder.Entity<ApplicationUser>()
+            .HasIndex(x => x.Username)
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [CompanyId] IS NULL AND [Username] != ''");
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Role).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.FirstName).HasMaxLength(80);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.LastName).HasMaxLength(100);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.FullName).HasMaxLength(200);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Username).HasMaxLength(60);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Email).HasMaxLength(160);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.PasswordHash).HasMaxLength(256);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.PhonePrefix).HasMaxLength(10);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Phone).HasMaxLength(30);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Address).HasMaxLength(300);
         modelBuilder.Entity<ApplicationUser>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Users)
@@ -51,7 +82,15 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── Condominium ────────────────────────────────────────────────────────
         modelBuilder.Entity<Condominium>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasFilter("[CompanyId] IS NOT NULL AND [IsDeleted] = 0");
+        modelBuilder.Entity<Condominium>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<Condominium>().Property(x => x.Code).HasMaxLength(20);
+        modelBuilder.Entity<Condominium>().Property(x => x.Address).HasMaxLength(300);
+        modelBuilder.Entity<Condominium>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Condominium>().Property(x => x.ContactPhonePrefix).HasMaxLength(10);
+        modelBuilder.Entity<Condominium>().Property(x => x.ContactPhone).HasMaxLength(30);
+        modelBuilder.Entity<Condominium>().Property(x => x.ContactEmail).HasMaxLength(160);
         modelBuilder.Entity<Condominium>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Condominiums)
@@ -59,8 +98,16 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── Building ───────────────────────────────────────────────────────────
         modelBuilder.Entity<Building>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasFilter("[CompanyId] IS NOT NULL AND [IsDeleted] = 0");
         modelBuilder.Entity<Building>().HasIndex(x => new { x.CondominiumId, x.Code }).IsUnique().HasFilter("[CondominiumId] IS NOT NULL AND [IsDeleted] = 0");
+        modelBuilder.Entity<Building>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.Code).HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.Address).HasMaxLength(300);
+        modelBuilder.Entity<Building>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Building>().Property(x => x.ContactPhonePrefix).HasMaxLength(10);
+        modelBuilder.Entity<Building>().Property(x => x.ContactPhone).HasMaxLength(30);
+        modelBuilder.Entity<Building>().Property(x => x.ContactEmail).HasMaxLength(160);
         modelBuilder.Entity<Building>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Buildings)
@@ -73,8 +120,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.CondominiumId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── ExpensePeriod ──────────────────────────────────────────────────────
         modelBuilder.Entity<ExpensePeriod>().HasIndex(x => new { x.BuildingId, x.Year, x.Month }).IsUnique();
-        modelBuilder.Entity<ExpensePeriod>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<ExpensePeriod>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<ExpensePeriod>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<ExpensePeriod>().Property(x => x.Notes).HasMaxLength(1000);
         modelBuilder.Entity<ExpensePeriod>()
             .HasOne(x => x.Company)
             .WithMany(x => x.ExpensePeriods)
@@ -86,9 +136,15 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.BuildingId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── BuildingExpense ────────────────────────────────────────────────────
         modelBuilder.Entity<BuildingExpense>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<BuildingExpense>().Property(x => x.Category).HasConversion<string>();
-        modelBuilder.Entity<BuildingExpense>().Property(x => x.DistributionType).HasConversion<string>();
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.Category).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.DistributionType).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.Notes).HasMaxLength(1000);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.ReceiptFileName).HasMaxLength(500);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.ReceiptStoredName).HasMaxLength(500);
         modelBuilder.Entity<BuildingExpense>().HasIndex(x => new { x.BuildingId, x.ExpensePeriodId, x.ExpenseDate });
         modelBuilder.Entity<BuildingExpense>()
             .HasOne(x => x.Company)
@@ -111,9 +167,13 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.TargetUnitId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── RecurringBuildingExpense ───────────────────────────────────────────
         modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Category).HasConversion<string>();
-        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.DistributionType).HasConversion<string>();
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Category).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.DistributionType).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Notes).HasMaxLength(1000);
         modelBuilder.Entity<RecurringBuildingExpense>()
             .HasOne(x => x.Company)
             .WithMany()
@@ -130,8 +190,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.TargetUnitId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── BuildingIncome ─────────────────────────────────────────────────────
         modelBuilder.Entity<BuildingIncome>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<BuildingIncome>().Property(x => x.Category).HasConversion<string>();
+        modelBuilder.Entity<BuildingIncome>().Property(x => x.Category).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<BuildingIncome>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<BuildingIncome>().Property(x => x.Notes).HasMaxLength(1000);
         modelBuilder.Entity<BuildingIncome>().HasIndex(x => new { x.BuildingId, x.ExpensePeriodId, x.IncomeDate });
         modelBuilder.Entity<BuildingIncome>()
             .HasOne(x => x.Company)
@@ -149,12 +212,13 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.ExpensePeriodId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── ExpenseSettlement ──────────────────────────────────────────────────
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.TotalBuildingExpenses).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.TotalBuildingIncomes).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.ReserveFundAmount).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.ExtraordinaryAmount).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.NetCommonAmount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<ExpenseSettlement>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<ExpenseSettlement>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
         modelBuilder.Entity<ExpenseSettlement>().HasIndex(x => x.ExpensePeriodId).IsUnique();
         modelBuilder.Entity<ExpenseSettlement>()
             .HasOne(x => x.Company)
@@ -187,8 +251,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.PublishedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── ExpenseCharge ──────────────────────────────────────────────────────
         modelBuilder.Entity<ExpenseCharge>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<ExpenseCharge>().Property(x => x.ChargeType).HasConversion<string>();
+        modelBuilder.Entity<ExpenseCharge>().Property(x => x.ChargeType).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<ExpenseCharge>().Property(x => x.Concept).HasMaxLength(300);
+        modelBuilder.Entity<ExpenseCharge>().Property(x => x.Notes).HasMaxLength(1000);
         modelBuilder.Entity<ExpenseCharge>()
             .HasOne(x => x.Company)
             .WithMany(x => x.ExpenseCharges)
@@ -221,8 +288,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── Payment ────────────────────────────────────────────────────────────
         modelBuilder.Entity<Payment>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
-        modelBuilder.Entity<Payment>().Property(x => x.Method).HasConversion<string>();
+        modelBuilder.Entity<Payment>().Property(x => x.Method).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<Payment>().Property(x => x.Reference).HasMaxLength(200);
+        modelBuilder.Entity<Payment>().Property(x => x.Notes).HasMaxLength(1000);
         modelBuilder.Entity<Payment>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Payments)
@@ -268,8 +338,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.BuildingId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── Unit ───────────────────────────────────────────────────────────────
         modelBuilder.Entity<Unit>().HasIndex(x => new { x.BuildingId, x.Code }).IsUnique();
         modelBuilder.Entity<Unit>().Property(x => x.Coefficient).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<Unit>().Property(x => x.Code).HasMaxLength(20);
+        modelBuilder.Entity<Unit>().Property(x => x.Floor).HasMaxLength(20);
         modelBuilder.Entity<Unit>()
             .HasOne(x => x.Company)
             .WithMany()
@@ -281,7 +354,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.BuildingId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // ── Resident ───────────────────────────────────────────────────────────
         modelBuilder.Entity<Resident>().HasIndex(x => new { x.CompanyId, x.DocumentNumber }).IsUnique();
+        modelBuilder.Entity<Resident>().Property(x => x.FullName).HasMaxLength(200);
+        modelBuilder.Entity<Resident>().Property(x => x.DocumentNumber).HasMaxLength(30);
+        modelBuilder.Entity<Resident>().Property(x => x.Email).HasMaxLength(160);
+        modelBuilder.Entity<Resident>().Property(x => x.PhoneNumber).HasMaxLength(30);
         modelBuilder.Entity<Resident>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Residents)
@@ -315,6 +393,89 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<UnitOwner>()
             .HasOne(x => x.Owner).WithMany()
             .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Announcement ───────────────────────────────────────────────────────
+        modelBuilder.Entity<Claim>().HasIndex(x => new { x.CreatedByUserId, x.CreatedAtUtc });
+        modelBuilder.Entity<Claim>().HasIndex(x => new { x.BuildingId, x.Status, x.CreatedAtUtc });
+        modelBuilder.Entity<Claim>().Property(x => x.Category).HasMaxLength(30);
+        modelBuilder.Entity<Claim>().Property(x => x.Description).HasMaxLength(2000);
+        modelBuilder.Entity<Claim>().Property(x => x.Status).HasMaxLength(30);
+        modelBuilder.Entity<Claim>()
+            .HasOne(x => x.Condominium)
+            .WithMany()
+            .HasForeignKey(x => x.CondominiumId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Claim>()
+            .HasOne(x => x.Building)
+            .WithMany()
+            .HasForeignKey(x => x.BuildingId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Claim>()
+            .HasOne(x => x.Unit)
+            .WithMany()
+            .HasForeignKey(x => x.UnitId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Claim>()
+            .HasOne(x => x.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Claim>()
+            .HasOne(x => x.ResolvedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.ResolvedByUserId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Announcement>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });
+        modelBuilder.Entity<Announcement>().Property(x => x.Title).HasMaxLength(200);
+        modelBuilder.Entity<Announcement>().Property(x => x.Body).HasMaxLength(5000);
+        modelBuilder.Entity<Announcement>().Property(x => x.Category).HasMaxLength(50);
+        modelBuilder.Entity<Announcement>()
+            .HasOne(x => x.Building)
+            .WithMany()
+            .HasForeignKey(x => x.BuildingId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Announcement>()
+            .HasOne(x => x.CreatedBy)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedByUserId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ── Vote / VoteOption ──────────────────────────────────────────────────
+        modelBuilder.Entity<Vote>().Property(x => x.QuorumPercentage).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<Vote>().Property(x => x.Title).HasMaxLength(200);
+        modelBuilder.Entity<Vote>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Vote>().Property(x => x.WeightType).HasMaxLength(20);
+        modelBuilder.Entity<Vote>().Property(x => x.Status).HasMaxLength(20);
+        modelBuilder.Entity<VoteOption>().Property(x => x.Label).HasMaxLength(200);
+        modelBuilder.Entity<Vote>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });
+        modelBuilder.Entity<Vote>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Vote>()
+            .HasOne(x => x.CreatedBy).WithMany()
+            .HasForeignKey(x => x.CreatedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<VoteOption>()
+            .HasOne(x => x.Vote).WithMany(x => x.Options)
+            .HasForeignKey(x => x.VoteId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<VoteCast>().Property(x => x.CoefficientWeight).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<VoteCast>().HasIndex(x => new { x.VoteId, x.UnitId }).IsUnique();
+        modelBuilder.Entity<VoteCast>()
+            .HasOne(x => x.Vote).WithMany(x => x.Casts)
+            .HasForeignKey(x => x.VoteId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCast>()
+            .HasOne(x => x.Option).WithMany(x => x.Casts)
+            .HasForeignKey(x => x.VoteOptionId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCast>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCast>()
+            .HasOne(x => x.CastBy).WithMany()
+            .HasForeignKey(x => x.CastByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }
@@ -354,7 +515,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             FullName = "Super Admin",
             Username = "superadmin",
             Email = "superadmin@codexa.local",
-            PasswordHash = "Condo*2026",
+            PasswordHash = "$2a$11$Y7ysfENQB6qvGrf5rxRPuer0C8iSxyLeVCbqBJw2jADBZb/wVqbrO",
             Role = UserRole.SuperAdmin,
             IsActive = true,
             MustChangePassword = true,

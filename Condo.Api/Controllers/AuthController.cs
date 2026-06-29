@@ -10,7 +10,7 @@ namespace Condo.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtTokenService, ITenantContext tenantContext) : ControllerBase
+public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtTokenService, ITenantContext tenantContext, IPasswordHasher passwordHasher) : ControllerBase
 {
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
@@ -44,9 +44,14 @@ public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtToken
             user = matches.SingleOrDefault();
         }
 
-        if (user is null || user.PasswordHash != request.Password)
-        {
+        if (user is null || !VerifyPassword(request.Password, user.PasswordHash))
             return Unauthorized();
+
+        // Auto-rehash plain-text passwords on first login after migration
+        if (!user.PasswordHash.StartsWith("$2"))
+        {
+            user.PasswordHash = passwordHasher.Hash(request.Password);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
         var token = jwtTokenService.CreateToken(user);
@@ -79,7 +84,7 @@ public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtToken
             return Unauthorized();
         }
 
-        if (user.PasswordHash != request.CurrentPassword)
+        if (!VerifyPassword(request.CurrentPassword, user.PasswordHash))
         {
             return BadRequest("Current password is invalid.");
         }
@@ -89,13 +94,18 @@ public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtToken
             return BadRequest("Password must have at least 8 characters, uppercase, lowercase and special character.");
         }
 
-        user.PasswordHash = request.NewPassword;
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         user.MustChangePassword = false;
         user.LastLoginAtUtc = DateTime.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
+
+    private bool VerifyPassword(string password, string storedHash) =>
+        storedHash.StartsWith("$2")
+            ? passwordHasher.Verify(password, storedHash)
+            : password == storedHash;
 
     private static bool IsValidPassword(string password) =>
         !string.IsNullOrWhiteSpace(password) &&

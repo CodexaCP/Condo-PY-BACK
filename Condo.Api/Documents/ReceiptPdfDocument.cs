@@ -8,13 +8,15 @@ namespace Condo.Api.Documents;
 
 public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
 {
-    private const string ColorPrimary = "#14363d";
-    private const string ColorAccent = "#1a8c5b";
-    private const string ColorGray = "#6b878d";
-    private const string ColorBorder = "#dbe7e3";
-    private const string ColorRowAlt = "#f5faf9";
+    private const string ColorPrimary = "#1385B6";
+    private const string ColorAccent = "#1AB7AF";
+    private const string ColorGray = "#637b88";
+    private const string ColorBorder = "#d7e5ea";
+    private const string ColorRowAlt = "#f4f9fc";
     private const string ColorWhite = "#ffffff";
     private const string ColorDebt = "#c94d3f";
+    private const string ColorReversalBg = "#fff7ed";
+    private const string ColorReversalBadge = "#ea580c";
 
     public DocumentMetadata GetMetadata() => new()
     {
@@ -53,7 +55,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                 });
             });
 
-            col.Item().PaddingTop(8).LineHorizontal(1).LineColor(ColorBorder);
+            col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(ColorPrimary);
         });
     }
 
@@ -124,14 +126,20 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                 var isOdd = true;
                 foreach (var charge in receipt.Charges)
                 {
-                    var bg = isOdd ? ColorWhite : ColorRowAlt;
-                    isOdd = !isOdd;
+                    var bg = charge.IsReversal ? ColorReversalBg : (isOdd ? ColorWhite : ColorRowAlt);
+                    if (!charge.IsReversal) isOdd = !isOdd;
 
-                    table.Cell().Background(bg).Padding(5).Text(charge.Concept).FontColor(ColorPrimary);
+                    table.Cell().Background(bg).Padding(5).Row(row =>
+                    {
+                        row.RelativeItem().Text(charge.Concept).FontColor(ColorPrimary);
+                        if (charge.IsReversal)
+                            row.AutoItem().PaddingLeft(4).Background(ColorReversalBadge).Padding(2)
+                                .Text("REVERSIÓN").FontSize(6).Bold().FontColor(ColorWhite);
+                    });
                     table.Cell().Background(bg).Padding(5).Text(ChargeTypeLabel(charge.ChargeType.ToString())).FontColor(ColorGray);
                     table.Cell().Background(bg).Padding(5).AlignRight()
                         .Text(FormatCurrency(charge.Amount))
-                        .FontColor(charge.Amount < 0 ? ColorDebt : ColorPrimary);
+                        .FontColor(charge.IsReversal ? ColorReversalBadge : ColorPrimary);
                 }
             });
         });

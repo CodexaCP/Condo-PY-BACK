@@ -45,5 +45,7 @@ public class PaymentDto
     public PaymentMethod Method { get; set; }
     public string Reference { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    public bool IsReversed { get; set; }
+    public DateTime? ReversedAt { get; set; }
     public List<PaymentAllocationDto> Allocations { get; set; } = new();
 }

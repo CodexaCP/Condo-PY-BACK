@@ -788,7 +788,8 @@ public class ExpensePeriodsController(
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken)
+            && !await UserHasUnitInBuildingAsync(period.BuildingId, cancellationToken))
         {
             return Forbid();
         }
@@ -1519,4 +1520,27 @@ public class ExpensePeriodsController(
         };
 
     private static string ResolveName(int year, int month) => $"{year:D4}-{month:D2}";
+
+    private async Task<bool> UserHasUnitInBuildingAsync(Guid buildingId, CancellationToken cancellationToken)
+    {
+        var uid = tenantContext.UserId;
+
+        if (await dbContext.UnitOwners
+            .AsNoTracking()
+            .AnyAsync(x => !x.IsDeleted && x.Unit != null && x.Unit.BuildingId == buildingId && x.OwnerId == uid, cancellationToken))
+            return true;
+
+        var email = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => x.Id == uid && !x.IsDeleted)
+            .Select(x => x.Email)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (email is null) return false;
+
+        return await dbContext.UnitResidents
+            .AsNoTracking()
+            .AnyAsync(x => !x.IsDeleted && x.EndDate == null && x.Unit != null && x.Unit.BuildingId == buildingId
+                && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == email, cancellationToken);
+    }
 }
