@@ -27,6 +27,10 @@ public interface ICondoDbContext
     DbSet<Vote> Votes { get; }
     DbSet<VoteOption> VoteOptions { get; }
     DbSet<VoteCast> VoteCasts { get; }
+    DbSet<OwnerPayment> OwnerPayments { get; }
+    DbSet<OwnerPaymentUnit> OwnerPaymentUnits { get; }
+    DbSet<OwnerCredit> OwnerCredits { get; }
+    DbSet<Notification> Notifications { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -30,6 +30,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Vote> Votes => Set<Vote>();
     public DbSet<VoteOption> VoteOptions => Set<VoteOption>();
     public DbSet<VoteCast> VoteCasts => Set<VoteCast>();
+    public DbSet<OwnerPayment> OwnerPayments => Set<OwnerPayment>();
+    public DbSet<OwnerPaymentUnit> OwnerPaymentUnits => Set<OwnerPaymentUnit>();
+    public DbSet<OwnerCredit> OwnerCredits => Set<OwnerCredit>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -476,6 +480,60 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<VoteCast>()
             .HasOne(x => x.CastBy).WithMany()
             .HasForeignKey(x => x.CastByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── OwnerPayment ───────────────────────────────────────────────────────
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.DeclaredAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.ReviewedAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.Reference).HasMaxLength(50);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.ComprobanteUrl).HasMaxLength(500);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<OwnerPayment>().HasIndex(x => x.Reference).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<OwnerPayment>().HasIndex(x => new { x.CompanyId, x.Status, x.CreatedAtUtc });
+        modelBuilder.Entity<OwnerPayment>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OwnerPayment>()
+            .HasOne(x => x.Owner).WithMany()
+            .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OwnerPayment>()
+            .HasOne(x => x.ReviewedByUser).WithMany()
+            .HasForeignKey(x => x.ReviewedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── OwnerPaymentUnit ───────────────────────────────────────────────────
+        modelBuilder.Entity<OwnerPaymentUnit>().Property(x => x.AllocatedAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerPaymentUnit>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OwnerPaymentUnit>()
+            .HasOne(x => x.OwnerPayment).WithMany(x => x.Units)
+            .HasForeignKey(x => x.OwnerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OwnerPaymentUnit>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── OwnerCredit ────────────────────────────────────────────────────────
+        modelBuilder.Entity<OwnerCredit>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerCredit>().HasIndex(x => new { x.CompanyId, x.OwnerId }).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<OwnerCredit>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OwnerCredit>()
+            .HasOne(x => x.Owner).WithMany()
+            .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Notification ───────────────────────────────────────────────────────
+        modelBuilder.Entity<Notification>().Property(x => x.Type).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<Notification>().Property(x => x.Title).HasMaxLength(200);
+        modelBuilder.Entity<Notification>().Property(x => x.Body).HasMaxLength(1000);
+        modelBuilder.Entity<Notification>().Property(x => x.EntityType).HasMaxLength(50);
+        modelBuilder.Entity<Notification>().HasIndex(x => new { x.RecipientId, x.IsRead, x.CreatedAtUtc });
+        modelBuilder.Entity<Notification>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Notification>()
+            .HasOne(x => x.Recipient).WithMany()
+            .HasForeignKey(x => x.RecipientId).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }
