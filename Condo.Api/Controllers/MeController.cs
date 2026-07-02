@@ -224,6 +224,49 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
             ResolvedByUserName = x.ResolvedByUser != null ? x.ResolvedByUser.FullName : string.Empty
         };
 
+    [HttpGet("announcements")]
+    public async Task<ActionResult<IReadOnlyList<AnnouncementDto>>> GetMyAnnouncements(CancellationToken cancellationToken)
+    {
+        var user = await GetCurrentUserAsync(cancellationToken);
+        if (user is null) return Unauthorized();
+        if (user.Role is not (UserRole.Owner or UserRole.Resident)) return Forbid();
+
+        var myUnits = await LoadAccessibleUnitsAsync(user, cancellationToken);
+        var buildingIds = myUnits.Select(x => x.BuildingId).Distinct().ToHashSet();
+
+        if (buildingIds.Count == 0)
+            return Ok(Array.Empty<AnnouncementDto>());
+
+        var now = DateTime.UtcNow;
+        var items = await dbContext.Announcements
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted
+                     && x.IsActive
+                     && buildingIds.Contains(x.BuildingId)
+                     && (x.PublishedAt == null || x.PublishedAt <= now)
+                     && (x.ExpiresAt == null || x.ExpiresAt >= now))
+            .OrderByDescending(x => x.PublishedAt ?? x.CreatedAtUtc)
+            .Select(x => new AnnouncementDto
+            {
+                Id = x.Id,
+                BuildingId = x.BuildingId,
+                BuildingName = x.Building.Name,
+                Title = x.Title,
+                Body = x.Body,
+                Category = x.Category,
+                PublishedAt = x.PublishedAt,
+                ExpiresAt = x.ExpiresAt,
+                IsActive = x.IsActive,
+                CreatedByUserId = x.CreatedByUserId,
+                CreatedByName = x.CreatedBy != null ? x.CreatedBy.FullName : string.Empty,
+                CreatedAtUtc = x.CreatedAtUtc,
+                UpdatedAtUtc = x.UpdatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(items);
+    }
+
     private static bool IsValidClaimCategory(string? category) =>
         category is "Ruido" or "Limpieza" or "Mantenimiento" or "Otro";
 }
