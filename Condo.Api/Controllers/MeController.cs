@@ -51,7 +51,7 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
     {
         var user = await GetCurrentUserAsync(cancellationToken);
         if (user is null) return Unauthorized();
-        if (user.Role is not (UserRole.Owner or UserRole.Resident)) return Forbid();
+        if (user.Role is not (UserRole.Owner or UserRole.Resident)) return BadRequest("Solo los propietarios y residentes pueden enviar reclamos.");
 
         if (!IsValidClaimCategory(request.Category))
             return BadRequest("Categoría inválida.");
@@ -66,7 +66,7 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
         var selectedUnit = (await LoadAccessibleUnitsAsync(user, cancellationToken))
             .FirstOrDefault(x => x.UnitId == request.UnitId);
 
-        if (selectedUnit is null) return Forbid();
+        if (selectedUnit is null) return BadRequest("No tenés permiso para reclamar en esa unidad.");
 
         var unitContext = await dbContext.Units
             .AsNoTracking()
@@ -89,13 +89,13 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (unitContext is null || unitContext.CondominiumId is null || unitContext.CompanyId == Guid.Empty)
+        if (unitContext is null || unitContext.CompanyId == Guid.Empty)
             return BadRequest("No se pudo resolver el contexto de la unidad.");
 
         var claim = new Claim
         {
             CompanyId = unitContext.CompanyId,
-            CondominiumId = unitContext.CondominiumId.Value,
+            CondominiumId = unitContext.CondominiumId,
             BuildingId = unitContext.BuildingId,
             UnitId = unitContext.UnitId,
             CreatedByUserId = user.Id,
@@ -207,7 +207,7 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
         {
             Id = x.Id,
             CondominiumId = x.CondominiumId,
-            CondominiumName = x.Condominium.Name,
+            CondominiumName = x.Condominium != null ? x.Condominium.Name : string.Empty,
             BuildingId = x.BuildingId,
             BuildingName = x.Building.Name,
             UnitId = x.UnitId,

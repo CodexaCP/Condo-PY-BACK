@@ -4,6 +4,7 @@ using Condo.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Condo.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CondoDbContext))]
-    partial class CondoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260705154654_MakeClaimCondominiumOptional")]
+    partial class MakeClaimCondominiumOptional
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,129 +24,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("Condo.Domain.Entities.Amenity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("BuildingId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<decimal>("ReservationPrice")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("BuildingId", "Name")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.ToTable("Amenities");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.AmenityReservation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AmenityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("BuildingId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ComprobanteUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("EndsAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Notes")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<decimal>("Price")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("RejectionReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<Guid>("ReservedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("ReviewedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ReviewedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("StartsAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BuildingId");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("ReviewedByUserId");
-
-                    b.HasIndex("ReservedByUserId", "CreatedAtUtc");
-
-                    b.HasIndex("AmenityId", "StartsAt", "EndsAt");
-
-                    b.ToTable("AmenityReservations");
-                });
 
             modelBuilder.Entity("Condo.Domain.Entities.Announcement", b =>
                 {
@@ -363,13 +243,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
-
-                    b.Property<string>("LateFeeFrequency")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal?>("LateFeeRatePercentage")
-                        .HasColumnType("decimal(5,2)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -715,9 +588,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
-
-                    b.Property<int?>("AutoLateFeeIntervalIndex")
-                        .HasColumnType("int");
 
                     b.Property<string>("ChargeType")
                         .IsRequired()
@@ -1640,67 +1510,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.ToTable("VoteOptions");
                 });
 
-            modelBuilder.Entity("Condo.Domain.Entities.Amenity", b =>
-                {
-                    b.HasOne("Condo.Domain.Entities.Building", "Building")
-                        .WithMany()
-                        .HasForeignKey("BuildingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Building");
-
-                    b.Navigation("Company");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.AmenityReservation", b =>
-                {
-                    b.HasOne("Condo.Domain.Entities.Amenity", "Amenity")
-                        .WithMany("Reservations")
-                        .HasForeignKey("AmenityId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.Building", "Building")
-                        .WithMany()
-                        .HasForeignKey("BuildingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.Company", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "ReservedByUser")
-                        .WithMany()
-                        .HasForeignKey("ReservedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "ReviewedByUser")
-                        .WithMany()
-                        .HasForeignKey("ReviewedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Amenity");
-
-                    b.Navigation("Building");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("ReservedByUser");
-
-                    b.Navigation("ReviewedByUser");
-                });
-
             modelBuilder.Entity("Condo.Domain.Entities.Announcement", b =>
                 {
                     b.HasOne("Condo.Domain.Entities.Building", "Building")
@@ -2316,11 +2125,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Vote");
-                });
-
-            modelBuilder.Entity("Condo.Domain.Entities.Amenity", b =>
-                {
-                    b.Navigation("Reservations");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.ApplicationUser", b =>

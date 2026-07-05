@@ -27,6 +27,14 @@ public class ExpenseSettlementSummaryDto
     public ExpensePeriodStatus PeriodStatus { get; set; }
     public int GeneratedChargeCount { get; set; }
     public bool IsCalculated { get; set; }
+    public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
+}
+
+public class SettlementCategoryTotalDto
+{
+    public string Category { get; set; } = string.Empty;
+    public int ExpenseCount { get; set; }
+    public decimal Amount { get; set; }
 }
 
 public class ExpenseSettlementChargePreviewDto

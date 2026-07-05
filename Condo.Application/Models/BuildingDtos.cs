@@ -1,3 +1,5 @@
+using Condo.Domain.Enums;
+
 namespace Condo.Application.Models;
 
 public class BuildingUpsertRequest
@@ -12,6 +14,8 @@ public class BuildingUpsertRequest
     public string? ContactPhonePrefix { get; set; }
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
+    public decimal? LateFeeRatePercentage { get; set; }
+    public LateFeeFrequency? LateFeeFrequency { get; set; }
 }
 
 public class BuildingDto
@@ -28,4 +32,6 @@ public class BuildingDto
     public string? ContactPhonePrefix { get; set; }
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
+    public decimal? LateFeeRatePercentage { get; set; }
+    public LateFeeFrequency? LateFeeFrequency { get; set; }
 }

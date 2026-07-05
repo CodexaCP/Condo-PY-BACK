@@ -1,4 +1,5 @@
 using Condo.Domain.Common;
+using Condo.Domain.Enums;
 
 namespace Condo.Domain.Entities;
 
@@ -14,6 +15,8 @@ public class Building : BaseEntity
     public string? ContactPhonePrefix { get; set; }
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
+    public decimal? LateFeeRatePercentage { get; set; }
+    public LateFeeFrequency? LateFeeFrequency { get; set; }
 
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }

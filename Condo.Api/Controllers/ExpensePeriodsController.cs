@@ -801,50 +801,8 @@ public class ExpensePeriodsController(
             return BadRequest("El período todavía no tiene una liquidación calculada para exportar.");
         }
 
-        List<SettlementPdfChargeRow> chargeRows;
-
-        if (period.Status == ExpensePeriodStatus.Draft)
-        {
-            var settlement = await dbContext.ExpenseSettlements
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
-
-            if (settlement is null)
-            {
-                return BadRequest("No se encontró la liquidación.");
-            }
-
-            ExpenseSettlementChargePreviewDto preview;
-            try
-            {
-                preview = await distributionService.PreviewAsync(period, settlement, cancellationToken);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(ex.Message);
-            }
-
-            chargeRows = preview.Items.Select(x => new SettlementPdfChargeRow(
-                x.UnitCode, x.Concept, x.ChargeType.ToString(), x.Amount)).ToList();
-        }
-        else
-        {
-            chargeRows = await dbContext.ExpenseCharges
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId != null)
-                .OrderBy(x => x.Unit!.Code)
-                .ThenBy(x => x.Concept)
-                .Select(x => new SettlementPdfChargeRow(
-                    x.Unit != null ? x.Unit.Code : string.Empty,
-                    x.Concept,
-                    x.ChargeType.ToString(),
-                    x.Amount))
-                .ToListAsync(cancellationToken);
-        }
-
         var document = new SettlementPdfDocument(
             summary,
-            chargeRows,
             period.StartDate.ToString("dd/MM/yyyy"),
             period.EndDate.ToString("dd/MM/yyyy"),
             period.DueDate.ToString("dd/MM/yyyy"));
@@ -1133,9 +1091,35 @@ public class ExpensePeriodsController(
             Status = settlement.Status,
             PeriodStatus = period.Status,
             GeneratedChargeCount = generatedChargeCount,
-            IsCalculated = true
+            IsCalculated = true,
+            CategoryTotals = await BuildCategoryTotalsAsync(period.Id, cancellationToken)
         };
     }
+
+    private async Task<List<SettlementCategoryTotalDto>> BuildCategoryTotalsAsync(Guid expensePeriodId, CancellationToken cancellationToken)
+    {
+        var rows = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted
+                     && x.ExpensePeriodId == expensePeriodId
+                     && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
+                      || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
+            .Select(x => new { x.Category, x.Amount })
+            .ToListAsync(cancellationToken);
+
+        return BuildCategoryTotals(rows.Select(x => (x.Category, x.Amount)));
+    }
+
+    private static List<SettlementCategoryTotalDto> BuildCategoryTotals(IEnumerable<(BuildingExpenseCategory Category, decimal Amount)> rows) =>
+        rows.GroupBy(x => x.Category)
+            .Select(g => new SettlementCategoryTotalDto
+            {
+                Category = g.Key.ToString(),
+                ExpenseCount = g.Count(),
+                Amount = g.Sum(x => x.Amount)
+            })
+            .OrderByDescending(x => x.Amount)
+            .ToList();
 
     private async Task<ExpenseSettlementSummaryDto> BuildLiveSettlementSummaryAsync(ExpensePeriod period, CancellationToken cancellationToken)
     {
@@ -1182,7 +1166,11 @@ public class ExpensePeriodsController(
             Status = null,
             PeriodStatus = period.Status,
             GeneratedChargeCount = 0,
-            IsCalculated = false
+            IsCalculated = false,
+            CategoryTotals = BuildCategoryTotals(expenses
+                .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient
+                                                or BuildingExpenseDistributionType.FixedPerUnit)
+                .Select(x => (x.Category, x.Amount)))
         };
     }
 

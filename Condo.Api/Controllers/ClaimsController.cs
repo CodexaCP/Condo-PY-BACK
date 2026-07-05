@@ -101,7 +101,7 @@ public class ClaimsController(
         {
             Id = x.Id,
             CondominiumId = x.CondominiumId,
-            CondominiumName = x.Condominium.Name,
+            CondominiumName = x.Condominium != null ? x.Condominium.Name : string.Empty,
             BuildingId = x.BuildingId,
             BuildingName = x.Building.Name,
             UnitId = x.UnitId,

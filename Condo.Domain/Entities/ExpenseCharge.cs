@@ -11,6 +11,7 @@ public class ExpenseCharge : CompanyScopedEntity
     public Guid? SourceBuildingExpenseId { get; set; }
     public Guid? SourceSettlementId { get; set; }
     public bool IsLateFee { get; set; }
+    public int? AutoLateFeeIntervalIndex { get; set; }
     public string Concept { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Notes { get; set; } = string.Empty;

@@ -3,7 +3,7 @@ namespace Condo.Application.Models;
 public class ClaimDto
 {
     public Guid Id { get; set; }
-    public Guid CondominiumId { get; set; }
+    public Guid? CondominiumId { get; set; }
     public string CondominiumName { get; set; } = string.Empty;
     public Guid BuildingId { get; set; }
     public string BuildingName { get; set; } = string.Empty;

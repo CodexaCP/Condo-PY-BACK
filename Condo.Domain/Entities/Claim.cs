@@ -4,7 +4,7 @@ namespace Condo.Domain.Entities;
 
 public class Claim : CompanyScopedEntity
 {
-    public Guid CondominiumId { get; set; }
+    public Guid? CondominiumId { get; set; }
     public Guid BuildingId { get; set; }
     public Guid UnitId { get; set; }
     public Guid CreatedByUserId { get; set; }
@@ -14,7 +14,7 @@ public class Claim : CompanyScopedEntity
     public DateTime? ResolvedAtUtc { get; set; }
     public Guid? ResolvedByUserId { get; set; }
 
-    public Condominium Condominium { get; set; } = null!;
+    public Condominium? Condominium { get; set; }
     public Building Building { get; set; } = null!;
     public Unit Unit { get; set; } = null!;
     public ApplicationUser CreatedByUser { get; set; } = null!;

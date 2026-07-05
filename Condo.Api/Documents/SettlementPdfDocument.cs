@@ -7,7 +7,6 @@ namespace Condo.Api.Documents;
 
 public sealed class SettlementPdfDocument(
     ExpenseSettlementSummaryDto summary,
-    IReadOnlyList<SettlementPdfChargeRow> charges,
     string periodStartDate,
     string periodEndDate,
     string periodDueDate) : IDocument
@@ -73,9 +72,9 @@ public sealed class SettlementPdfDocument(
         {
             col.Spacing(14);
             col.Item().Element(ComposeSummary);
-            if (charges.Count > 0)
+            if (summary.CategoryTotals.Count > 0)
             {
-                col.Item().Element(ComposeChargesTable);
+                col.Item().Element(ComposeCategoryTable);
             }
         });
     }
@@ -139,47 +138,72 @@ public sealed class SettlementPdfDocument(
             });
     }
 
-    private void ComposeChargesTable(IContainer container)
+    private static readonly IReadOnlyDictionary<string, string> CategoryLabels = new Dictionary<string, string>
     {
-        var unitCount = charges.Select(x => x.UnitCode).Distinct().Count();
-        var total = charges.Sum(x => x.Amount);
+        ["Utilities"] = "Servicios",
+        ["Cleaning"] = "Limpieza",
+        ["Security"] = "Seguridad",
+        ["Maintenance"] = "Mantenimiento",
+        ["Elevator"] = "Ascensor",
+        ["Insurance"] = "Seguro",
+        ["Payroll"] = "Salarios",
+        ["Taxes"] = "Impuestos",
+        ["Administration"] = "Administracion",
+        ["ReserveFund"] = "Fondo de reserva",
+        ["Extraordinary"] = "Extraordinario",
+        ["Supplies"] = "Insumos",
+        ["Other"] = "Otro"
+    };
+
+    private void ComposeCategoryTable(IContainer container)
+    {
+        var totals = summary.CategoryTotals;
+        var expenseCount = totals.Sum(x => x.ExpenseCount);
+        var total = totals.Sum(x => x.Amount);
 
         container.Column(col =>
         {
-            col.Item().PaddingBottom(4).Text("Distribucion por unidad").Bold().FontColor(ColorPrimary);
+            col.Item().PaddingBottom(4).Text("Gastos comunes por categoria").Bold().FontColor(ColorPrimary);
             col.Item().PaddingBottom(8)
-                .Text($"{charges.Count} cargos · {unitCount} unidades · {FormatCurrency(total)}")
+                .Text($"{expenseCount} gastos · {totals.Count} categorias · {FormatCurrency(total)}")
                 .FontColor(ColorGray);
 
             col.Item().Table(table =>
             {
                 table.ColumnsDefinition(c =>
                 {
-                    c.ConstantColumn(55);
                     c.RelativeColumn(4);
-                    c.ConstantColumn(75);
-                    c.ConstantColumn(90);
+                    c.ConstantColumn(70);
+                    c.ConstantColumn(100);
                 });
 
                 table.Header(header =>
                 {
-                    header.Cell().Background(ColorPrimary).Padding(4).Text("Unidad").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(4).Text("Concepto").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(4).Text("Tipo").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(4).Text("Categoria").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(4).AlignRight().Text("Gastos").FontColor(ColorWhite).Bold();
                     header.Cell().Background(ColorPrimary).Padding(4).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
                 });
 
                 var isOdd = true;
-                foreach (var charge in charges.OrderBy(x => x.UnitCode).ThenBy(x => x.Concept))
+                foreach (var row in totals)
                 {
                     var bg = isOdd ? ColorWhite : ColorRowAlt;
                     isOdd = !isOdd;
 
-                    table.Cell().Background(bg).Padding(4).Text(charge.UnitCode).FontColor(ColorPrimary);
-                    table.Cell().Background(bg).Padding(4).Text(charge.Concept).FontColor(ColorPrimary);
-                    table.Cell().Background(bg).Padding(4).Text(charge.ChargeType).FontColor(ColorGray);
-                    table.Cell().Background(bg).Padding(4).AlignRight().Text(FormatCurrency(charge.Amount)).FontColor(ColorPrimary);
+                    table.Cell().Background(bg).Padding(4)
+                        .Text(CategoryLabels.GetValueOrDefault(row.Category, row.Category)).FontColor(ColorPrimary);
+                    table.Cell().Background(bg).Padding(4).AlignRight()
+                        .Text(row.ExpenseCount.ToString()).FontColor(ColorGray);
+                    table.Cell().Background(bg).Padding(4).AlignRight()
+                        .Text(FormatCurrency(row.Amount)).FontColor(ColorPrimary);
                 }
+
+                table.Cell().Background(ColorAccent).Padding(4)
+                    .Text("Total gastos comunes").FontColor(ColorWhite).Bold();
+                table.Cell().Background(ColorAccent).Padding(4).AlignRight()
+                    .Text(expenseCount.ToString()).FontColor(ColorWhite).Bold();
+                table.Cell().Background(ColorAccent).Padding(4).AlignRight()
+                    .Text(FormatCurrency(total)).FontColor(ColorWhite).Bold();
             });
         });
     }
@@ -207,5 +231,3 @@ public sealed class SettlementPdfDocument(
 
     private static string FormatCurrency(decimal value) => $"Gs. {value:N0}";
 }
-
-public sealed record SettlementPdfChargeRow(string UnitCode, string Concept, string ChargeType, decimal Amount);

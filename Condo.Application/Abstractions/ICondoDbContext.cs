@@ -31,6 +31,8 @@ public interface ICondoDbContext
     DbSet<OwnerPaymentUnit> OwnerPaymentUnits { get; }
     DbSet<OwnerCredit> OwnerCredits { get; }
     DbSet<Notification> Notifications { get; }
+    DbSet<Amenity> Amenities { get; }
+    DbSet<AmenityReservation> AmenityReservations { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

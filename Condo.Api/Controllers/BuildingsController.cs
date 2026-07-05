@@ -1,6 +1,7 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/buildings")]
-public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingDto>>> GetAll(CancellationToken cancellationToken)
@@ -59,7 +60,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 Description = x.Description,
                 ContactPhonePrefix = x.ContactPhonePrefix,
                 ContactPhone = x.ContactPhone,
-                ContactEmail = x.ContactEmail
+                ContactEmail = x.ContactEmail,
+                LateFeeRatePercentage = x.LateFeeRatePercentage,
+                LateFeeFrequency = x.LateFeeFrequency
             })
             .ToListAsync(cancellationToken);
 
@@ -90,7 +93,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 Description = x.Description,
                 ContactPhonePrefix = x.ContactPhonePrefix,
                 ContactPhone = x.ContactPhone,
-                ContactEmail = x.ContactEmail
+                ContactEmail = x.ContactEmail,
+                LateFeeRatePercentage = x.LateFeeRatePercentage,
+                LateFeeFrequency = x.LateFeeFrequency
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -159,7 +164,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             ContactPhonePrefix = string.IsNullOrWhiteSpace(request.ContactPhonePrefix) ? null : request.ContactPhonePrefix.Trim(),
             ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim(),
-            ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant()
+            ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant(),
+            LateFeeRatePercentage = NormalizedLateFeeRate(request),
+            LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null
         };
 
         dbContext.Buildings.Add(entity);
@@ -229,6 +236,11 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             }
         }
 
+        var previousRate = entity.LateFeeRatePercentage;
+        var previousFrequency = entity.LateFeeFrequency;
+        var newRate = NormalizedLateFeeRate(request);
+        var newFrequency = newRate.HasValue ? request.LateFeeFrequency : null;
+
         entity.CondominiumId = request.CondominiumId;
         entity.Name = normalizedName;
         entity.Code = normalizedCode;
@@ -238,6 +250,18 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.ContactPhonePrefix = string.IsNullOrWhiteSpace(request.ContactPhonePrefix) ? null : request.ContactPhonePrefix.Trim();
         entity.ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim();
         entity.ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant();
+        entity.LateFeeRatePercentage = newRate;
+        entity.LateFeeFrequency = newFrequency;
+
+        var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
+        if (lateFeeChanged && effectiveCompanyId.HasValue)
+        {
+            await QueueLateFeeChangeNotificationsAsync(
+                entity, effectiveCompanyId.Value,
+                previousRate, previousFrequency,
+                newRate, newFrequency,
+                cancellationToken);
+        }
 
         try
         {
@@ -250,6 +274,99 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         entity.Condominium = condominium;
         return Ok(ToDto(entity));
+    }
+
+    private static decimal? NormalizedLateFeeRate(BuildingUpsertRequest request) =>
+        request.LateFeeRatePercentage is > 0m ? decimal.Round(request.LateFeeRatePercentage.Value, 2) : null;
+
+    private static string LateFeeConfigLabel(decimal? rate, LateFeeFrequency? frequency) =>
+        rate.HasValue && frequency.HasValue
+            ? $"{rate.Value:0.##}% {LateFeeFrequencyLabel(frequency.Value)}"
+            : "sin mora";
+
+    private static string LateFeeFrequencyLabel(LateFeeFrequency frequency) => frequency switch
+    {
+        LateFeeFrequency.Daily => "diario",
+        LateFeeFrequency.Weekly => "semanal",
+        LateFeeFrequency.Biweekly => "quincenal",
+        _ => frequency.ToString()
+    };
+
+    private async Task QueueLateFeeChangeNotificationsAsync(
+        Building building,
+        Guid companyId,
+        decimal? previousRate, LateFeeFrequency? previousFrequency,
+        decimal? newRate, LateFeeFrequency? newFrequency,
+        CancellationToken cancellationToken)
+    {
+        var actorId = tenantContext.UserId;
+        var actorName = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => x.Id == actorId)
+            .Select(x => x.FullName)
+            .FirstOrDefaultAsync(cancellationToken) ?? "Un administrador";
+
+        var recipientIds = new HashSet<Guid>();
+
+        // Propietarios de unidades del edificio
+        recipientIds.UnionWith(await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == building.Id)
+            .Select(x => x.OwnerId)
+            .ToListAsync(cancellationToken));
+
+        // Residentes activos (usuario por email del residente)
+        var residentEmails = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == building.Id
+                     && x.Resident != null && !x.Resident.IsDeleted)
+            .Select(x => x.Resident!.Email)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (residentEmails.Count > 0)
+        {
+            recipientIds.UnionWith(await dbContext.ApplicationUsers
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
+                .Select(x => x.Id)
+                .ToListAsync(cancellationToken));
+        }
+
+        // Managers con acceso al edificio
+        recipientIds.UnionWith(await dbContext.UserBuildingAccesses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == building.Id)
+            .Select(x => x.ApplicationUserId)
+            .ToListAsync(cancellationToken));
+
+        // Admins y operadores de la empresa
+        recipientIds.UnionWith(await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.IsActive && x.CompanyId == companyId
+                     && (x.Role == UserRole.CompanyAdmin || x.Role == UserRole.CompanyOperator))
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken));
+
+        var previousLabel = LateFeeConfigLabel(previousRate, previousFrequency);
+        var newLabel = LateFeeConfigLabel(newRate, newFrequency);
+        var changedAt = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
+        var body = $"{actorName} cambió el interés por mora del edificio {building.Name} de «{previousLabel}» a «{newLabel}» el {changedAt}.";
+
+        foreach (var recipientId in recipientIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = companyId,
+                RecipientId = recipientId,
+                Type = NotificationType.LateFeeConfigChanged,
+                Title = "Cambio en interés por mora",
+                Body = body,
+                EntityType = "Building",
+                EntityId = building.Id
+            });
+        }
     }
 
     [HttpDelete("{id:guid}")]
@@ -343,6 +460,16 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return "La direccion es obligatoria.";
         }
 
+        if (request.LateFeeRatePercentage is < 0m or > 100m)
+        {
+            return "La tasa de interés por mora debe estar entre 0 y 100.";
+        }
+
+        if (request.LateFeeRatePercentage is > 0m && !request.LateFeeFrequency.HasValue)
+        {
+            return "Definí el incremento de la mora (diario, semanal o quincenal).";
+        }
+
         return null;
     }
 
@@ -379,6 +506,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             Description = entity.Description,
             ContactPhonePrefix = entity.ContactPhonePrefix,
             ContactPhone = entity.ContactPhone,
-            ContactEmail = entity.ContactEmail
+            ContactEmail = entity.ContactEmail,
+            LateFeeRatePercentage = entity.LateFeeRatePercentage,
+            LateFeeFrequency = entity.LateFeeFrequency
         };
 }

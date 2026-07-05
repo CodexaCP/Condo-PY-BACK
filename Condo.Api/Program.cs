@@ -18,11 +18,14 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        options.JsonSerializerOptions.Converters.Add(new Condo.Api.Serialization.UtcDateTimeConverter());
+        options.JsonSerializerOptions.Converters.Add(new Condo.Api.Serialization.UtcNullableDateTimeConverter());
     });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCondoInfrastructure(builder.Configuration);
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

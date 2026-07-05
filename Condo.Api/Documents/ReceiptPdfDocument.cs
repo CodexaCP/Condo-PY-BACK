@@ -33,7 +33,11 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
             page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(9));
             page.Header().Element(ComposeHeader);
             page.Content().Element(ComposeBody);
-            page.Footer().Element(ComposeFooter);
+            page.Footer().Column(col =>
+            {
+                col.Item().Element(PdfWatermark.ComposeNonFiscal);
+                col.Item().Element(ComposeFooter);
+            });
         });
     }
 

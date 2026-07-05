@@ -34,6 +34,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<OwnerPaymentUnit> OwnerPaymentUnits => Set<OwnerPaymentUnit>();
     public DbSet<OwnerCredit> OwnerCredits => Set<OwnerCredit>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Amenity> Amenities => Set<Amenity>();
+    public DbSet<AmenityReservation> AmenityReservations => Set<AmenityReservation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -112,6 +114,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.ContactPhonePrefix).HasMaxLength(10);
         modelBuilder.Entity<Building>().Property(x => x.ContactPhone).HasMaxLength(30);
         modelBuilder.Entity<Building>().Property(x => x.ContactEmail).HasMaxLength(160);
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeRatePercentage).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeFrequency).HasConversion<string>().HasMaxLength(20);
         modelBuilder.Entity<Building>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Buildings)
@@ -408,6 +412,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Condominium)
             .WithMany()
             .HasForeignKey(x => x.CondominiumId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Claim>()
             .HasOne(x => x.Building)
@@ -534,6 +539,41 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Notification>()
             .HasOne(x => x.Recipient).WithMany()
             .HasForeignKey(x => x.RecipientId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Amenity ────────────────────────────────────────────────────────────
+        modelBuilder.Entity<Amenity>().Property(x => x.Name).HasMaxLength(150);
+        modelBuilder.Entity<Amenity>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Amenity>().Property(x => x.ReservationPrice).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Amenity>().HasIndex(x => new { x.BuildingId, x.Name }).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<Amenity>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Amenity>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AmenityReservation>().Property(x => x.Price).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<AmenityReservation>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<AmenityReservation>().Property(x => x.Notes).HasMaxLength(500);
+        modelBuilder.Entity<AmenityReservation>().Property(x => x.ComprobanteUrl).HasMaxLength(500);
+        modelBuilder.Entity<AmenityReservation>().Property(x => x.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<AmenityReservation>().HasIndex(x => new { x.AmenityId, x.StartsAt, x.EndsAt });
+        modelBuilder.Entity<AmenityReservation>().HasIndex(x => new { x.ReservedByUserId, x.CreatedAtUtc });
+        modelBuilder.Entity<AmenityReservation>()
+            .HasOne(x => x.Amenity).WithMany(x => x.Reservations)
+            .HasForeignKey(x => x.AmenityId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AmenityReservation>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AmenityReservation>()
+            .HasOne(x => x.ReservedByUser).WithMany()
+            .HasForeignKey(x => x.ReservedByUserId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AmenityReservation>()
+            .HasOne(x => x.ReviewedByUser).WithMany()
+            .HasForeignKey(x => x.ReviewedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AmenityReservation>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }
