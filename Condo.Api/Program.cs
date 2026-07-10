@@ -26,6 +26,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddCondoInfrastructure(builder.Configuration);
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddHostedService<LateFeeAccrualService>();
+builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

@@ -170,6 +170,27 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         };
 
         dbContext.Buildings.Add(entity);
+
+        // Auto-assign demo plan — every new building starts with a 45-day free trial
+        var demoPlanId = Guid.Parse("A0000000-0000-0000-0000-000000000001");
+        var today = DateTime.UtcNow;
+        dbContext.BuildingPlans.Add(new BuildingPlan
+        {
+            PlanId = demoPlanId,
+            BuildingId = entity.Id,
+            AssignmentScope = PlanAssignmentScope.Building,
+            ScopeEntityId = entity.Id,
+            StartDate = today,
+            EndDate = today.AddDays(45),
+            IsActive = true,
+            IsArchived = false,
+            AssignedById = tenantContext.UserId
+        });
+
+        var demoPlan = await dbContext.Plans.FirstOrDefaultAsync(x => x.Id == demoPlanId, cancellationToken);
+        if (demoPlan is not null && !demoPlan.IsAssigned)
+            demoPlan.IsAssigned = true;
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);

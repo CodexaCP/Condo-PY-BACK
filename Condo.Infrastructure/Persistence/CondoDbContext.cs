@@ -36,6 +36,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Amenity> Amenities => Set<Amenity>();
     public DbSet<AmenityReservation> AmenityReservations => Set<AmenityReservation>();
+    public DbSet<Plan> Plans => Set<Plan>();
+    public DbSet<BuildingPlan> BuildingPlans => Set<BuildingPlan>();
+    public DbSet<BuildingPlanPayment> BuildingPlanPayments => Set<BuildingPlanPayment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -575,6 +578,53 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
 
+        // ── Plan ───────────────────────────────────────────────────────────────
+        modelBuilder.Entity<Plan>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<Plan>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Plan>().Property(x => x.Price).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Plan>().Property(x => x.BillingCycle).HasConversion<string>().HasMaxLength(20);
+        // Only one default plan allowed at a time
+        modelBuilder.Entity<Plan>().HasIndex(x => x.IsDefault).HasFilter("[IsDefault] = 1 AND [IsDeleted] = 0").IsUnique();
+
+        // ── BuildingPlan ───────────────────────────────────────────────────────
+        modelBuilder.Entity<BuildingPlan>().Property(x => x.AssignmentScope).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BuildingPlan>().HasIndex(x => new { x.BuildingId, x.IsArchived })
+            .HasFilter("[IsArchived] = 0 AND [IsDeleted] = 0");
+        modelBuilder.Entity<BuildingPlan>().HasIndex(x => new { x.ScopeEntityId, x.AssignmentScope });
+        modelBuilder.Entity<BuildingPlan>()
+            .HasOne(x => x.Plan).WithMany(x => x.BuildingPlans)
+            .HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlan>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlan>()
+            .HasOne(x => x.AssignedBy).WithMany()
+            .HasForeignKey(x => x.AssignedById).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlan>()
+            .HasOne(x => x.PaidBy).WithMany()
+            .HasForeignKey(x => x.PaidById).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── BuildingPlanPayment ────────────────────────────────────────────────
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.DeclaredAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.AssignmentScope).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.ComprobanteUrl).HasMaxLength(500);
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.Reference).HasMaxLength(50);
+        modelBuilder.Entity<BuildingPlanPayment>().Property(x => x.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<BuildingPlanPayment>().HasIndex(x => new { x.ScopeEntityId, x.Status });
+        modelBuilder.Entity<BuildingPlanPayment>()
+            .HasOne(x => x.BuildingPlan).WithMany(x => x.Payments)
+            .HasForeignKey(x => x.BuildingPlanId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlanPayment>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlanPayment>()
+            .HasOne(x => x.SubmittedBy).WithMany()
+            .HasForeignKey(x => x.SubmittedById).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPlanPayment>()
+            .HasOne(x => x.ReviewedBy).WithMany()
+            .HasForeignKey(x => x.ReviewedById).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
         SeedCatalog(modelBuilder);
     }
 
@@ -602,6 +652,21 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     {
         var superAdminId = Guid.Parse("B781A1AA-6F3D-46D3-8F78-72E7A0000001");
         var createdAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        modelBuilder.Entity<Plan>().HasData(new Plan
+        {
+            Id = Guid.Parse("A0000000-0000-0000-0000-000000000001"),
+            Name = "Plan Gratuito 45 días",
+            Description = "Plan de prueba gratuito incluido al registrar un nuevo edificio en la plataforma.",
+            IsDefault = true,
+            Price = 0m,
+            BillingCycle = BillingCycle.Monthly,
+            GracePeriodDays = 5,
+            IsActive = true,
+            IsAssigned = false,
+            CreatedAtUtc = createdAt,
+            UpdatedAtUtc = createdAt
+        });
 
         modelBuilder.Entity<ApplicationUser>().HasData(new ApplicationUser
         {
