@@ -371,7 +371,7 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         // SuperAdmin users don't have company/building scope
         if (companyId.HasValue)
         {
-            if (request.BuildingIds is null || request.BuildingIds.Count == 0)
+            if (parsedRole == UserRole.BuildingManager && (request.BuildingIds is null || request.BuildingIds.Count == 0))
                 return BadRequest("Debes asignar al menos un edificio.");
 
             if (request.BuildingIds.Any(x => x == Guid.Empty))

@@ -293,44 +293,64 @@ public class AmenitiesController(
 
         if (!await CanUseAmenityAsync(amenity.BuildingId, ct)) return Forbid();
 
-        // Transacción serializable: el chequeo de solape y la inserción son atómicos.
-        // Ante dos usuarios simultáneos, gana el primero que entra; el segundo recibe el conflicto.
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        // CreateExecutionStrategy es obligatorio cuando EnableRetryOnFailure está activo
+        // y se usan transacciones manuales. El query final va FUERA del wrapper para que
+        // EF Core no confunda la transacción ya committed con una aún activa.
+        string? conflictMessage = null;
+        Guid? createdId = null;
 
-        var conflict = await dbContext.AmenityReservations
-            .Where(x => !x.IsDeleted && x.AmenityId == id
-                     && BlockingStatuses.Contains(x.Status)
-                     && x.StartsAt < request.EndsAt && request.StartsAt < x.EndsAt)
-            .OrderBy(x => x.StartsAt)
-            .Select(x => new { x.StartsAt, x.EndsAt })
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable, ct);
+
+            var conflict = await dbContext.AmenityReservations
+                .Where(x => !x.IsDeleted && x.AmenityId == id
+                         && BlockingStatuses.Contains(x.Status)
+                         && x.StartsAt < request.EndsAt && request.StartsAt < x.EndsAt)
+                .OrderBy(x => x.StartsAt)
+                .Select(x => new { x.StartsAt, x.EndsAt })
+                .FirstOrDefaultAsync(ct);
+
+            if (conflict is not null)
+            {
+                await transaction.RollbackAsync(ct);
+                var cs = DateTime.SpecifyKind(conflict.StartsAt, DateTimeKind.Utc).ToLocalTime();
+                var ce = DateTime.SpecifyKind(conflict.EndsAt, DateTimeKind.Utc).ToLocalTime();
+                conflictMessage = $"El amenity ya está reservado el {cs:dd/MM/yyyy} de {cs:HH:mm} a {ce:HH:mm} hs. Podés reservar a partir de las {ce:HH:mm} hs.";
+                return;
+            }
+
+            var reservation = new AmenityReservation
+            {
+                CompanyId = amenity.CompanyId,
+                AmenityId = amenity.Id,
+                BuildingId = amenity.BuildingId,
+                ReservedByUserId = tenantContext.UserId,
+                StartsAt = request.StartsAt,
+                EndsAt = request.EndsAt,
+                Price = amenity.ReservationPrice,
+                Status = AmenityReservationStatus.PendingPayment,
+                Notes = request.Notes?.Trim() ?? string.Empty
+            };
+
+            dbContext.AmenityReservations.Add(reservation);
+            await dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            createdId = reservation.Id;
+        });
+
+        if (conflictMessage is not null)
+            return Conflict(conflictMessage);
+
+        var dto = await dbContext.AmenityReservations
+            .AsNoTracking()
+            .Where(x => x.Id == createdId)
+            .Select(ToReservationDto())
             .FirstOrDefaultAsync(ct);
 
-        if (conflict is not null)
-        {
-            await transaction.RollbackAsync(ct);
-            var cs = DateTime.SpecifyKind(conflict.StartsAt, DateTimeKind.Utc).ToLocalTime();
-            var ce = DateTime.SpecifyKind(conflict.EndsAt, DateTimeKind.Utc).ToLocalTime();
-            return Conflict($"El amenity ya está reservado el {cs:dd/MM/yyyy} de {cs:HH:mm} a {ce:HH:mm} hs. Podés reservar a partir de las {ce:HH:mm} hs.");
-        }
-
-        var reservation = new AmenityReservation
-        {
-            CompanyId = amenity.CompanyId,
-            AmenityId = amenity.Id,
-            BuildingId = amenity.BuildingId,
-            ReservedByUserId = tenantContext.UserId,
-            StartsAt = request.StartsAt,
-            EndsAt = request.EndsAt,
-            Price = amenity.ReservationPrice,
-            Status = AmenityReservationStatus.PendingPayment,
-            Notes = request.Notes.Trim()
-        };
-
-        dbContext.AmenityReservations.Add(reservation);
-        await dbContext.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-
-        var dto = await dbContext.AmenityReservations.AsNoTracking().Where(x => x.Id == reservation.Id).Select(ToReservationDto()).FirstAsync(ct);
         return CreatedAtAction(nameof(GetMyReservations), dto);
     }
 
@@ -354,9 +374,16 @@ public class AmenitiesController(
         if (string.IsNullOrWhiteSpace(request.ComprobanteUrl))
             return BadRequest("El comprobante es obligatorio.");
 
+        var isAdmin = User.IsInRole("SuperAdmin") || User.IsInRole("CompanyAdmin") ||
+                      User.IsInRole("CompanyOperator") || User.IsInRole("BuildingManager");
+
         var reservation = await dbContext.AmenityReservations
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.ReservedByUserId == tenantContext.UserId, ct);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id &&
+                (isAdmin || x.ReservedByUserId == tenantContext.UserId), ct);
         if (reservation is null) return NotFound();
+
+        if (isAdmin && !accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(reservation.BuildingId, ct))
+            return Forbid();
 
         if (reservation.Status is not (AmenityReservationStatus.PendingPayment or AmenityReservationStatus.PendingReview))
             return BadRequest("La reserva ya fue procesada.");
@@ -365,7 +392,7 @@ public class AmenitiesController(
         reservation.Status = AmenityReservationStatus.PendingReview;
         await dbContext.SaveChangesAsync(ct);
 
-        var dto = await dbContext.AmenityReservations.AsNoTracking().Where(x => x.Id == id).Select(ToReservationDto()).FirstAsync(ct);
+        var dto = await dbContext.AmenityReservations.AsNoTracking().Where(x => x.Id == id).Select(ToReservationDto()).FirstOrDefaultAsync(ct);
         return Ok(dto);
     }
 
