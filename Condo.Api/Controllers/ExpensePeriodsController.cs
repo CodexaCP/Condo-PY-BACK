@@ -600,6 +600,7 @@ public class ExpensePeriodsController(
         settlement.PublishedByUserId = tenantContext.UserId;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyBuildingUsersAsync(period, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -1533,5 +1534,55 @@ public class ExpensePeriodsController(
             .AsNoTracking()
             .AnyAsync(x => !x.IsDeleted && x.EndDate == null && x.Unit != null && x.Unit.BuildingId == buildingId
                 && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == email, cancellationToken);
+    }
+
+    private async Task NotifyBuildingUsersAsync(ExpensePeriod period, CancellationToken ct)
+    {
+        var recipientIds = await GetBuildingUserIdsAsync(period.BuildingId, ct);
+        if (recipientIds.Count == 0) return;
+
+        foreach (var rid in recipientIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = period.CompanyId,
+                RecipientId = rid,
+                Type = NotificationType.ExpensePeriodPublished,
+                Title = "Nuevo periodo de expensas publicado",
+                Body = period.Name,
+                EntityType = "ExpensePeriod",
+                EntityId = period.Id
+            });
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)
+    {
+        var ownerIds = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+            .Select(x => x.OwnerId)
+            .ToListAsync(ct);
+
+        var residentEmails = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
+                     && x.Resident != null && !x.Resident.IsDeleted)
+            .Select(x => x.Resident!.Email)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var residentUserIds = residentEmails.Count > 0
+            ? await dbContext.ApplicationUsers
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
+                .Select(x => x.Id)
+                .ToListAsync(ct)
+            : [];
+
+        return ownerIds.Concat(residentUserIds).Distinct().ToList();
     }
 }
