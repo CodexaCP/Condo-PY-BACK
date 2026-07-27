@@ -155,6 +155,8 @@ public sealed class SettlementPdfDocument(
         ["Other"] = "Otro"
     };
 
+    private const string ColorCatHeader = "#e8f4f8";
+
     private void ComposeCategoryTable(IContainer container)
     {
         var totals = summary.CategoryTotals;
@@ -172,36 +174,47 @@ public sealed class SettlementPdfDocument(
             {
                 table.ColumnsDefinition(c =>
                 {
-                    c.RelativeColumn(4);
-                    c.ConstantColumn(70);
-                    c.ConstantColumn(100);
+                    c.RelativeColumn();
+                    c.ConstantColumn(110);
                 });
 
                 table.Header(header =>
                 {
-                    header.Cell().Background(ColorPrimary).Padding(4).Text("Categoria").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(4).AlignRight().Text("Gastos").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(4).Text("Concepto").FontColor(ColorWhite).Bold();
                     header.Cell().Background(ColorPrimary).Padding(4).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
                 });
 
-                var isOdd = true;
-                foreach (var row in totals)
+                var itemAlt = true;
+                foreach (var cat in totals)
                 {
-                    var bg = isOdd ? ColorWhite : ColorRowAlt;
-                    isOdd = !isOdd;
+                    var catLabel = CategoryLabels.GetValueOrDefault(cat.Category, cat.Category);
 
-                    table.Cell().Background(bg).Padding(4)
-                        .Text(CategoryLabels.GetValueOrDefault(row.Category, row.Category)).FontColor(ColorPrimary);
-                    table.Cell().Background(bg).Padding(4).AlignRight()
-                        .Text(row.ExpenseCount.ToString()).FontColor(ColorGray);
-                    table.Cell().Background(bg).Padding(4).AlignRight()
-                        .Text(FormatCurrency(row.Amount)).FontColor(ColorPrimary);
+                    // Fila cabecera de categoría
+                    table.Cell().Background(ColorCatHeader).Padding(4)
+                        .Text(catLabel).Bold().FontColor(ColorPrimary);
+                    table.Cell().Background(ColorCatHeader).Padding(4).AlignRight()
+                        .Text(FormatCurrency(cat.Amount)).Bold().FontColor(ColorPrimary);
+
+                    // Sub-filas: un gasto por fila
+                    foreach (var item in cat.Items)
+                    {
+                        var bg = itemAlt ? ColorWhite : ColorRowAlt;
+                        itemAlt = !itemAlt;
+
+                        table.Cell().Background(bg).PaddingLeft(14).PaddingVertical(3)
+                            .Text(t =>
+                            {
+                                t.Span("· ").FontColor(ColorAccent);
+                                t.Span(item.Description).FontColor(ColorGray);
+                            });
+                        table.Cell().Background(bg).PaddingRight(4).PaddingVertical(3).AlignRight()
+                            .Text(FormatCurrency(item.Amount)).FontColor(ColorGray);
+                    }
                 }
 
+                // Fila total
                 table.Cell().Background(ColorAccent).Padding(4)
                     .Text("Total gastos comunes").FontColor(ColorWhite).Bold();
-                table.Cell().Background(ColorAccent).Padding(4).AlignRight()
-                    .Text(expenseCount.ToString()).FontColor(ColorWhite).Bold();
                 table.Cell().Background(ColorAccent).Padding(4).AlignRight()
                     .Text(FormatCurrency(total)).FontColor(ColorWhite).Bold();
             });

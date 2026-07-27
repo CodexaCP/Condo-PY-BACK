@@ -35,6 +35,13 @@ public class SettlementCategoryTotalDto
     public string Category { get; set; } = string.Empty;
     public int ExpenseCount { get; set; }
     public decimal Amount { get; set; }
+    public List<SettlementCategoryItemDto> Items { get; set; } = new();
+}
+
+public class SettlementCategoryItemDto
+{
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
 
 public class ExpenseSettlementChargePreviewDto

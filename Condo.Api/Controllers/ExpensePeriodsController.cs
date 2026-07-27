@@ -1104,19 +1104,22 @@ public class ExpensePeriodsController(
                      && x.ExpensePeriodId == expensePeriodId
                      && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
                       || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
-            .Select(x => new { x.Category, x.Amount })
+            .Select(x => new { x.Category, x.Amount, x.Description })
             .ToListAsync(cancellationToken);
 
-        return BuildCategoryTotals(rows.Select(x => (x.Category, x.Amount)));
+        return BuildCategoryTotals(rows.Select(x => (x.Category, x.Amount, x.Description)));
     }
 
-    private static List<SettlementCategoryTotalDto> BuildCategoryTotals(IEnumerable<(BuildingExpenseCategory Category, decimal Amount)> rows) =>
+    private static List<SettlementCategoryTotalDto> BuildCategoryTotals(IEnumerable<(BuildingExpenseCategory Category, decimal Amount, string Description)> rows) =>
         rows.GroupBy(x => x.Category)
             .Select(g => new SettlementCategoryTotalDto
             {
                 Category = g.Key.ToString(),
                 ExpenseCount = g.Count(),
-                Amount = g.Sum(x => x.Amount)
+                Amount = g.Sum(x => x.Amount),
+                Items = g.Select(x => new SettlementCategoryItemDto { Description = x.Description, Amount = x.Amount })
+                         .OrderByDescending(x => x.Amount)
+                         .ToList()
             })
             .OrderByDescending(x => x.Amount)
             .ToList();
@@ -1170,7 +1173,7 @@ public class ExpensePeriodsController(
             CategoryTotals = BuildCategoryTotals(expenses
                 .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient
                                                 or BuildingExpenseDistributionType.FixedPerUnit)
-                .Select(x => (x.Category, x.Amount)))
+                .Select(x => (x.Category, x.Amount, x.Description)))
         };
     }
 
