@@ -1,6 +1,7 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -108,6 +109,9 @@ public class AnnouncementsController(
         dbContext.Announcements.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        if (entity.IsActive)
+            await NotifyBuildingUsersAsync(entity.BuildingId, entity.Id, entity.Title, cancellationToken);
+
         var dto = await LoadDtoAsync(entity.Id, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, dto);
     }
@@ -129,6 +133,8 @@ public class AnnouncementsController(
         var validationError = Validate(request.Title, request.Body, request.Category);
         if (validationError is not null) return BadRequest(validationError);
 
+        var wasInactive = !entity.IsActive;
+
         entity.Title = request.Title.Trim();
         entity.Body = request.Body.Trim();
         entity.Category = request.Category.Trim();
@@ -137,6 +143,9 @@ public class AnnouncementsController(
         entity.IsActive = request.IsActive;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (request.IsActive && wasInactive)
+            await NotifyBuildingUsersAsync(entity.BuildingId, entity.Id, entity.Title, cancellationToken);
 
         var dto = await LoadDtoAsync(entity.Id, cancellationToken);
         return Ok(dto);
@@ -202,6 +211,9 @@ public class AnnouncementsController(
         dbContext.Announcements.AddRange(entities);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        foreach (var e in entities.Where(x => x.IsActive))
+            await NotifyBuildingUsersAsync(e.BuildingId, e.Id, e.Title, cancellationToken);
+
         var ids = entities.Select(x => x.Id).ToHashSet();
         var dtos = await dbContext.Announcements
             .AsNoTracking()
@@ -225,6 +237,64 @@ public class AnnouncementsController(
             .ToListAsync(cancellationToken);
 
         return Ok(dtos);
+    }
+
+    private async Task NotifyBuildingUsersAsync(Guid buildingId, Guid announcementId, string title, CancellationToken ct)
+    {
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == buildingId, ct);
+
+        var companyId = building?.CompanyId ?? building?.Condominium?.CompanyId;
+        if (companyId is null) return;
+
+        var recipientIds = await GetBuildingUserIdsAsync(buildingId, ct);
+        if (recipientIds.Count == 0) return;
+
+        foreach (var rid in recipientIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = companyId.Value,
+                RecipientId = rid,
+                Type = NotificationType.AnnouncementPublished,
+                Title = "Nuevo comunicado",
+                Body = title,
+                EntityType = "Announcement",
+                EntityId = announcementId
+            });
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)
+    {
+        var ownerIds = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+            .Select(x => x.OwnerId)
+            .ToListAsync(ct);
+
+        var residentEmails = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
+                     && x.Resident != null && !x.Resident.IsDeleted)
+            .Select(x => x.Resident!.Email)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var residentUserIds = residentEmails.Count > 0
+            ? await dbContext.ApplicationUsers
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
+                .Select(x => x.Id)
+                .ToListAsync(ct)
+            : [];
+
+        return ownerIds.Concat(residentUserIds).Distinct().ToList();
     }
 
     private Announcement BuildEntity(Guid buildingId, AnnouncementUpsertRequest r) =>

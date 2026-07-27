@@ -345,6 +345,41 @@ public class AmenitiesController(
         if (conflictMessage is not null)
             return Conflict(conflictMessage);
 
+        if (createdId.HasValue)
+        {
+            var managerIds = await dbContext.UserBuildingAccesses
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == amenity.BuildingId)
+                .Select(x => x.ApplicationUserId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            if (managerIds.Count > 0)
+            {
+                var s = DateTime.SpecifyKind(request.StartsAt, DateTimeKind.Utc).ToLocalTime();
+                var e = DateTime.SpecifyKind(request.EndsAt, DateTimeKind.Utc).ToLocalTime();
+                var rangeText = s.Date == e.Date
+                    ? $"el {s:dd/MM/yyyy} ({s:HH:mm}–{e:HH:mm} hs)"
+                    : $"del {s:dd/MM/yyyy HH:mm} al {e:dd/MM/yyyy HH:mm} hs";
+
+                foreach (var managerId in managerIds)
+                {
+                    dbContext.Notifications.Add(new Notification
+                    {
+                        CompanyId = amenity.CompanyId,
+                        RecipientId = managerId,
+                        Type = NotificationType.AmenityReservationCreated,
+                        Title = "Nueva solicitud de reserva",
+                        Body = $"Nueva reserva de {amenity.Name} {rangeText}.",
+                        EntityType = "AmenityReservation",
+                        EntityId = createdId.Value
+                    });
+                }
+
+                await dbContext.SaveChangesAsync(ct);
+            }
+        }
+
         var dto = await dbContext.AmenityReservations
             .AsNoTracking()
             .Where(x => x.Id == createdId)

@@ -1,6 +1,7 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -184,6 +185,28 @@ public class VotesController(
         vote.Status = "Open";
         vote.OpenedAtUtc = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var companyId = await GetBuildingCompanyIdAsync(vote.BuildingId, cancellationToken);
+        if (companyId.HasValue)
+        {
+            var recipientIds = await GetBuildingUserIdsAsync(vote.BuildingId, cancellationToken);
+            foreach (var rid in recipientIds)
+            {
+                dbContext.Notifications.Add(new Notification
+                {
+                    CompanyId = companyId.Value,
+                    RecipientId = rid,
+                    Type = NotificationType.VoteOpened,
+                    Title = "Nueva votación abierta",
+                    Body = vote.Title,
+                    EntityType = "Vote",
+                    EntityId = vote.Id
+                });
+            }
+            if (recipientIds.Count > 0)
+                await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         return Ok(await LoadDetailDto(vote.Id, cancellationToken));
     }
 
@@ -317,6 +340,46 @@ public class VotesController(
             QuorumReached = quorumReached,
             Options = options, Units = units
         };
+    }
+
+    private async Task<Guid?> GetBuildingCompanyIdAsync(Guid buildingId, CancellationToken ct)
+    {
+        var row = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .Where(x => !x.IsDeleted && x.Id == buildingId)
+            .Select(x => new { x.CompanyId, CondCompanyId = x.Condominium != null ? x.Condominium.CompanyId : null })
+            .FirstOrDefaultAsync(ct);
+
+        return row?.CompanyId ?? row?.CondCompanyId;
+    }
+
+    private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)
+    {
+        var ownerIds = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+            .Select(x => x.OwnerId)
+            .ToListAsync(ct);
+
+        var residentEmails = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
+                     && x.Resident != null && !x.Resident.IsDeleted)
+            .Select(x => x.Resident!.Email)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var residentUserIds = residentEmails.Count > 0
+            ? await dbContext.ApplicationUsers
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
+                .Select(x => x.Id)
+                .ToListAsync(ct)
+            : [];
+
+        return ownerIds.Concat(residentUserIds).Distinct().ToList();
     }
 
     private static string? Validate(VoteUpsertRequest r)

@@ -1,6 +1,7 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +85,18 @@ public class ClaimsController(
             claim.ResolvedAtUtc = null;
             claim.ResolvedByUserId = null;
         }
+
+        var statusLabel = claim.Status == "EnProceso" ? "En proceso" : claim.Status;
+        dbContext.Notifications.Add(new Notification
+        {
+            CompanyId = claim.CompanyId,
+            RecipientId = claim.CreatedByUserId,
+            Type = NotificationType.ClaimStatusUpdated,
+            Title = "Estado de reclamo actualizado",
+            Body = $"Tu reclamo fue marcado como \"{statusLabel}\".",
+            EntityType = "Claim",
+            EntityId = claim.Id
+        });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

@@ -105,6 +105,29 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
         };
 
         dbContext.Claims.Add(claim);
+
+        var managerIds = await dbContext.UserBuildingAccesses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == claim.BuildingId)
+            .Select(x => x.ApplicationUserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var shortDesc = description.Length > 80 ? description[..80] + "…" : description;
+        foreach (var managerId in managerIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = unitContext.CompanyId,
+                RecipientId = managerId,
+                Type = NotificationType.ClaimCreated,
+                Title = "Nuevo reclamo",
+                Body = $"{user.FullName} — {request.Category}: {shortDesc}",
+                EntityType = "Claim",
+                EntityId = claim.Id
+            });
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var dto = await dbContext.Claims

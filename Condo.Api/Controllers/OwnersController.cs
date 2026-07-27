@@ -96,9 +96,12 @@ public class OwnersController(
             Username         = normalizedUsername,
             Email            = normalizedEmail,
             PasswordHash     = passwordHasher.Hash(string.IsNullOrWhiteSpace(request.Password) ? "Condo*Temp1" : request.Password),
+            DocumentType     = NormalizeDocumentType(request.DocumentType),
+            DocumentNumber   = request.DocumentNumber?.Trim() ?? null,
             PhonePrefix      = request.PhonePrefix?.Trim() ?? null,
             Phone            = request.Phone?.Trim() ?? null,
             Address          = request.Address?.Trim() ?? null,
+            IsResident       = request.IsResident,
             Role             = UserRole.Owner,
             IsActive         = request.IsActive,
             MustChangePassword = true
@@ -149,17 +152,20 @@ public class OwnersController(
         var firstName = request.FirstName.Trim();
         var lastName  = request.LastName.Trim();
 
-        owner.FirstName  = firstName;
-        owner.LastName   = lastName;
-        owner.FullName   = string.IsNullOrWhiteSpace(request.FullName)
-                             ? $"{firstName} {lastName}".Trim()
-                             : request.FullName.Trim();
-        owner.Username   = normalizedUsername;
-        owner.Email      = normalizedEmail;
-        owner.PhonePrefix = request.PhonePrefix?.Trim() ?? null;
-        owner.Phone      = request.Phone?.Trim() ?? null;
-        owner.Address    = request.Address?.Trim() ?? null;
-        owner.IsActive   = request.IsActive;
+        owner.FirstName      = firstName;
+        owner.LastName       = lastName;
+        owner.FullName       = string.IsNullOrWhiteSpace(request.FullName)
+                                 ? $"{firstName} {lastName}".Trim()
+                                 : request.FullName.Trim();
+        owner.Username       = normalizedUsername;
+        owner.Email          = normalizedEmail;
+        owner.DocumentType   = NormalizeDocumentType(request.DocumentType);
+        owner.DocumentNumber = request.DocumentNumber?.Trim() ?? null;
+        owner.PhonePrefix    = request.PhonePrefix?.Trim() ?? null;
+        owner.Phone          = request.Phone?.Trim() ?? null;
+        owner.Address        = request.Address?.Trim() ?? null;
+        owner.IsResident     = request.IsResident;
+        owner.IsActive       = request.IsActive;
 
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
@@ -258,18 +264,24 @@ public class OwnersController(
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is SqlException sql && (sql.Number == 2601 || sql.Number == 2627);
 
+    private static string? NormalizeDocumentType(string? raw) =>
+        raw?.Trim() is { Length: > 0 } t ? t : null;
+
     private static OwnerDto ToDto(ApplicationUser u) => new()
     {
-        Id          = u.Id,
-        CompanyId   = u.CompanyId,
-        FirstName   = u.FirstName,
-        LastName    = u.LastName,
-        FullName    = u.FullName,
-        Username    = u.Username,
-        Email       = u.Email,
-        PhonePrefix = u.PhonePrefix,
-        Phone       = u.Phone,
-        Address     = u.Address,
-        IsActive    = u.IsActive
+        Id             = u.Id,
+        CompanyId      = u.CompanyId,
+        FirstName      = u.FirstName,
+        LastName       = u.LastName,
+        FullName       = u.FullName,
+        Username       = u.Username,
+        Email          = u.Email,
+        DocumentType   = u.DocumentType,
+        DocumentNumber = u.DocumentNumber,
+        PhonePrefix    = u.PhonePrefix,
+        Phone          = u.Phone,
+        Address        = u.Address,
+        IsResident     = u.IsResident,
+        IsActive       = u.IsActive
     };
 }

@@ -91,7 +91,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpPost]
     public async Task<ActionResult<ResidentDto>> Create([FromBody] ResidentUpsertRequest request, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin)
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
         {
             return Forbid();
         }
@@ -127,6 +127,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         {
             CompanyId = companyId.Value,
             FullName = request.FullName.Trim(),
+            DocumentType = string.IsNullOrWhiteSpace(request.DocumentType) ? null : request.DocumentType.Trim(),
             DocumentNumber = normalizedDocumentNumber,
             Email = request.Email.Trim().ToLowerInvariant(),
             PhoneNumber = request.PhoneNumber.Trim(),
@@ -150,7 +151,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<ResidentDto>> Update(Guid id, [FromBody] ResidentUpsertRequest request, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin)
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
         {
             return Forbid();
         }
@@ -183,6 +184,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         }
 
         entity.FullName = request.FullName.Trim();
+        entity.DocumentType = string.IsNullOrWhiteSpace(request.DocumentType) ? null : request.DocumentType.Trim();
         entity.DocumentNumber = normalizedDocumentNumber;
         entity.Email = request.Email.Trim().ToLowerInvariant();
         entity.PhoneNumber = request.PhoneNumber.Trim();
@@ -204,7 +206,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin)
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
         {
             return Forbid();
         }
@@ -296,6 +298,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         {
             Id = entity.Id,
             FullName = entity.FullName,
+            DocumentType = entity.DocumentType,
             DocumentNumber = entity.DocumentNumber,
             Email = entity.Email,
             PhoneNumber = entity.PhoneNumber,
