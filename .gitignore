@@ -12,6 +12,9 @@ appsettings.Local.json
 *.pfx
 *.p12
 
+## Publish output
+publish/
+
 ## JetBrains
 .idea/
 

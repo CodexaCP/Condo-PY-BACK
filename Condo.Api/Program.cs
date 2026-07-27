@@ -69,7 +69,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("frontend");
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
