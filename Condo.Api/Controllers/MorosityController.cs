@@ -107,6 +107,18 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
             })
             .ToListAsync(cancellationToken);
 
+        var ownerAssignments = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && unitIds.Contains(x.UnitId))
+            .Select(x => new
+            {
+                x.UnitId,
+                x.IsPrimary,
+                x.StartDate,
+                OwnerName = x.Owner != null ? x.Owner.FullName : string.Empty
+            })
+            .ToListAsync(cancellationToken);
+
         var allItems = chargeSnapshots
             .GroupBy(x => new
             {
@@ -135,6 +147,12 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                     .ThenByDescending(x => x.StartDate)
                     .FirstOrDefault();
 
+                var unitOwner = ownerAssignments
+                    .Where(x => x.UnitId == group.Key.UnitId)
+                    .OrderByDescending(x => x.IsPrimary)
+                    .ThenByDescending(x => x.StartDate)
+                    .FirstOrDefault();
+
                 return new MorosityItemDto
                 {
                     UnitId = group.Key.UnitId,
@@ -157,6 +175,7 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                     IsOccupied = assignedResident is not null,
                     ResponsibleType = assignedResident is not null ? "ResidentAssigned" : "OwnerAdministration",
                     ResponsibleName = assignedResident?.ResidentName ?? "Propietario / administracion",
+                    OwnerName = unitOwner?.OwnerName ?? string.Empty,
                     AgingBucket = ComputeAgingBucket(today.DayNumber - group.Key.DueDate.DayNumber)
                 };
             })

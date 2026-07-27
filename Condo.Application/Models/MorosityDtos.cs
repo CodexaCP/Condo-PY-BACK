@@ -50,6 +50,7 @@ public class MorosityItemDto
     public bool IsOccupied { get; set; }
     public string ResponsibleType { get; set; } = string.Empty;
     public string ResponsibleName { get; set; } = string.Empty;
+    public string OwnerName { get; set; } = string.Empty;
     public string AgingBucket { get; set; } = string.Empty;
 }
 
