@@ -73,8 +73,12 @@ public class ExpenseReceiptDto
     public int Year { get; set; }
     public int Month { get; set; }
     public DateOnly DueDate { get; set; }
-    public string HolderName { get; set; } = string.Empty;
-    public string HolderDocumentNumber { get; set; } = string.Empty;
+    public string OwnerName { get; set; } = string.Empty;
+    public string? OwnerDocumentType { get; set; }
+    public string? OwnerDocumentNumber { get; set; }
+    public string ResidentName { get; set; } = string.Empty;
+    public string? ResidentDocumentType { get; set; }
+    public string? ResidentDocumentNumber { get; set; }
     public decimal UnitCoefficient { get; set; }
     public IReadOnlyList<ExpenseReceiptChargeDto> Charges { get; set; } = [];
     public IReadOnlyList<AccountStatementPaymentDto> Payments { get; set; } = [];

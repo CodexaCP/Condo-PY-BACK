@@ -78,21 +78,39 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
 
     private void ComposeUnitInfo(IContainer container)
     {
-        container.Table(table =>
+        container.Column(col =>
         {
-            table.ColumnsDefinition(c =>
+            // ── Propietario ──────────────────────────────────────
+            col.Item().Table(t =>
             {
-                c.RelativeColumn();
-                c.RelativeColumn();
-                c.RelativeColumn();
+                t.ColumnsDefinition(c => { c.RelativeColumn(2); c.RelativeColumn(); c.RelativeColumn(); });
+                t.Cell().ColumnSpan(3).Background(ColorPrimary).PaddingHorizontal(6).PaddingVertical(3)
+                    .Text("Propietario").FontColor(ColorWhite).Bold().FontSize(8);
+                AddInfoCell(t, "Nombre", receipt.OwnerName);
+                AddInfoCell(t, "Tipo doc.", receipt.OwnerDocumentType ?? "—");
+                AddInfoCell(t, "Documento", receipt.OwnerDocumentNumber ?? "—");
             });
 
-            AddInfoCell(table, "Titular", receipt.HolderName);
-            AddInfoCell(table, "Documento", receipt.HolderDocumentNumber ?? "—");
-            AddInfoCell(table, "Unidad", receipt.UnitCode);
-            AddInfoCell(table, "Coeficiente", receipt.UnitCoefficient.ToString("F6"));
-            AddInfoCell(table, "Vencimiento", receipt.DueDate.ToString("dd/MM/yyyy"));
-            AddInfoCell(table, "Periodo", $"{receipt.Month:D2}/{receipt.Year}");
+            // ── Residente ─────────────────────────────────────────
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(c => { c.RelativeColumn(2); c.RelativeColumn(); c.RelativeColumn(); });
+                t.Cell().ColumnSpan(3).Background(ColorAccent).PaddingHorizontal(6).PaddingVertical(3)
+                    .Text("Residente").FontColor(ColorWhite).Bold().FontSize(8);
+                AddInfoCell(t, "Nombre", receipt.ResidentName);
+                AddInfoCell(t, "Tipo doc.", receipt.ResidentDocumentType ?? "—");
+                AddInfoCell(t, "Documento", receipt.ResidentDocumentNumber ?? "—");
+            });
+
+            // ── Datos de la unidad ────────────────────────────────
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(c => { c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); });
+                AddInfoCell(t, "Unidad", receipt.UnitCode);
+                AddInfoCell(t, "Coeficiente", receipt.UnitCoefficient.ToString("F6"));
+                AddInfoCell(t, "Vencimiento", receipt.DueDate.ToString("dd/MM/yyyy"));
+                AddInfoCell(t, "Periodo", $"{receipt.Month:D2}/{receipt.Year}");
+            });
         });
     }
 

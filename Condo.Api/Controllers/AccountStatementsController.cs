@@ -274,21 +274,8 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             return NotFound();
         }
 
-        var holder = await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x =>
-                !x.IsDeleted &&
-                x.UnitId == unitId &&
-                (x.EndDate == null || x.EndDate >= period.EndDate) &&
-                x.StartDate <= period.EndDate)
-            .OrderByDescending(x => x.IsPrimary)
-            .ThenByDescending(x => x.StartDate)
-            .Select(x => new
-            {
-                x.Resident!.FullName,
-                x.Resident!.DocumentNumber
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+        var (ownerName, ownerDocType, ownerDocNum, residentName, residentDocType, residentDocNum) =
+            await GetUnitPersonInfoAsync(unitId, period.EndDate, cancellationToken);
 
         var charges = await dbContext.ExpenseCharges
             .AsNoTracking()
@@ -337,8 +324,12 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             Year = period.Year,
             Month = period.Month,
             DueDate = period.DueDate,
-            HolderName = holder?.FullName ?? "Titular no asignado",
-            HolderDocumentNumber = holder?.DocumentNumber ?? string.Empty,
+            OwnerName = ownerName,
+            OwnerDocumentType = ownerDocType,
+            OwnerDocumentNumber = ownerDocNum,
+            ResidentName = residentName,
+            ResidentDocumentType = residentDocType,
+            ResidentDocumentNumber = residentDocNum,
             UnitCoefficient = unit.Coefficient,
             Charges = charges,
             Payments = receiptPayments,
@@ -370,17 +361,8 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         if (period is null) return NotFound();
 
-        var holder = await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x =>
-                !x.IsDeleted &&
-                x.UnitId == unitId &&
-                (x.EndDate == null || x.EndDate >= period.EndDate) &&
-                x.StartDate <= period.EndDate)
-            .OrderByDescending(x => x.IsPrimary)
-            .ThenByDescending(x => x.StartDate)
-            .Select(x => new { x.Resident!.FullName, x.Resident!.DocumentNumber })
-            .FirstOrDefaultAsync(cancellationToken);
+        var (ownerName, ownerDocType, ownerDocNum, residentName, residentDocType, residentDocNum) =
+            await GetUnitPersonInfoAsync(unitId, period.EndDate, cancellationToken);
 
         var charges = await dbContext.ExpenseCharges
             .AsNoTracking()
@@ -428,8 +410,12 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             Year = period.Year,
             Month = period.Month,
             DueDate = period.DueDate,
-            HolderName = holder?.FullName ?? "Titular no asignado",
-            HolderDocumentNumber = holder?.DocumentNumber ?? string.Empty,
+            OwnerName = ownerName,
+            OwnerDocumentType = ownerDocType,
+            OwnerDocumentNumber = ownerDocNum,
+            ResidentName = residentName,
+            ResidentDocumentType = residentDocType,
+            ResidentDocumentNumber = residentDocNum,
             UnitCoefficient = unit.Coefficient,
             Charges = charges,
             Payments = payments,
@@ -492,5 +478,48 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                 IsReversal = x.IsReversal
             })
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task<(string OwnerName, string? OwnerDocType, string? OwnerDocNumber,
+                         string ResidentName, string? ResidentDocType, string? ResidentDocNumber)>
+        GetUnitPersonInfoAsync(Guid unitId, DateOnly periodEndDate, CancellationToken ct)
+    {
+        var owner = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId)
+            .OrderByDescending(x => x.IsPrimary)
+            .Select(x => new { x.Owner!.FullName, x.Owner!.DocumentType, x.Owner!.DocumentNumber, x.Owner!.IsResident })
+            .FirstOrDefaultAsync(ct);
+
+        string? residentName, residentDocType, residentDocNumber;
+        if (owner?.IsResident == true)
+        {
+            residentName    = owner.FullName;
+            residentDocType = owner.DocumentType;
+            residentDocNumber = owner.DocumentNumber;
+        }
+        else
+        {
+            var res = await dbContext.UnitResidents
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.UnitId == unitId
+                         && (x.EndDate == null || x.EndDate >= periodEndDate)
+                         && x.StartDate <= periodEndDate)
+                .OrderByDescending(x => x.IsPrimary).ThenByDescending(x => x.StartDate)
+                .Select(x => new { x.Resident!.FullName, x.Resident!.DocumentType, x.Resident!.DocumentNumber })
+                .FirstOrDefaultAsync(ct);
+            residentName      = res?.FullName;
+            residentDocType   = res?.DocumentType;
+            residentDocNumber = res?.DocumentNumber;
+        }
+
+        return (
+            owner?.FullName ?? "—",
+            owner?.DocumentType,
+            owner?.DocumentNumber,
+            residentName ?? "—",
+            residentDocType,
+            residentDocNumber
+        );
     }
 }
