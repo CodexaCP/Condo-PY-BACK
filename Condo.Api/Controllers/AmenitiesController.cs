@@ -17,6 +17,9 @@ public class AmenitiesController(
     IAccessScopeService accessScope,
     ITenantContext tenantContext) : ControllerBase
 {
+    private static readonly TimeZoneInfo _pyt =
+        TimeZoneInfo.FindSystemTimeZoneById("America/Asuncion");
+
     private static readonly AmenityReservationStatus[] BlockingStatuses =
     [
         AmenityReservationStatus.PendingPayment,
@@ -317,8 +320,8 @@ public class AmenitiesController(
             if (conflict is not null)
             {
                 await transaction.RollbackAsync(ct);
-                var cs = DateTime.SpecifyKind(conflict.StartsAt, DateTimeKind.Utc).ToLocalTime();
-                var ce = DateTime.SpecifyKind(conflict.EndsAt, DateTimeKind.Utc).ToLocalTime();
+                var cs = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(conflict.StartsAt, DateTimeKind.Utc), _pyt);
+                var ce = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(conflict.EndsAt, DateTimeKind.Utc), _pyt);
                 conflictMessage = $"El amenity ya está reservado el {cs:dd/MM/yyyy} de {cs:HH:mm} a {ce:HH:mm} hs. Podés reservar a partir de las {ce:HH:mm} hs.";
                 return;
             }
@@ -356,8 +359,8 @@ public class AmenitiesController(
 
             if (managerIds.Count > 0)
             {
-                var s = DateTime.SpecifyKind(request.StartsAt, DateTimeKind.Utc).ToLocalTime();
-                var e = DateTime.SpecifyKind(request.EndsAt, DateTimeKind.Utc).ToLocalTime();
+                var s = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(request.StartsAt, DateTimeKind.Utc), _pyt);
+                var e = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(request.EndsAt, DateTimeKind.Utc), _pyt);
                 var rangeText = s.Date == e.Date
                     ? $"el {s:dd/MM/yyyy} ({s:HH:mm}–{e:HH:mm} hs)"
                     : $"del {s:dd/MM/yyyy HH:mm} al {e:dd/MM/yyyy HH:mm} hs";
