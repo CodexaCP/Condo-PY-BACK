@@ -170,7 +170,8 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
             Address            = request.Address?.Trim() ?? null,
             Role               = role,
             IsActive           = request.IsActive,
-            MustChangePassword = true
+            MustChangePassword = true,
+            SignatureUrl       = string.IsNullOrWhiteSpace(request.SignatureUrl) ? null : request.SignatureUrl.Trim()
         };
 
         dbContext.ApplicationUsers.Add(user);
@@ -273,6 +274,7 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         user.Address       = request.Address?.Trim() ?? null;
         user.Role          = role;
         user.IsActive      = request.IsActive;
+        user.SignatureUrl  = string.IsNullOrWhiteSpace(request.SignatureUrl) ? null : request.SignatureUrl.Trim();
 
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
@@ -367,6 +369,15 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
 
         if (!Enum.TryParse<UserRole>(request.Role, true, out var parsedRole))
             return BadRequest("El rol indicado no es válido.");
+
+        if (!string.IsNullOrWhiteSpace(request.SignatureUrl))
+        {
+            if (request.SignatureUrl.Length > 500)
+                return BadRequest("La URL de la firma no puede superar los 500 caracteres.");
+
+            if (parsedRole != UserRole.BuildingManager && parsedRole != UserRole.CompanyAdmin)
+                return BadRequest("Solo los encargados de edificio y administradores de empresa pueden tener una firma.");
+        }
 
         // SuperAdmin users don't have company/building scope
         if (companyId.HasValue)
@@ -517,6 +528,7 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         BuildingIds   = u.BuildingAccesses
             .Where(x => !x.IsDeleted && x.IsActive)
             .Select(x => x.BuildingId)
-            .ToList()
+            .ToList(),
+        SignatureUrl  = u.SignatureUrl
     };
 }

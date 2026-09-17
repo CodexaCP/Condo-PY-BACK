@@ -16,6 +16,7 @@ public class UserUpsertRequest
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public IReadOnlyList<Guid> BuildingIds { get; set; } = Array.Empty<Guid>();
+    public string? SignatureUrl { get; set; }
 }
 
 public class BuildingCapacityItem
@@ -46,4 +47,5 @@ public class UserDto
     public string Role { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public IReadOnlyList<Guid> BuildingIds { get; set; } = Array.Empty<Guid>();
+    public string? SignatureUrl { get; set; }
 }

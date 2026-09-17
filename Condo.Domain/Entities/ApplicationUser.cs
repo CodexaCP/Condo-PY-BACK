@@ -25,6 +25,7 @@ public class ApplicationUser : BaseEntity
 
     public bool IsResident { get; set; } = false;
     public UserRole Role { get; set; } = UserRole.Resident;
+    public string? SignatureUrl { get; set; }
     public bool IsActive { get; set; } = true;
     public bool MustChangePassword { get; set; } = true;
     public DateTime? LastLoginAtUtc { get; set; }

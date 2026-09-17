@@ -79,6 +79,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<ApplicationUser>().Property(x => x.PhonePrefix).HasMaxLength(10);
         modelBuilder.Entity<ApplicationUser>().Property(x => x.Phone).HasMaxLength(30);
         modelBuilder.Entity<ApplicationUser>().Property(x => x.Address).HasMaxLength(300);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.SignatureUrl).HasMaxLength(500);
         modelBuilder.Entity<ApplicationUser>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Users)
