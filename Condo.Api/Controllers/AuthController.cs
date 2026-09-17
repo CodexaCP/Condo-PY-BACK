@@ -29,8 +29,19 @@ public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtToken
         Domain.Entities.ApplicationUser? user;
         if (isEmail)
         {
-            user = await baseQuery
-                .FirstOrDefaultAsync(x => !x.IsDeleted && x.IsActive && x.Email == normalizedIdentifier, cancellationToken);
+            // El email es único solo dentro de cada empresa (no globalmente) — si dos empresas
+            // distintas dieron de alta el mismo correo, no se puede autenticar silenciosamente
+            // contra el primero que devuelva la consulta, porque eso mezclaría cuentas de
+            // empresas distintas. Se aplica la misma detección de ambigüedad que ya existe
+            // para el nombre de usuario.
+            var emailMatches = await baseQuery
+                .Where(x => !x.IsDeleted && x.IsActive && x.Email == normalizedIdentifier)
+                .ToListAsync(cancellationToken);
+
+            if (emailMatches.Count > 1)
+                return Unauthorized(new { error = "duplicate_email", message = "Hay más de un usuario con ese correo. Por favor ingresá con tu nombre de usuario, o contactá a tu administrador." });
+
+            user = emailMatches.SingleOrDefault();
         }
         else
         {

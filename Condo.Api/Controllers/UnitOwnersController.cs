@@ -83,12 +83,18 @@ public class UnitOwnersController(
 
         if (owner is null) return NotFound("Propietario no encontrado.");
 
+        var companyId = unit.Building?.CompanyId ?? accessScope.CompanyId ?? Guid.Empty;
+
+        // Crítico: el propietario debe pertenecer a la misma empresa que la unidad — sin este
+        // chequeo se podría vincular una unidad a un usuario de otra empresa administradora,
+        // dándole acceso a expensas, pagos, reclamos, comunicados y amenities ajenos.
+        if (owner.CompanyId != companyId)
+            return BadRequest("El propietario no pertenece a la misma empresa que la unidad.");
+
         var duplicate = await dbContext.UnitOwners
             .AnyAsync(x => !x.IsDeleted && x.UnitId == request.UnitId && x.OwnerId == request.OwnerId, cancellationToken);
 
         if (duplicate) return Conflict("Este propietario ya esta asignado a esta unidad.");
-
-        var companyId = unit.Building?.CompanyId ?? accessScope.CompanyId ?? Guid.Empty;
 
         var entity = new UnitOwner
         {
