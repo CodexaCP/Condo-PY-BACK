@@ -101,16 +101,20 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
             return Conflict("Ya existe una asignacion con la misma unidad, residente y fecha de inicio.");
         }
 
+        // RangesOverlap es un método C# puro: EF Core no puede traducirlo a SQL dentro de un
+        // Any/Where, así que primero se filtra por lo que sí es traducible (Unit/Resident/IsDeleted)
+        // y el solapamiento de fechas se evalúa en memoria sobre ese conjunto ya acotado.
+        var existingForUnit = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == request.UnitId)
+            .Select(x => new { x.ResidentId, x.IsPrimary, x.StartDate, x.EndDate })
+            .ToListAsync(cancellationToken);
+
         // Una unidad puede tener varios residentes a la vez (ej. familia conviviendo), pero el
         // mismo residente no puede tener dos asignaciones superpuestas a la misma unidad.
-        var overlapsSameResident = await dbContext.UnitResidents
-            .AsNoTracking()
-            .AnyAsync(x =>
-                !x.IsDeleted &&
-                x.UnitId == request.UnitId &&
-                x.ResidentId == request.ResidentId &&
-                RangesOverlap(x.StartDate, x.EndDate, request.StartDate, request.EndDate),
-                cancellationToken);
+        var overlapsSameResident = existingForUnit.Any(x =>
+            x.ResidentId == request.ResidentId &&
+            RangesOverlap(x.StartDate, x.EndDate, request.StartDate, request.EndDate));
 
         if (overlapsSameResident)
         {
@@ -119,14 +123,9 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
 
         if (request.IsPrimary)
         {
-            var hasPrimaryOverlap = await dbContext.UnitResidents
-                .AsNoTracking()
-                .AnyAsync(x =>
-                    !x.IsDeleted &&
-                    x.UnitId == request.UnitId &&
-                    x.IsPrimary &&
-                    RangesOverlap(x.StartDate, x.EndDate, request.StartDate, request.EndDate),
-                    cancellationToken);
+            var hasPrimaryOverlap = existingForUnit.Any(x =>
+                x.IsPrimary &&
+                RangesOverlap(x.StartDate, x.EndDate, request.StartDate, request.EndDate));
 
             if (hasPrimaryOverlap)
             {
