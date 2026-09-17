@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -11,7 +12,8 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/unit-owners")]
-public class UnitOwnersController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class UnitOwnersController(
+    ICondoDbContext dbContext, IAccessScopeService accessScope, IOwnerResidencySyncService residencySync) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<UnitOwnerDto>>> GetAll(
@@ -99,6 +101,9 @@ public class UnitOwnersController(ICondoDbContext dbContext, IAccessScopeService
 
         dbContext.UnitOwners.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (owner.IsResident)
+            await residencySync.SyncAsync(owner, companyId, cancellationToken);
 
         return Ok(new UnitOwnerDto
         {

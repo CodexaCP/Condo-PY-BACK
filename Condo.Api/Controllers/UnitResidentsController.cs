@@ -14,7 +14,8 @@ namespace Condo.Api.Controllers;
 public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<UnitResidentDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<UnitResidentDto>>> GetAll(
+        [FromQuery] Guid? residentId, CancellationToken cancellationToken)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
@@ -34,6 +35,11 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
             }
         }
 
+        if (residentId.HasValue)
+        {
+            query = query.Where(x => x.ResidentId == residentId.Value);
+        }
+
         var links = await query
             .OrderBy(x => x.Unit!.Code)
             .ThenBy(x => x.Resident!.FullName)
@@ -42,6 +48,8 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
                 Id = x.Id,
                 UnitId = x.UnitId,
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
+                BuildingId = x.Unit != null ? x.Unit.BuildingId : Guid.Empty,
+                BuildingName = x.Unit != null && x.Unit.Building != null ? x.Unit.Building.Name : string.Empty,
                 ResidentId = x.ResidentId,
                 ResidentName = x.Resident != null ? x.Resident.FullName : string.Empty,
                 IsPrimary = x.IsPrimary,
@@ -63,6 +71,7 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
 
         var unit = await dbContext.Units
             .AsNoTracking()
+            .Include(x => x.Building)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.UnitId, cancellationToken);
         var resident = await dbContext.Residents
             .AsNoTracking()
@@ -92,17 +101,20 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
             return Conflict("Ya existe una asignacion con la misma unidad, residente y fecha de inicio.");
         }
 
-        var overlapsUnit = await dbContext.UnitResidents
+        // Una unidad puede tener varios residentes a la vez (ej. familia conviviendo), pero el
+        // mismo residente no puede tener dos asignaciones superpuestas a la misma unidad.
+        var overlapsSameResident = await dbContext.UnitResidents
             .AsNoTracking()
             .AnyAsync(x =>
                 !x.IsDeleted &&
                 x.UnitId == request.UnitId &&
+                x.ResidentId == request.ResidentId &&
                 RangesOverlap(x.StartDate, x.EndDate, request.StartDate, request.EndDate),
                 cancellationToken);
 
-        if (overlapsUnit)
+        if (overlapsSameResident)
         {
-            return BadRequest("La unidad ya tiene una asignacion activa o solapada en ese rango de fechas.");
+            return BadRequest("Este residente ya tiene una asignacion activa o solapada en esa unidad.");
         }
 
         if (request.IsPrimary)
@@ -142,7 +154,40 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
             return Conflict("Ya existe una asignacion con la misma unidad, residente y fecha de inicio.");
         }
 
-        return Ok(ToDto(entity, unit.Code, resident.FullName));
+        return Ok(ToDto(entity, unit.Code, unit.BuildingId, unit.Building?.Name ?? string.Empty, resident.FullName));
+    }
+
+    [HttpPatch("{id:guid}/end")]
+    public async Task<ActionResult<UnitResidentDto>> EndResidency(
+        Guid id, [FromBody] EndResidencyRequest request, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.UnitResidents
+            .Include(x => x.Unit)
+                .ThenInclude(u => u!.Building)
+            .Include(x => x.Resident)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null) return NotFound();
+
+        if (entity.Unit is null || !await accessScope.CanAccessBuildingAsync(entity.Unit.BuildingId, cancellationToken))
+            return Forbid();
+
+        if (entity.EndDate.HasValue)
+            return BadRequest("Esta residencia ya tiene fecha de fin.");
+
+        var endDate = request.EndDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        if (endDate < entity.StartDate)
+            return BadRequest("La fecha de fin no puede ser anterior a la fecha de inicio.");
+
+        entity.EndDate = endDate;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToDto(
+            entity,
+            entity.Unit.Code,
+            entity.Unit.BuildingId,
+            entity.Unit.Building?.Name ?? string.Empty,
+            entity.Resident?.FullName ?? string.Empty));
     }
 
     [HttpDelete("{id:guid}")]
@@ -167,12 +212,15 @@ public class UnitResidentsController(ICondoDbContext dbContext, IAccessScopeServ
         return NoContent();
     }
 
-    private static UnitResidentDto ToDto(UnitResident entity, string unitCode, string residentName) =>
+    private static UnitResidentDto ToDto(
+        UnitResident entity, string unitCode, Guid buildingId, string buildingName, string residentName) =>
         new()
         {
             Id = entity.Id,
             UnitId = entity.UnitId,
             UnitCode = unitCode,
+            BuildingId = buildingId,
+            BuildingName = buildingName,
             ResidentId = entity.ResidentId,
             ResidentName = residentName,
             IsPrimary = entity.IsPrimary,

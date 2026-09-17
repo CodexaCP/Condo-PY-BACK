@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -17,7 +18,8 @@ public class OwnersController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
-    Condo.Application.Abstractions.IPasswordHasher passwordHasher) : ControllerBase
+    Condo.Application.Abstractions.IPasswordHasher passwordHasher,
+    IOwnerResidencySyncService residencySync) : ControllerBase
 {
     private static readonly Regex EmailRegex    = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
     private static readonly Regex UsernameRegex = new(@"^[a-z0-9][a-z0-9.\-_]*$",  RegexOptions.Compiled);
@@ -122,6 +124,8 @@ public class OwnersController(
             return Conflict("Ya existe un propietario con ese correo o nombre de usuario.");
         }
 
+        await residencySync.SyncAsync(owner, companyId, cancellationToken);
+
         return Ok(ToDto(owner));
     }
 
@@ -186,6 +190,8 @@ public class OwnersController(
         {
             return Conflict("Ya existe un propietario con ese correo o nombre de usuario.");
         }
+
+        await residencySync.SyncAsync(owner, companyId, cancellationToken);
 
         return Ok(ToDto(owner));
     }
