@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -15,7 +16,8 @@ namespace Condo.Api.Controllers;
 public class AmenitiesController(
     CondoDbContext dbContext,
     IAccessScopeService accessScope,
-    ITenantContext tenantContext) : ControllerBase
+    ITenantContext tenantContext,
+    IUnitOverdueService overdueService) : ControllerBase
 {
     private static readonly TimeZoneInfo _pyt =
         TimeZoneInfo.FindSystemTimeZoneById("America/Asuncion");
@@ -296,6 +298,22 @@ public class AmenitiesController(
 
         if (!await CanUseAmenityAsync(amenity.BuildingId, ct)) return Forbid();
 
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => x.Id == amenity.BuildingId)
+            .Select(x => new { x.BlockOverdueAmenityReservations })
+            .FirstOrDefaultAsync(ct);
+
+        if (building is { BlockOverdueAmenityReservations: true })
+        {
+            var myUnitIds = await GetMyUnitIdsAsync(amenity.BuildingId, ct);
+            foreach (var unitId in myUnitIds)
+            {
+                if (await overdueService.IsUnitOverdueAsync(unitId, ct))
+                    return BadRequest("Tenés pagos atrasados. Regularizá tu situación para poder reservar amenities.");
+            }
+        }
+
         // CreateExecutionStrategy es obligatorio cuando EnableRetryOnFailure está activo
         // y se usan transacciones manuales. El query final va FUERA del wrapper para que
         // EF Core no confunda la transacción ya committed con una aún activa.
@@ -504,6 +522,40 @@ public class AmenitiesController(
                          && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == user.Email
                          && x.Unit != null && !x.Unit.IsDeleted)
                 .Select(x => x.Unit!.BuildingId)
+                .ToListAsync(ct));
+        }
+
+        return result;
+    }
+
+    private async Task<HashSet<Guid>> GetMyUnitIdsAsync(Guid buildingId, CancellationToken ct)
+    {
+        var userId = tenantContext.UserId;
+        var user = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.IsActive && x.Id == userId, ct);
+        if (user is null) return [];
+
+        var result = new HashSet<Guid>();
+
+        if (user.Role == UserRole.Owner)
+        {
+            result.UnionWith(await dbContext.UnitOwners
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.OwnerId == user.Id
+                         && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+                .Select(x => x.UnitId)
+                .ToListAsync(ct));
+        }
+
+        if (user.Role == UserRole.Resident)
+        {
+            result.UnionWith(await dbContext.UnitResidents
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.EndDate == null
+                         && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == user.Email
+                         && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+                .Select(x => x.UnitId)
                 .ToListAsync(ct));
         }
 

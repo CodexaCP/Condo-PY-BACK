@@ -62,7 +62,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
-                LateFeeFrequency = x.LateFeeFrequency
+                LateFeeFrequency = x.LateFeeFrequency,
+                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations
             })
             .ToListAsync(cancellationToken);
 
@@ -95,7 +96,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
-                LateFeeFrequency = x.LateFeeFrequency
+                LateFeeFrequency = x.LateFeeFrequency,
+                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -166,7 +168,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim(),
             ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant(),
             LateFeeRatePercentage = NormalizedLateFeeRate(request),
-            LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null
+            LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
+            BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations
         };
 
         dbContext.Buildings.Add(entity);
@@ -273,6 +276,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant();
         entity.LateFeeRatePercentage = newRate;
         entity.LateFeeFrequency = newFrequency;
+        entity.BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations;
 
         var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
         if (lateFeeChanged && effectiveCompanyId.HasValue)
@@ -529,6 +533,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = entity.ContactPhone,
             ContactEmail = entity.ContactEmail,
             LateFeeRatePercentage = entity.LateFeeRatePercentage,
-            LateFeeFrequency = entity.LateFeeFrequency
+            LateFeeFrequency = entity.LateFeeFrequency,
+            BlockOverdueAmenityReservations = entity.BlockOverdueAmenityReservations
         };
 }

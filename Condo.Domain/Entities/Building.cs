@@ -17,6 +17,7 @@ public class Building : BaseEntity
     public string? ContactEmail { get; set; }
     public decimal? LateFeeRatePercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
+    public bool BlockOverdueAmenityReservations { get; set; } = false;
 
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
