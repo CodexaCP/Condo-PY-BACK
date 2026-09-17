@@ -18,8 +18,8 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
     private static readonly Regex EmailRegex    = new(@"^[^\s@]+@[^\s@]+\.[^\s@]+$", RegexOptions.Compiled);
     private static readonly Regex UsernameRegex = new(@"^[a-z0-9][a-z0-9.\-_]*$",  RegexOptions.Compiled);
 
-    private const int BuildingManagerLimit  = 2;
-    private const int CompanyOperatorLimit  = 5;
+    private const int BuildingManagerLimit  = 25;
+    private const int CompanyOperatorLimit  = 25;
 
     // ─── CAPACITY ───────────────────────────────────────────────────────────
     [HttpGet("capacity")]
