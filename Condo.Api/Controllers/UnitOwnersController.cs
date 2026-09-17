@@ -71,9 +71,13 @@ public class UnitOwnersController(ICondoDbContext dbContext, IAccessScopeService
         if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
             return Forbid();
 
+        // Se permite vincular como propietario a cualquier cuenta Owner o Resident: una misma
+        // persona puede ser propietaria de una unidad y residente de otra (o de la misma), sin
+        // necesidad de cambiarle el rol base de la cuenta.
         var owner = await dbContext.ApplicationUsers
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.OwnerId && x.Role == UserRole.Owner, cancellationToken);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.OwnerId
+                     && (x.Role == UserRole.Owner || x.Role == UserRole.Resident), cancellationToken);
 
         if (owner is null) return NotFound("Propietario no encontrado.");
 

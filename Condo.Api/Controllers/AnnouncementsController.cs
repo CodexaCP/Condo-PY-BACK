@@ -277,22 +277,14 @@ public class AnnouncementsController(
             .Select(x => x.OwnerId)
             .ToListAsync(ct);
 
-        var residentEmails = await dbContext.UnitResidents
+        var residentUserIds = await dbContext.UnitResidents
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.EndDate == null
                      && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
-                     && x.Resident != null && !x.Resident.IsDeleted)
-            .Select(x => x.Resident!.Email)
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId != null)
+            .Select(x => x.Resident!.ApplicationUserId!.Value)
             .Distinct()
             .ToListAsync(ct);
-
-        var residentUserIds = residentEmails.Count > 0
-            ? await dbContext.ApplicationUsers
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
-                .Select(x => x.Id)
-                .ToListAsync(ct)
-            : [];
 
         return ownerIds.Concat(residentUserIds).Distinct().ToList();
     }

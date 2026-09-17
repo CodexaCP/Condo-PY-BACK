@@ -377,6 +377,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.Residents)
             .HasForeignKey(x => x.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Resident>()
+            .HasOne(x => x.ApplicationUser)
+            .WithMany()
+            .HasForeignKey(x => x.ApplicationUserId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<UnitResident>().HasIndex(x => new { x.UnitId, x.ResidentId, x.StartDate }).IsUnique();
         modelBuilder.Entity<UnitResident>()

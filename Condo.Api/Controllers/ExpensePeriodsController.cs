@@ -1522,18 +1522,10 @@ public class ExpensePeriodsController(
             .AnyAsync(x => !x.IsDeleted && x.Unit != null && x.Unit.BuildingId == buildingId && x.OwnerId == uid, cancellationToken))
             return true;
 
-        var email = await dbContext.ApplicationUsers
-            .AsNoTracking()
-            .Where(x => x.Id == uid && !x.IsDeleted)
-            .Select(x => x.Email)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (email is null) return false;
-
         return await dbContext.UnitResidents
             .AsNoTracking()
             .AnyAsync(x => !x.IsDeleted && x.EndDate == null && x.Unit != null && x.Unit.BuildingId == buildingId
-                && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == email, cancellationToken);
+                && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == uid, cancellationToken);
     }
 
     private async Task NotifyBuildingUsersAsync(ExpensePeriod period, CancellationToken ct)
@@ -1566,22 +1558,14 @@ public class ExpensePeriodsController(
             .Select(x => x.OwnerId)
             .ToListAsync(ct);
 
-        var residentEmails = await dbContext.UnitResidents
+        var residentUserIds = await dbContext.UnitResidents
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.EndDate == null
                      && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
-                     && x.Resident != null && !x.Resident.IsDeleted)
-            .Select(x => x.Resident!.Email)
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId != null)
+            .Select(x => x.Resident!.ApplicationUserId!.Value)
             .Distinct()
             .ToListAsync(ct);
-
-        var residentUserIds = residentEmails.Count > 0
-            ? await dbContext.ApplicationUsers
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
-                .Select(x => x.Id)
-                .ToListAsync(ct)
-            : [];
 
         return ownerIds.Concat(residentUserIds).Distinct().ToList();
     }

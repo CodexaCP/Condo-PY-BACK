@@ -45,7 +45,8 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
                 Email = x.Email,
                 PhoneNumber = x.PhoneNumber,
                 IsOwner = x.IsOwner,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                HasLinkedAccount = x.ApplicationUserId != null
             })
             .ToListAsync(cancellationToken);
 
@@ -66,7 +67,8 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
                 Email = x.Email,
                 PhoneNumber = x.PhoneNumber,
                 IsOwner = x.IsOwner,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                HasLinkedAccount = x.ApplicationUserId != null
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -123,16 +125,20 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return Conflict("Ya existe un residente con ese documento dentro de la empresa.");
         }
 
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var linkedUserId = await FindMatchingUserIdAsync(companyId.Value, normalizedEmail, cancellationToken);
+
         var entity = new Resident
         {
             CompanyId = companyId.Value,
             FullName = request.FullName.Trim(),
             DocumentType = string.IsNullOrWhiteSpace(request.DocumentType) ? null : request.DocumentType.Trim(),
             DocumentNumber = normalizedDocumentNumber,
-            Email = request.Email.Trim().ToLowerInvariant(),
+            Email = normalizedEmail,
             PhoneNumber = request.PhoneNumber.Trim(),
             IsOwner = request.IsOwner,
-            IsActive = request.IsActive
+            IsActive = request.IsActive,
+            ApplicationUserId = linkedUserId
         };
 
         dbContext.Residents.Add(entity);
@@ -183,10 +189,16 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return Conflict("Ya existe un residente con ese documento dentro de la empresa.");
         }
 
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        if (normalizedEmail != entity.Email)
+        {
+            entity.ApplicationUserId = await FindMatchingUserIdAsync(entity.CompanyId, normalizedEmail, cancellationToken);
+        }
+
         entity.FullName = request.FullName.Trim();
         entity.DocumentType = string.IsNullOrWhiteSpace(request.DocumentType) ? null : request.DocumentType.Trim();
         entity.DocumentNumber = normalizedDocumentNumber;
-        entity.Email = request.Email.Trim().ToLowerInvariant();
+        entity.Email = normalizedEmail;
         entity.PhoneNumber = request.PhoneNumber.Trim();
         entity.IsOwner = request.IsOwner;
         entity.IsActive = request.IsActive;
@@ -279,6 +291,13 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         return null;
     }
 
+    private async Task<Guid?> FindMatchingUserIdAsync(Guid companyId, string normalizedEmail, CancellationToken ct) =>
+        await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.CompanyId == companyId && x.Email == normalizedEmail)
+            .Select(x => (Guid?)x.Id)
+            .FirstOrDefaultAsync(ct);
+
     private static bool IsUniqueDocumentViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException sqlException &&
         (sqlException.Number == 2601 || sqlException.Number == 2627) &&
@@ -303,6 +322,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             Email = entity.Email,
             PhoneNumber = entity.PhoneNumber,
             IsOwner = entity.IsOwner,
-            IsActive = entity.IsActive
+            IsActive = entity.IsActive,
+            HasLinkedAccount = entity.ApplicationUserId != null
         };
 }

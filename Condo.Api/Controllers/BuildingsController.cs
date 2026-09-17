@@ -340,24 +340,15 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             .Select(x => x.OwnerId)
             .ToListAsync(cancellationToken));
 
-        // Residentes activos (usuario por email del residente)
-        var residentEmails = await dbContext.UnitResidents
+        // Residentes activos (vinculados directamente por Id de usuario)
+        recipientIds.UnionWith(await dbContext.UnitResidents
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.EndDate == null
                      && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == building.Id
-                     && x.Resident != null && !x.Resident.IsDeleted)
-            .Select(x => x.Resident!.Email)
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId != null)
+            .Select(x => x.Resident!.ApplicationUserId!.Value)
             .Distinct()
-            .ToListAsync(cancellationToken);
-
-        if (residentEmails.Count > 0)
-        {
-            recipientIds.UnionWith(await dbContext.ApplicationUsers
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.IsActive && residentEmails.Contains(x.Email))
-                .Select(x => x.Id)
-                .ToListAsync(cancellationToken));
-        }
+            .ToListAsync(cancellationToken));
 
         // Managers con acceso al edificio
         recipientIds.UnionWith(await dbContext.UserBuildingAccesses

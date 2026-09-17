@@ -184,6 +184,9 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
                 var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
                 if (syncError is not null) return syncError;
             }
+
+            if (companyId.HasValue)
+                await LinkMatchingResidentsAsync(companyId.Value, normalizedEmail, user.Id, cancellationToken);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
@@ -291,6 +294,9 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
                 var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
                 if (syncError is not null) return syncError;
             }
+
+            if (targetCompanyId.HasValue)
+                await LinkMatchingResidentsAsync(targetCompanyId.Value, normalizedEmail, user.Id, cancellationToken);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
@@ -497,6 +503,20 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         await dbContext.ApplicationUsers.AnyAsync(
             x => !x.IsDeleted && x.CompanyId == companyId && x.Username == username
                  && (!excludeId.HasValue || x.Id != excludeId.Value), ct);
+
+    private async Task LinkMatchingResidentsAsync(Guid companyId, string normalizedEmail, Guid userId, CancellationToken ct)
+    {
+        var residents = await dbContext.Residents
+            .Where(x => !x.IsDeleted && x.CompanyId == companyId && x.Email == normalizedEmail)
+            .ToListAsync(ct);
+
+        if (residents.Count == 0) return;
+
+        foreach (var resident in residents)
+            resident.ApplicationUserId = userId;
+
+        await dbContext.SaveChangesAsync(ct);
+    }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is SqlException sql && (sql.Number == 2601 || sql.Number == 2627);

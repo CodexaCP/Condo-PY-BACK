@@ -151,7 +151,9 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
     {
         var results = new List<MyUnitDto>();
 
-        if (user.Role == UserRole.Owner)
+        // El acceso se resuelve por los vínculos reales (UnitOwner / UnitResident.ApplicationUserId),
+        // no por el rol único de la cuenta: una misma persona puede ser propietaria de una unidad
+        // y residente de otra (o de la misma), y ambos vínculos se muestran combinados.
         {
             var ownerUnits = await dbContext.UnitOwners
                 .AsNoTracking()
@@ -184,14 +186,13 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
             }
         }
 
-        if (user.Role == UserRole.Resident)
         {
             var residentUnits = await dbContext.UnitResidents
                 .AsNoTracking()
                 .Where(x => !x.IsDeleted
                          && x.EndDate == null
                          && x.Resident != null
-                         && x.Resident.Email == user.Email
+                         && x.Resident.ApplicationUserId == user.Id
                          && !x.Resident.IsDeleted)
                 .Include(x => x.Resident)
                 .Include(x => x.Unit)

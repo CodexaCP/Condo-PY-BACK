@@ -24,13 +24,18 @@ public class OwnersController(
 
     // ─── GET ALL ────────────────────────────────────────────────────────────
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<OwnerDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<OwnerDto>>> GetAll(
+        [FromQuery] bool includeResidents,
+        CancellationToken cancellationToken)
     {
         if (!CanManageOwners()) return Forbid();
 
+        // includeResidents=true se usa desde la pantalla de asignación de propietarios,
+        // para poder elegir también a una cuenta Resident (una misma persona puede ser
+        // propietaria de una unidad y residente de otra, o de la misma).
         IQueryable<ApplicationUser> query = dbContext.ApplicationUsers
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.Role == UserRole.Owner);
+            .Where(x => !x.IsDeleted && (x.Role == UserRole.Owner || (includeResidents && x.Role == UserRole.Resident)));
 
         if (!accessScope.IsSuperAdmin)
         {

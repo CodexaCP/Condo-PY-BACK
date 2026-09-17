@@ -11,7 +11,9 @@ public class Resident : CompanyScopedEntity
     public string PhoneNumber { get; set; } = string.Empty;
     public bool IsOwner { get; set; }
     public bool IsActive { get; set; } = true;
+    public Guid? ApplicationUserId { get; set; }
 
     public Company? Company { get; set; }
+    public ApplicationUser? ApplicationUser { get; set; }
     public ICollection<UnitResident> UnitResidents { get; set; } = new List<UnitResident>();
 }

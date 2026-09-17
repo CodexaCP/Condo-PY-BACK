@@ -104,44 +104,29 @@ public sealed class OverdueAmenityReservationEnforcementService(
         var ids = userIds.ToList();
         if (ids.Count == 0) return new Dictionary<Guid, HashSet<Guid>>();
 
-        var users = await dbContext.ApplicationUsers
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && ids.Contains(x.Id))
-            .Select(x => new { x.Id, x.Role, x.Email })
-            .ToListAsync(ct);
-
         var result = new Dictionary<Guid, HashSet<Guid>>();
 
-        var ownerUserIds = users.Where(x => x.Role == UserRole.Owner).Select(x => x.Id).ToList();
-        if (ownerUserIds.Count > 0)
-        {
-            var ownerUnits = await dbContext.UnitOwners
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && ownerUserIds.Contains(x.OwnerId) && x.Unit != null && !x.Unit.IsDeleted)
-                .Select(x => new { x.OwnerId, UnitId = x.Unit!.Id })
-                .ToListAsync(ct);
-            foreach (var row in ownerUnits)
-                result.GetOrAdd(row.OwnerId).Add(row.UnitId);
-        }
+        // El vínculo se resuelve por relación real (UnitOwner / UnitResident.ApplicationUserId),
+        // no por el rol único de la cuenta: una misma persona puede ser propietaria de una unidad
+        // y residente de otra (o de la misma).
+        var ownerUnits = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && ids.Contains(x.OwnerId) && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => new { x.OwnerId, UnitId = x.Unit!.Id })
+            .ToListAsync(ct);
+        foreach (var row in ownerUnits)
+            result.GetOrAdd(row.OwnerId).Add(row.UnitId);
 
-        var residentUsers = users.Where(x => x.Role == UserRole.Resident).ToList();
-        if (residentUsers.Count > 0)
-        {
-            var emails = residentUsers.Select(x => x.Email).ToHashSet();
-            var residentUnits = await dbContext.UnitResidents
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.EndDate == null
-                         && x.Resident != null && !x.Resident.IsDeleted && emails.Contains(x.Resident.Email)
-                         && x.Unit != null && !x.Unit.IsDeleted)
-                .Select(x => new { ResidentEmail = x.Resident!.Email, UnitId = x.Unit!.Id })
-                .ToListAsync(ct);
-
-            foreach (var user in residentUsers)
-            {
-                foreach (var row in residentUnits.Where(x => x.ResidentEmail == user.Email))
-                    result.GetOrAdd(user.Id).Add(row.UnitId);
-            }
-        }
+        var residentUnits = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Resident != null && !x.Resident.IsDeleted
+                     && x.Resident.ApplicationUserId != null && ids.Contains(x.Resident.ApplicationUserId.Value)
+                     && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => new { UserId = x.Resident!.ApplicationUserId!.Value, UnitId = x.Unit!.Id })
+            .ToListAsync(ct);
+        foreach (var row in residentUnits)
+            result.GetOrAdd(row.UserId).Add(row.UnitId);
 
         return result;
     }

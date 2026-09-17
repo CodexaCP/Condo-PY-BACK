@@ -25,17 +25,9 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         if (await dbContext.UnitOwners.AnyAsync(x => !x.IsDeleted && x.UnitId == unit.Id && x.OwnerId == uid, cancellationToken))
             return true;
 
-        var email = await dbContext.ApplicationUsers
-            .AsNoTracking()
-            .Where(x => x.Id == uid && !x.IsDeleted)
-            .Select(x => x.Email)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (email is null) return false;
-
         return await dbContext.UnitResidents.AnyAsync(
             x => !x.IsDeleted && x.UnitId == unit.Id && x.EndDate == null
-              && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == email,
+              && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == uid,
             cancellationToken);
     }
 

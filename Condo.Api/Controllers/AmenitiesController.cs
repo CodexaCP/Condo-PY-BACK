@@ -505,25 +505,21 @@ public class AmenitiesController(
 
         var result = new HashSet<Guid>();
 
-        if (user.Role == UserRole.Owner)
-        {
-            result.UnionWith(await dbContext.UnitOwners
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.OwnerId == user.Id && x.Unit != null && !x.Unit.IsDeleted)
-                .Select(x => x.Unit!.BuildingId)
-                .ToListAsync(ct));
-        }
+        // Se combinan ambos vínculos sin depender del Role único de la cuenta: una misma
+        // persona puede ser propietaria de una unidad y residente de otra (o de la misma).
+        result.UnionWith(await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == user.Id && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => x.Unit!.BuildingId)
+            .ToListAsync(ct));
 
-        if (user.Role == UserRole.Resident)
-        {
-            result.UnionWith(await dbContext.UnitResidents
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.EndDate == null
-                         && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == user.Email
-                         && x.Unit != null && !x.Unit.IsDeleted)
-                .Select(x => x.Unit!.BuildingId)
-                .ToListAsync(ct));
-        }
+        result.UnionWith(await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == user.Id
+                     && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => x.Unit!.BuildingId)
+            .ToListAsync(ct));
 
         return result;
     }
@@ -538,26 +534,20 @@ public class AmenitiesController(
 
         var result = new HashSet<Guid>();
 
-        if (user.Role == UserRole.Owner)
-        {
-            result.UnionWith(await dbContext.UnitOwners
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.OwnerId == user.Id
-                         && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
-                .Select(x => x.UnitId)
-                .ToListAsync(ct));
-        }
+        result.UnionWith(await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == user.Id
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+            .Select(x => x.UnitId)
+            .ToListAsync(ct));
 
-        if (user.Role == UserRole.Resident)
-        {
-            result.UnionWith(await dbContext.UnitResidents
-                .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.EndDate == null
-                         && x.Resident != null && !x.Resident.IsDeleted && x.Resident.Email == user.Email
-                         && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
-                .Select(x => x.UnitId)
-                .ToListAsync(ct));
-        }
+        result.UnionWith(await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == user.Id
+                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
+            .Select(x => x.UnitId)
+            .ToListAsync(ct));
 
         return result;
     }

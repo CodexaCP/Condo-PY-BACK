@@ -22,4 +22,5 @@ public class ResidentDto
     public string PhoneNumber { get; set; } = string.Empty;
     public bool IsOwner { get; set; }
     public bool IsActive { get; set; }
+    public bool HasLinkedAccount { get; set; }
 }
