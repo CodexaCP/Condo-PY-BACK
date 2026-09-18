@@ -1,10 +1,12 @@
 using Condo.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Condo.Application.Abstractions;
 
 public interface ICondoDbContext
 {
+    DatabaseFacade Database { get; }
     DbSet<Company> Companies { get; }
     DbSet<Condominium> Condominiums { get; }
     DbSet<ApplicationUser> ApplicationUsers { get; }
@@ -36,6 +38,9 @@ public interface ICondoDbContext
     DbSet<Plan> Plans { get; }
     DbSet<BuildingPlan> BuildingPlans { get; }
     DbSet<BuildingPlanPayment> BuildingPlanPayments { get; }
+    DbSet<InvoiceSeries> InvoiceSeries { get; }
+    DbSet<Invoice> Invoices { get; }
+    DbSet<InvoiceAuditLog> InvoiceAuditLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

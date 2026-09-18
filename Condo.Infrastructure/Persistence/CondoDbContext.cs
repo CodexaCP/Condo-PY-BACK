@@ -39,6 +39,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<BuildingPlan> BuildingPlans => Set<BuildingPlan>();
     public DbSet<BuildingPlanPayment> BuildingPlanPayments => Set<BuildingPlanPayment>();
+    public DbSet<InvoiceSeries> InvoiceSeries => Set<InvoiceSeries>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceAuditLog> InvoiceAuditLogs => Set<InvoiceAuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -630,6 +633,69 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BuildingPlanPayment>()
             .HasOne(x => x.ReviewedBy).WithMany()
             .HasForeignKey(x => x.ReviewedById).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── InvoiceSeries (timbrado) ───────────────────────────────────────────
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.Ruc).HasMaxLength(20);
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.RazonSocial).HasMaxLength(200);
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.Establecimiento).HasMaxLength(3);
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.PuntoExpedicion).HasMaxLength(3);
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.NumeroTimbrado).HasMaxLength(20);
+        modelBuilder.Entity<InvoiceSeries>()
+            .HasIndex(x => new { x.CompanyId, x.Establecimiento, x.PuntoExpedicion, x.NumeroTimbrado })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<InvoiceSeries>().HasIndex(x => new { x.BuildingId, x.Activo });
+        modelBuilder.Entity<InvoiceSeries>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<InvoiceSeries>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Invoice (factura) ──────────────────────────────────────────────────
+        modelBuilder.Entity<Invoice>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Invoice>().Property(x => x.NumeroFormateado).HasMaxLength(50);
+        modelBuilder.Entity<Invoice>().Property(x => x.MontoTotal).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Invoice>().Property(x => x.DetalleSnapshotJson).HasColumnType("nvarchar(max)");
+        modelBuilder.Entity<Invoice>().Property(x => x.MotivoAnulacion).HasMaxLength(500);
+        modelBuilder.Entity<Invoice>().HasIndex(x => new { x.InvoiceSeriesId, x.Numero }).IsUnique()
+            .HasFilter("[Numero] IS NOT NULL");
+        modelBuilder.Entity<Invoice>().HasIndex(x => x.PaymentId);
+        modelBuilder.Entity<Invoice>().HasIndex(x => new { x.CompanyId, x.Status, x.CreatedAtUtc });
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Payment).WithMany()
+            .HasForeignKey(x => x.PaymentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.Series).WithMany(x => x.Invoices)
+            .HasForeignKey(x => x.InvoiceSeriesId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.ReemplazadaPorInvoice).WithMany()
+            .HasForeignKey(x => x.ReemplazadaPorInvoiceId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── InvoiceAuditLog ────────────────────────────────────────────────────
+        modelBuilder.Entity<InvoiceAuditLog>().Property(x => x.Action).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<InvoiceAuditLog>().Property(x => x.DatosAntesJson).HasColumnType("nvarchar(max)");
+        modelBuilder.Entity<InvoiceAuditLog>().Property(x => x.DatosDespuesJson).HasColumnType("nvarchar(max)");
+        modelBuilder.Entity<InvoiceAuditLog>().Property(x => x.Detalle).HasMaxLength(500);
+        modelBuilder.Entity<InvoiceAuditLog>().HasIndex(x => new { x.InvoiceId, x.TimestampUtc });
+        modelBuilder.Entity<InvoiceAuditLog>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<InvoiceAuditLog>()
+            .HasOne(x => x.Invoice).WithMany()
+            .HasForeignKey(x => x.InvoiceId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<InvoiceAuditLog>()
+            .HasOne(x => x.InvoiceSeries).WithMany()
+            .HasForeignKey(x => x.InvoiceSeriesId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }
