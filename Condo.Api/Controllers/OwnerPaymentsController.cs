@@ -166,7 +166,28 @@ public class OwnerPaymentsController(
         if (IsOwner() && payment.OwnerId != tenantContext.UserId) return Forbid();
         if (!IsOwner() && !CanManagePayments()) return Forbid();
 
-        return Ok(ToDto(payment));
+        var dto = ToDto(payment);
+
+        if (payment.Status == OwnerPaymentStatus.Approved)
+        {
+            dto.Applications = await dbContext.Payments
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && !x.IsReversed && x.Reference == payment.Reference && x.CompanyId == companyId.Value)
+                .SelectMany(p => p.Allocations
+                    .Where(a => !a.IsDeleted)
+                    .Select(a => new OwnerPaymentApplicationDto
+                    {
+                        UnitCode = p.Unit != null ? p.Unit.Code : string.Empty,
+                        Concept = a.Charge != null ? a.Charge.Concept : string.Empty,
+                        PeriodYear = p.ExpensePeriod != null ? p.ExpensePeriod.Year : 0,
+                        PeriodMonth = p.ExpensePeriod != null ? p.ExpensePeriod.Month : 0,
+                        Amount = a.AllocatedAmount
+                    }))
+                .OrderBy(a => a.PeriodYear).ThenBy(a => a.PeriodMonth).ThenBy(a => a.UnitCode)
+                .ToListAsync(ct);
+        }
+
+        return Ok(dto);
     }
 
     // ─── CREATE (Owner only) ─────────────────────────────────────────────────

@@ -35,6 +35,16 @@ public class OwnerPaymentDto
     public DateTime? ResolvedAt { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public List<OwnerPaymentUnitDto> Units { get; set; } = [];
+    public List<OwnerPaymentApplicationDto> Applications { get; set; } = [];
+}
+
+public class OwnerPaymentApplicationDto
+{
+    public string UnitCode { get; set; } = string.Empty;
+    public string Concept { get; set; } = string.Empty;
+    public int PeriodYear { get; set; }
+    public int PeriodMonth { get; set; }
+    public decimal Amount { get; set; }
 }
 
 public class OwnerPaymentUnitDto
