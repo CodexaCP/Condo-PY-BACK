@@ -1,5 +1,6 @@
 using Condo.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Condo.Application.Abstractions;
@@ -7,6 +8,7 @@ namespace Condo.Application.Abstractions;
 public interface ICondoDbContext
 {
     DatabaseFacade Database { get; }
+    ChangeTracker ChangeTracker { get; }
     DbSet<Company> Companies { get; }
     DbSet<Condominium> Condominiums { get; }
     DbSet<ApplicationUser> ApplicationUsers { get; }

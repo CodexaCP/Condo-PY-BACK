@@ -7,6 +7,7 @@ using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using QuestPDF.Fluent;
 
 namespace Condo.Api.Controllers;
@@ -185,52 +186,74 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
 
         var beforeSnapshot = new { invoice.Status, invoice.Numero };
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var exhausted = false;
 
-        var updatedRows = await dbContext.Database.SqlQueryRaw<long>(
-            """
-            UPDATE InvoiceSeries
-            SET CorrelativoActual = CorrelativoActual + 1
-            OUTPUT INSERTED.CorrelativoActual
-            WHERE Id = {0}
-              AND IsDeleted = 0
-              AND Activo = 1
-              AND CorrelativoActual < RangoHasta
-              AND CAST(GETUTCDATE() AS date) BETWEEN VigenciaDesde AND VigenciaHasta
-            """, request.InvoiceSeriesId).ToListAsync(cancellationToken);
-
-        var numero = updatedRows.SingleOrDefault();
-        if (numero == 0)
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            await transaction.RollbackAsync(cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            exhausted = false;
+
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            var connection = dbContext.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction.GetDbTransaction();
+            command.CommandText = """
+                UPDATE InvoiceSeries
+                SET CorrelativoActual = CorrelativoActual + 1
+                OUTPUT INSERTED.CorrelativoActual
+                WHERE Id = @seriesId
+                  AND IsDeleted = 0
+                  AND Activo = 1
+                  AND CorrelativoActual < RangoHasta
+                  AND CAST(GETUTCDATE() AS date) BETWEEN VigenciaDesde AND VigenciaHasta
+                """;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@seriesId";
+            parameter.Value = request.InvoiceSeriesId;
+            command.Parameters.Add(parameter);
+
+            var scalar = await command.ExecuteScalarAsync(cancellationToken);
+            if (scalar is null or DBNull)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                exhausted = true;
+                return;
+            }
+
+            var numero = Convert.ToInt64(scalar);
+
+            var tracked = await dbContext.Invoices.FirstAsync(x => x.Id == id, cancellationToken);
+            tracked.InvoiceSeriesId = series.Id;
+            tracked.Numero = numero;
+            tracked.NumeroFormateado = $"{series.Establecimiento}-{series.PuntoExpedicion}-{numero:D7}";
+            tracked.Status = InvoiceStatus.Issued;
+            tracked.FechaEmisionUtc = DateTime.UtcNow;
+
+            dbContext.InvoiceAuditLogs.Add(new InvoiceAuditLog
+            {
+                CompanyId = tracked.CompanyId,
+                InvoiceId = tracked.Id,
+                InvoiceSeriesId = series.Id,
+                Action = InvoiceAuditAction.Issued,
+                UserId = tenantContext.UserId,
+                TimestampUtc = DateTime.UtcNow,
+                DatosAntesJson = JsonSerializer.Serialize(beforeSnapshot),
+                DatosDespuesJson = JsonSerializer.Serialize(new { tracked.Status, tracked.Numero, tracked.NumeroFormateado }),
+                Detalle = $"Factura emitida con el número {tracked.NumeroFormateado}."
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+
+        if (exhausted)
+        {
             return Conflict("El timbrado está agotado, vencido o inactivo. Cargue un nuevo timbrado antes de emitir.");
         }
 
-        invoice.InvoiceSeriesId = series.Id;
-        invoice.Numero = numero;
-        invoice.NumeroFormateado = $"{series.Establecimiento}-{series.PuntoExpedicion}-{numero:D7}";
-        invoice.Status = InvoiceStatus.Issued;
-        invoice.FechaEmisionUtc = DateTime.UtcNow;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        dbContext.InvoiceAuditLogs.Add(new InvoiceAuditLog
-        {
-            CompanyId = invoice.CompanyId,
-            InvoiceId = invoice.Id,
-            InvoiceSeriesId = series.Id,
-            Action = InvoiceAuditAction.Issued,
-            UserId = tenantContext.UserId,
-            TimestampUtc = DateTime.UtcNow,
-            DatosAntesJson = JsonSerializer.Serialize(beforeSnapshot),
-            DatosDespuesJson = JsonSerializer.Serialize(new { invoice.Status, invoice.Numero, invoice.NumeroFormateado }),
-            Detalle = $"Factura emitida con el número {invoice.NumeroFormateado}."
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        await transaction.CommitAsync(cancellationToken);
-
-        var row = await LoadRowAsync(invoice.Id, cancellationToken);
+        var row = await LoadRowAsync(id, cancellationToken);
         return Ok(ToDto(row!));
     }
 
