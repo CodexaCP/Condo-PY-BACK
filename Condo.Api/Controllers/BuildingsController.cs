@@ -220,7 +220,15 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         }
 
         var effectiveCompanyId = await GetEffectiveCompanyIdAsync(entity, cancellationToken);
-        if (effectiveCompanyId.HasValue)
+        var isBuildingManager = User.IsInRole("BuildingManager");
+        if (isBuildingManager)
+        {
+            if (!await accessScope.CanAccessBuildingAsync(id, cancellationToken))
+            {
+                return Forbid();
+            }
+        }
+        else if (effectiveCompanyId.HasValue)
         {
             if (!await accessScope.CanManageCompanyAsync(effectiveCompanyId.Value, cancellationToken))
             {
@@ -232,8 +240,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return Forbid();
         }
 
-        var condominium = await ResolveCondominiumAsync(entity.CompanyId, request.CondominiumId, cancellationToken);
-        if (request.CondominiumId.HasValue && condominium is null)
+        var requestedCondominiumId = isBuildingManager ? entity.CondominiumId : request.CondominiumId;
+        var condominium = await ResolveCondominiumAsync(entity.CompanyId, requestedCondominiumId, cancellationToken);
+        if (requestedCondominiumId.HasValue && condominium is null)
         {
             return BadRequest("El condominio no existe o no pertenece a la empresa seleccionada.");
         }
@@ -265,11 +274,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         var newRate = NormalizedLateFeeRate(request);
         var newFrequency = newRate.HasValue ? request.LateFeeFrequency : null;
 
-        entity.CondominiumId = request.CondominiumId;
+        entity.CondominiumId = requestedCondominiumId;
         entity.Name = normalizedName;
         entity.Code = normalizedCode;
         entity.Address = normalizedAddress;
-        entity.IsActive = request.IsActive;
+        if (!isBuildingManager)
+        {
+            entity.IsActive = request.IsActive;
+        }
         entity.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
         entity.ContactPhonePrefix = string.IsNullOrWhiteSpace(request.ContactPhonePrefix) ? null : request.ContactPhonePrefix.Trim();
         entity.ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim();
