@@ -27,11 +27,7 @@ public class OwnerPaymentsController(
         if (companyId is null) return Forbid();
         var ownerId = tenantContext.UserId;
 
-        var unitIds = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value)
-            .Select(x => x.UnitId)
-            .ToListAsync(ct);
+        var unitIds = await LoadLinkedUnitIdsAsync(ownerId, companyId.Value, ct);
 
         if (!unitIds.Any()) return Ok(new List<OwnerDebtUnitDto>());
 
@@ -206,11 +202,7 @@ public class OwnerPaymentsController(
         if (request.UnitIds is null || !request.UnitIds.Any())
             return BadRequest("Debe seleccionar al menos una unidad.");
 
-        var ownerUnitIds = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value)
-            .Select(x => x.UnitId)
-            .ToListAsync(ct);
+        var ownerUnitIds = await LoadLinkedUnitIdsAsync(ownerId, companyId.Value, ct);
 
         if (request.UnitIds.Except(ownerUnitIds).Any())
             return BadRequest("Una o más unidades no pertenecen a este propietario.");
@@ -583,7 +575,14 @@ public class OwnerPaymentsController(
 
     private async Task SettlePaymentAsync(OwnerPayment ownerPayment, Guid companyId, CancellationToken ct)
     {
-        var unitIds = ownerPayment.Units.Where(u => !u.IsDeleted).Select(u => u.UnitId).ToList();
+        // El pago se aplica siempre al período más antiguo entre TODAS las unidades del
+        // propietario, sin importar cuáles se marcaron al enviarlo.
+        var unitIds = await LoadLinkedUnitIdsAsync(ownerPayment.OwnerId, companyId, ct);
+
+        foreach (var declaredUnit in ownerPayment.Units.Where(u => !u.IsDeleted))
+        {
+            if (!unitIds.Contains(declaredUnit.UnitId)) unitIds.Add(declaredUnit.UnitId);
+        }
 
         var credit = await dbContext.OwnerCredits
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerPayment.OwnerId && x.CompanyId == companyId, ct);
@@ -643,8 +642,21 @@ public class OwnerPaymentsController(
 
             available -= pendingAmount;
 
-            if (allocatedPerUnit.ContainsKey(charge.UnitId))
-                allocatedPerUnit[charge.UnitId] += pendingAmount;
+            if (!allocatedPerUnit.ContainsKey(charge.UnitId))
+            {
+                var extraUnit = new OwnerPaymentUnit
+                {
+                    CompanyId = companyId,
+                    OwnerPaymentId = ownerPayment.Id,
+                    UnitId = charge.UnitId,
+                    AllocatedAmount = 0
+                };
+                dbContext.OwnerPaymentUnits.Add(extraUnit);
+                ownerPayment.Units.Add(extraUnit);
+                allocatedPerUnit[charge.UnitId] = 0m;
+            }
+
+            allocatedPerUnit[charge.UnitId] += pendingAmount;
         }
 
         foreach (var pUnit in ownerPayment.Units.Where(u => !u.IsDeleted))
@@ -657,6 +669,26 @@ public class OwnerPaymentsController(
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
+
+    // Mismas unidades que ve la app en "Mis unidades": vínculo de propietario (UnitOwner)
+    // más vínculo de residente activo (UnitResident.Resident.ApplicationUserId).
+    private async Task<List<Guid>> LoadLinkedUnitIdsAsync(Guid userId, Guid companyId, CancellationToken ct)
+    {
+        var owned = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == userId && x.CompanyId == companyId)
+            .Select(x => x.UnitId)
+            .ToListAsync(ct);
+
+        var resided = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null && x.CompanyId == companyId
+                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == userId)
+            .Select(x => x.UnitId)
+            .ToListAsync(ct);
+
+        return owned.Union(resided).ToList();
+    }
 
     private bool IsOwner() =>
         string.Equals(tenantContext.Role, "Owner", StringComparison.OrdinalIgnoreCase);
