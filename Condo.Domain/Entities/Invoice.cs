@@ -9,6 +9,8 @@ public class Invoice : CompanyScopedEntity
     public Guid UnitId { get; set; }
     public Guid PaymentId { get; set; }
     public Guid? InvoiceSeriesId { get; set; }
+    // Pago de propietario aprobado del que sale esta factura (una factura por unidad cubre todo lo aplicado a esa unidad).
+    public Guid? OwnerPaymentId { get; set; }
 
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
 
@@ -29,6 +31,7 @@ public class Invoice : CompanyScopedEntity
     public Building? Building { get; set; }
     public Unit? Unit { get; set; }
     public Payment? Payment { get; set; }
+    public OwnerPayment? OwnerPayment { get; set; }
     public InvoiceSeries? Series { get; set; }
     public Invoice? ReemplazadaPorInvoice { get; set; }
 }

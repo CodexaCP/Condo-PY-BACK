@@ -268,7 +268,10 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         var invoices = await dbContext.Invoices
             .AsNoTracking()
             .Where(i => !i.IsDeleted && i.UnitId == unitId && i.Status == InvoiceStatus.Issued
-                        && i.Payment != null && !i.Payment.IsReversed && i.Payment.ExpensePeriodId == expensePeriodId)
+                        && ((i.Payment != null && !i.Payment.IsReversed && i.Payment.ExpensePeriodId == expensePeriodId)
+                            || (i.OwnerPayment != null && dbContext.Payments.Any(p =>
+                                !p.IsDeleted && !p.IsReversed && p.UnitId == unitId && p.ExpensePeriodId == expensePeriodId
+                                && p.Reference == i.OwnerPayment.Reference))))
             .OrderBy(i => i.Numero)
             .Select(i => new OwnerPaymentInvoiceDto
             {

@@ -117,7 +117,8 @@ public class OwnerPaymentsController(
         var invoices = await dbContext.Invoices
             .AsNoTracking()
             .Where(i => !i.IsDeleted && i.CompanyId == companyId.Value && i.Status == InvoiceStatus.Issued
-                        && i.Payment != null && !i.Payment.IsReversed && i.Payment.Reference == payment.Reference)
+                        && (i.OwnerPaymentId == payment.Id
+                            || (i.Payment != null && !i.Payment.IsReversed && i.Payment.Reference == payment.Reference)))
             .OrderBy(i => i.Numero)
             .Select(i => new OwnerPaymentInvoiceDto
             {

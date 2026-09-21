@@ -684,6 +684,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Invoice>()
             .HasOne(x => x.Payment).WithMany()
             .HasForeignKey(x => x.PaymentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invoice>().HasIndex(x => x.OwnerPaymentId);
+        modelBuilder.Entity<Invoice>()
+            .HasOne(x => x.OwnerPayment).WithMany()
+            .HasForeignKey(x => x.OwnerPaymentId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Invoice>()
             .HasOne(x => x.Series).WithMany(x => x.Invoices)
             .HasForeignKey(x => x.InvoiceSeriesId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);

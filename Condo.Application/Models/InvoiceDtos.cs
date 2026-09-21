@@ -83,6 +83,11 @@ public class CreateInvoiceDraftRequest
     public Guid PaymentId { get; set; }
 }
 
+public class CreateOwnerPaymentInvoiceDraftsRequest
+{
+    public Guid OwnerPaymentId { get; set; }
+}
+
 public class EmitInvoiceRequest
 {
     public Guid InvoiceSeriesId { get; set; }
