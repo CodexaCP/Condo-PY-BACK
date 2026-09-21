@@ -31,16 +31,10 @@ public class OwnerPaymentsController(
 
         if (!unitIds.Any()) return Ok(new List<OwnerDebtUnitDto>());
 
-        var charges = await dbContext.ExpenseCharges
-            .AsNoTracking()
-            .Include(x => x.Unit).ThenInclude(u => u!.Building)
-            .Include(x => x.ExpensePeriod)
-            .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId.Value && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
-            .ToListAsync(ct);
+        var (charges, pendingById) = await LoadPendingChargesAsync(unitIds, companyId.Value, false, ct);
 
         var result = charges
-            .Where(c => c.Amount - c.Allocations.Sum(a => a.AllocatedAmount) > 0)
+            .Where(c => pendingById[c.Id] > 0)
             .GroupBy(c => c.UnitId)
             .Select(g =>
             {
@@ -50,7 +44,7 @@ public class OwnerPaymentsController(
                     UnitId = g.Key,
                     UnitCode = first.Unit?.Code ?? string.Empty,
                     BuildingName = first.Unit?.Building?.Name ?? string.Empty,
-                    TotalDebt = g.Sum(c => c.Amount - c.Allocations.Sum(a => a.AllocatedAmount)),
+                    TotalDebt = g.Sum(c => pendingById[c.Id]),
                     Charges = g
                         .OrderBy(c => c.ExpensePeriod!.Year).ThenBy(c => c.ExpensePeriod!.Month)
                         .Select(c => new OwnerDebtChargeDto
@@ -61,7 +55,7 @@ public class OwnerPaymentsController(
                             PeriodYear = c.ExpensePeriod!.Year,
                             PeriodMonth = c.ExpensePeriod.Month,
                             Amount = c.Amount,
-                            PendingAmount = c.Amount - c.Allocations.Sum(a => a.AllocatedAmount)
+                            PendingAmount = pendingById[c.Id]
                         }).ToList()
                 };
             })
@@ -505,15 +499,10 @@ public class OwnerPaymentsController(
         var paymentDate = DateOnly.FromDateTime(DateTime.UtcNow);
         var reference = $"CREDIT-{DateTime.UtcNow:yyyyMMddHHmmss}";
 
-        var charges = await dbContext.ExpenseCharges
-            .Include(x => x.ExpensePeriod)
-            .Include(x => x.Unit).ThenInclude(u => u!.Building)
-            .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
-            .ToListAsync(ct);
+        var (charges, pendingById) = await LoadPendingChargesAsync(unitIds, companyId, true, ct);
 
         var pending = charges
-            .Where(c => c.Amount - c.Allocations.Sum(a => a.AllocatedAmount) > 0)
+            .Where(c => pendingById[c.Id] > 0)
             .OrderBy(c => c.ExpensePeriod!.Year)
             .ThenBy(c => c.ExpensePeriod!.Month)
             .ThenByDescending(c => c.Amount)
@@ -529,7 +518,7 @@ public class OwnerPaymentsController(
         foreach (var charge in pending)
         {
             if (available <= 0) break;
-            var pendingAmount = charge.Amount - charge.Allocations.Sum(a => a.AllocatedAmount);
+            var pendingAmount = pendingById[charge.Id];
             // Siempre del más antiguo al más reciente: nunca se salta un cargo antiguo.
             if (available < pendingAmount) break;
 
@@ -595,15 +584,10 @@ public class OwnerPaymentsController(
 
         var available = ownerPayment.ReviewedAmount!.Value + credit.Amount;
 
-        var charges = await dbContext.ExpenseCharges
-            .Include(x => x.ExpensePeriod)
-            .Include(x => x.Unit).ThenInclude(u => u!.Building)
-            .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
-            .ToListAsync(ct);
+        var (charges, pendingById) = await LoadPendingChargesAsync(unitIds, companyId, true, ct);
 
         var pendingCharges = charges
-            .Where(c => c.Amount - c.Allocations.Sum(a => a.AllocatedAmount) > 0)
+            .Where(c => pendingById[c.Id] > 0)
             .OrderBy(c => c.ExpensePeriod!.Year)
             .ThenBy(c => c.ExpensePeriod!.Month)
             .ThenByDescending(c => c.Amount)
@@ -621,7 +605,7 @@ public class OwnerPaymentsController(
         {
             if (available <= 0) break;
 
-            var pendingAmount = charge.Amount - charge.Allocations.Sum(a => a.AllocatedAmount);
+            var pendingAmount = pendingById[charge.Id];
             // Regla: siempre del más antiguo al más reciente. Si no alcanza para el cargo más
             // antiguo pendiente, no se salta a uno más nuevo: el resto queda como saldo a favor.
             if (available < pendingAmount) break;
@@ -676,6 +660,74 @@ public class OwnerPaymentsController(
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
+
+    // Cargos pendientes reales de las unidades. Mismo criterio que el estado de cuenta:
+    // solo periodos publicados, sin reversiones ni cargos ya revertidos, y descontando los pagos
+    // (o partes de pagos) que no tienen imputacion a un cargo, aplicados del mas antiguo al mas
+    // reciente dentro de cada unidad. Devuelve el pendiente de cada cargo por su Id.
+    private async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> PendingById)> LoadPendingChargesAsync(
+        IReadOnlyCollection<Guid> unitIds, Guid companyId, bool tracking, CancellationToken ct)
+    {
+        IQueryable<ExpenseCharge> query = dbContext.ExpenseCharges
+            .Include(x => x.ExpensePeriod)
+            .Include(x => x.Unit).ThenInclude(u => u!.Building)
+            .Include(x => x.Allocations.Where(a => !a.IsDeleted));
+        if (!tracking) query = query.AsNoTracking();
+
+        var reversedIds = (await dbContext.ExpenseCharges
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsReversal && x.ReversalOfChargeId != null
+                            && unitIds.Contains(x.UnitId) && x.CompanyId == companyId)
+                .Select(x => x.ReversalOfChargeId!.Value)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        var charges = (await query
+                .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId
+                            && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
+                .ToListAsync(ct))
+            .Where(c => !reversedIds.Contains(c.Id))
+            .ToList();
+
+        var pendingById = charges.ToDictionary(c => c.Id, c => c.Amount - c.Allocations.Sum(a => a.AllocatedAmount));
+
+        var payments = await dbContext.Payments
+            .AsNoTracking()
+            .Where(p => !p.IsDeleted && !p.IsReversed && unitIds.Contains(p.UnitId) && p.CompanyId == companyId
+                        && p.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
+            .Select(p => new
+            {
+                p.UnitId,
+                p.Amount,
+                Allocated = p.Allocations.Where(a => !a.IsDeleted).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m
+            })
+            .ToListAsync(ct);
+
+        var unallocatedByUnit = payments
+            .GroupBy(p => p.UnitId)
+            .ToDictionary(g => g.Key, g => g.Sum(p => decimal.Max(p.Amount - p.Allocated, 0m)));
+
+        foreach (var unitGroup in charges.GroupBy(c => c.UnitId))
+        {
+            if (!unallocatedByUnit.TryGetValue(unitGroup.Key, out var remaining) || remaining <= 0) continue;
+
+            foreach (var charge in unitGroup
+                         .OrderBy(c => c.ExpensePeriod!.Year)
+                         .ThenBy(c => c.ExpensePeriod!.Month)
+                         .ThenBy(c => c.CreatedAtUtc))
+            {
+                if (remaining <= 0) break;
+                var open = pendingById[charge.Id];
+                if (open <= 0) continue;
+
+                var take = decimal.Min(open, remaining);
+                pendingById[charge.Id] = open - take;
+                remaining -= take;
+            }
+        }
+
+        return (charges, pendingById);
+    }
 
     // Mismas unidades que ve la app en "Mis unidades": vínculo de propietario (UnitOwner)
     // más vínculo de residente activo (UnitResident.Resident.ApplicationUserId).
