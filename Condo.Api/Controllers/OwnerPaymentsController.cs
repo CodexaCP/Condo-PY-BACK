@@ -98,6 +98,40 @@ public class OwnerPaymentsController(
         return Ok(new OwnerCreditDto { Amount = credit?.Amount ?? 0 });
     }
 
+    // ─── INVOICES OF A PAYMENT ───────────────────────────────────────────────
+    // Facturas emitidas a partir de los pagos que generó la aprobación de este pago del propietario.
+    [HttpGet("{id:guid}/invoices")]
+    public async Task<ActionResult<IReadOnlyList<OwnerPaymentInvoiceDto>>> GetInvoices(Guid id, CancellationToken ct)
+    {
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        var payment = await dbContext.OwnerPayments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
+        if (payment is null) return NotFound();
+
+        if (IsOwner() && payment.OwnerId != tenantContext.UserId) return Forbid();
+        if (!IsOwner() && !CanManagePayments()) return Forbid();
+
+        var invoices = await dbContext.Invoices
+            .AsNoTracking()
+            .Where(i => !i.IsDeleted && i.CompanyId == companyId.Value && i.Status == InvoiceStatus.Issued
+                        && i.Payment != null && !i.Payment.IsReversed && i.Payment.Reference == payment.Reference)
+            .OrderBy(i => i.Numero)
+            .Select(i => new OwnerPaymentInvoiceDto
+            {
+                Id = i.Id,
+                NumeroFormateado = i.NumeroFormateado,
+                UnitCode = i.Unit != null ? i.Unit.Code : string.Empty,
+                MontoTotal = i.MontoTotal,
+                FechaEmisionUtc = i.FechaEmisionUtc
+            })
+            .ToListAsync(ct);
+
+        return Ok(invoices);
+    }
+
     // ─── CREDIT HISTORY ──────────────────────────────────────────────────────
     // Cuando se genero cada saldo a favor (y de que comprobante) y cuando/como/a que se aplico.
     [HttpGet("credit-movements")]

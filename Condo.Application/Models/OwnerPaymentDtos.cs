@@ -69,6 +69,15 @@ public class OwnerCreditDto
     public decimal Amount { get; set; }
 }
 
+public class OwnerPaymentInvoiceDto
+{
+    public Guid Id { get; set; }
+    public string? NumeroFormateado { get; set; }
+    public string UnitCode { get; set; } = string.Empty;
+    public decimal MontoTotal { get; set; }
+    public DateTime? FechaEmisionUtc { get; set; }
+}
+
 public class OwnerCreditMovementDto
 {
     public Guid Id { get; set; }

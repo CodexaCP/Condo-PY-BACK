@@ -149,7 +149,10 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         var row = await LoadRowAsync(id, cancellationToken);
         if (row is null) return NotFound();
 
-        if (!await accessScope.CanAccessBuildingAsync(row.BuildingId, cancellationToken)) return Forbid();
+        // Personal del edificio, o el propietario/residente de la unidad (solo facturas emitidas).
+        var isStaff = await accessScope.CanAccessBuildingAsync(row.BuildingId, cancellationToken);
+        if (!isStaff && !(row.Status == InvoiceStatus.Issued && await IsLinkedToUnitAsync(row.UnitId, cancellationToken)))
+            return Forbid();
 
         var dto = ToDto(row);
         (dto.ClienteNombre, dto.ClienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
@@ -324,6 +327,19 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
 
         var row = await LoadRowAsync(invoice.Id, cancellationToken);
         return Ok(ToDto(row!));
+    }
+
+    private async Task<bool> IsLinkedToUnitAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        var userId = tenantContext.UserId;
+
+        if (await dbContext.UnitOwners.AsNoTracking()
+                .AnyAsync(x => !x.IsDeleted && x.UnitId == unitId && x.OwnerId == userId, cancellationToken))
+            return true;
+
+        return await dbContext.UnitResidents.AsNoTracking()
+            .AnyAsync(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null
+                           && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == userId, cancellationToken);
     }
 
     // Cliente de la factura: propietario principal de la unidad (o el primero); si no hay, el residente actual.
