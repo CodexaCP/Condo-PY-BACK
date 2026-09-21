@@ -876,6 +876,14 @@ public class ExpensePeriodsController(
             return Forbid();
         }
 
+        // Quien solo accede por ser propietario/inquilino de una unidad no ve la liquidacion
+        // hasta que el periodo este publicado.
+        if (period.Status != ExpensePeriodStatus.Published
+            && !await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
+        {
+            return NotFound();
+        }
+
         var summary = await BuildSettlementSummaryAsync(period, cancellationToken);
 
         if (!summary.IsCalculated)

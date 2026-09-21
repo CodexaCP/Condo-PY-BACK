@@ -15,6 +15,14 @@ namespace Condo.Api.Controllers;
 [Route("api/account-statements")]
 public class AccountStatementsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
 {
+    // Propietarios, inquilinos y demas usuarios finales solo ven periodos ya publicados;
+    // los roles administrativos ven todos los estados.
+    private bool IsEndUser =>
+        !tenantContext.IsSuperAdmin &&
+        !(string.Equals(tenantContext.Role, "CompanyAdmin", StringComparison.OrdinalIgnoreCase) ||
+          string.Equals(tenantContext.Role, "CompanyOperator", StringComparison.OrdinalIgnoreCase) ||
+          string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase));
+
     private async Task<bool> CanAccessUnitAsync(Unit unit, CancellationToken cancellationToken)
     {
         if (await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
@@ -51,7 +59,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var statements = await dbContext.ExpensePeriods
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId)
+            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId && (!IsEndUser || x.Status == ExpensePeriodStatus.Published))
             .OrderByDescending(x => x.Year)
             .ThenByDescending(x => x.Month)
             .Select(x => new AccountStatementPeriodDto
@@ -120,7 +128,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var statements = await dbContext.ExpensePeriods
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId)
+            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId && (!IsEndUser || x.Status == ExpensePeriodStatus.Published))
             .OrderByDescending(x => x.Year)
             .ThenByDescending(x => x.Month)
             .Select(x => new AccountStatementPeriodDto
@@ -188,7 +196,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId, cancellationToken);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId && (!IsEndUser || x.Status == ExpensePeriodStatus.Published), cancellationToken);
 
         if (period is null)
         {
@@ -259,7 +267,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId, cancellationToken);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId && (!IsEndUser || x.Status == ExpensePeriodStatus.Published), cancellationToken);
 
         if (period is null)
         {
@@ -349,7 +357,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId, cancellationToken);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId && (!IsEndUser || x.Status == ExpensePeriodStatus.Published), cancellationToken);
 
         if (period is null) return NotFound();
 

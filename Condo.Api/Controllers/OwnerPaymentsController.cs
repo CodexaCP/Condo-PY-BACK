@@ -36,7 +36,7 @@ public class OwnerPaymentsController(
             .Include(x => x.Unit).ThenInclude(u => u!.Building)
             .Include(x => x.ExpensePeriod)
             .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId.Value)
+            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId.Value && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
             .ToListAsync(ct);
 
         var result = charges
@@ -509,7 +509,7 @@ public class OwnerPaymentsController(
             .Include(x => x.ExpensePeriod)
             .Include(x => x.Unit).ThenInclude(u => u!.Building)
             .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId)
+            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
             .ToListAsync(ct);
 
         var pending = charges
@@ -599,7 +599,7 @@ public class OwnerPaymentsController(
             .Include(x => x.ExpensePeriod)
             .Include(x => x.Unit).ThenInclude(u => u!.Building)
             .Include(x => x.Allocations.Where(a => !a.IsDeleted))
-            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId)
+            .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId && x.ExpensePeriod!.Status == ExpensePeriodStatus.Published)
             .ToListAsync(ct);
 
         var pendingCharges = charges
