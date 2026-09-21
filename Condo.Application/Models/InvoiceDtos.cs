@@ -64,6 +64,7 @@ public class InvoiceDto
     public DateOnly? SeriesVigenciaHasta { get; set; }
     public string? BuildingAddress { get; set; }
     public string? BuildingPhone { get; set; }
+    public DateOnly? PeriodDueDate { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
     public InvoiceStatus Status { get; set; }

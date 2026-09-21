@@ -56,7 +56,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Building != null ? x.Building.Address : null,
                 x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
-                x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc))
+                x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null))
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
@@ -695,7 +696,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Building != null ? x.Building.Address : null,
                 x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
-                x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc))
+                x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null))
             .FirstOrDefaultAsync(cancellationToken);
 
     private static InvoiceDto ToDto(InvoiceRow row) => new()
@@ -717,6 +719,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         SeriesVigenciaHasta = row.SeriesVigenciaHasta,
         BuildingAddress = row.BuildingAddress,
         BuildingPhone = row.BuildingPhone,
+        PeriodDueDate = row.PeriodDueDate,
         Status = row.Status,
         Numero = row.Numero,
         NumeroFormateado = row.NumeroFormateado,
@@ -737,5 +740,6 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         string? SeriesEstablecimiento, string? SeriesPuntoExpedicion, DateOnly? SeriesVigenciaDesde, DateOnly? SeriesVigenciaHasta,
         string? BuildingAddress, string? BuildingPhone,
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
-        DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc);
+        DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
+        DateOnly? PeriodDueDate);
 }

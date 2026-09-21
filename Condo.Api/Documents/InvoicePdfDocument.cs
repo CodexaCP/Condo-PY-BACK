@@ -17,10 +17,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
     private const float PageWidth = 595.2756f;
     private const float PageHeight = 841.8898f;
     private const float RowTopY = 524.4094f;      // linea bajo el encabezado de la tabla
-    private const float RowBottomY = 243.7795f;   // base de la tabla de conceptos
-    private const float TemplateRowHeight = 48.1890f;
-    private const int TemplateRows = 6;
-    private const int MaxRows = 26;
+    private const int MaxRows = 18;
 
     public DocumentMetadata GetMetadata() => new()
     {
@@ -54,23 +51,29 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
 
     private static void DrawFrame(LayersDescriptor l)
     {
-        Rect(l, 34.01575f, 674.6457f, 317.4803f, 133.2283f);
-        Rect(l, 362.8346f, 674.6457f, 198.4252f, 133.2283f);
-        Rect(l, 34.01575f, 572.5984f, 527.2441f, 90.70866f);
-        HLine(l, 34.01575f, 634.9606f, 561.2598f);
+        // Casilla gris del "TOTAL A PAGAR" (se dibuja primero para que las lineas queden encima).
+        FillRect(l, 493.6f, 195.99f, 67.2f, 21.9f, "#E4E4E4");
 
+        Rect(l, 34.01575f, 674.6457f, 317.4803f, 133.2283f);   // edificio / emisor
+        Rect(l, 362.8346f, 674.6457f, 198.4252f, 133.2283f);   // timbrado y numero
+        Rect(l, 34.01575f, 572.5984f, 527.2441f, 90.70866f);   // fecha, condicion, cliente
+
+        // Tabla de conceptos: sin filas, solo columnas (item | concepto | exentas | 5% | 10%).
         Rect(l, 34.01575f, 243.7795f, 527.2441f, 317.4803f);
-        foreach (var x in new[] { 70.86614f, 328.8189f })
-            VLine(l, x, 243.7795f, 561.2598f);
-        // Las divisiones de 5% y 10% arrancan bajo el rotulo "VALOR DE VENTA" para no cruzarlo.
-        foreach (var x in new[] { 411.0236f, 493.2283f })
-            VLine(l, x, 243.7795f, 542.8346f);
+        VLine(l, 70.86614f, 243.7795f, 561.2598f);
+        VLine(l, 328.8189f, 243.7795f, 561.2598f);
+        VLine(l, 411.0236f, 243.7795f, 542.8346f);
+        VLine(l, 493.2283f, 243.7795f, 542.8346f);
         HLine(l, 328.8189f, 542.8346f, 561.2598f);
         HLine(l, 34.01575f, RowTopY, 561.2598f);
 
+        // Totales: la fila de subtotales sigue las columnas y el total tiene su casilla.
         Rect(l, 34.01575f, 147.4016f, 527.2441f, 96.37795f);
         foreach (var y in new[] { 218.2677f, 195.5906f, 172.9134f })
             HLine(l, 34.01575f, y, 561.2598f);
+        foreach (var x in new[] { 328.8189f, 411.0236f, 493.2283f })
+            VLine(l, x, 218.2677f, 243.7795f);
+        VLine(l, 493.2283f, 195.5906f, 218.2677f);
     }
 
     // ─── Emisor y datos del timbrado ─────────────────────────────────────────
@@ -143,35 +146,44 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
 
     private void DrawClientBlock(LayersDescriptor l)
     {
-        var date = invoice.FechaEmisionUtc?.ToLocalTime() ?? invoice.CreatedAtUtc.ToLocalTime();
-        var document = invoice.ClienteDocumento ?? string.Empty;
+        var date = (invoice.FechaEmisionUtc ?? invoice.CreatedAtUtc).ToLocalTime();
+        var document = (invoice.ClienteDocumento ?? string.Empty).Trim();
+        // Un documento con guion es RUC (8540611-2); sin guion es cedula.
+        var isRuc = document.Contains('-');
 
-        Text(l, 45, 645, 7.5f, "FECHA DE EMISIÓN:", bold: true);
-        Text(l, 130, 645, 8, date.ToString("dd/MM/yyyy"));
-        Text(l, 332, 645, 7.5f, "CONDICIÓN DE VENTA:", bold: true);
-        Text(l, 428, 645, 8, "Contado");
+        Text(l, 45, 645, 8.5f, "FECHA DE EMISION:");
+        Text(l, 148, 645, 8.5f, DateInWords(date), bold: true, width: 160);
+        Text(l, 292, 645, 8.5f, "CONDICION DE VENTA:", bold: true);
+        Text(l, 404, 645, 8.5f, "CONTADO", bold: true);
+        CheckBox(l, 452, 642.5f, 11.5f, checkedBox: true);
+        Text(l, 472, 645, 8.5f, "CREDITO", bold: true);
+        CheckBox(l, 517, 642.5f, 11.5f, checkedBox: false);
 
-        Text(l, 45, 615, 7.5f, "NOMBRE O RAZÓN SOCIAL:", bold: true);
-        Text(l, 156, 615, 8, invoice.ClienteNombre ?? string.Empty, width: 208);
-        Text(l, 374, 615, 7.5f, "C.I. / RUC:", bold: true);
-        Text(l, 445, 615, 8, document, width: 110);
+        Text(l, 45, 619, 8.5f, "NOMBRE O RAZON SOCIAL:");
+        Text(l, 172, 619, 9, invoice.ClienteNombre ?? string.Empty, width: 280);
+        Text(l, 470, 619, 8.5f, "C.I. Nº");
+        if (!string.IsNullOrEmpty(document) && !isRuc)
+            Text(l, 497, 619, 9, document, width: 60);
 
-        Text(l, 45, 587, 7.5f, "RUC:", bold: true);
-        Text(l, 79, 587, 8, document, width: 250);
-        Text(l, 374, 587, 7.5f, "UNIDAD / REFERENCIA:", bold: true);
-        Text(l, 473, 587, 8, invoice.UnitCode, width: 85);
+        Text(l, 45, 593, 8.5f, "RUC:");
+        if (!string.IsNullOrEmpty(document) && isRuc)
+            Text(l, 74, 593, 9, document, width: 200);
+        Text(l, 300, 593, 8.5f, "UNIDAD", bold: true);
+        Text(l, 420, 593, 9, invoice.UnitCode, width: 135, align: Align.Right);
     }
 
     // ─── Tabla de conceptos ──────────────────────────────────────────────────
 
     private void DrawDetail(LayersDescriptor l)
     {
-        Text(l, 328.8189f, 549, 8, "VALOR DE VENTA", bold: true, width: 232.4409f, align: Align.Center);
-        Text(l, 43, 537, 8, "ITEM", bold: true);
-        Text(l, 146, 537, 8, "CONCEPTO / DESCRIPCIÓN", bold: true);
-        Text(l, 352, 530, 7.5f, "EXENTAS", bold: true);
-        Text(l, 447, 530, 7.5f, "5%", bold: true);
-        Text(l, 520, 530, 7.5f, "10%", bold: true);
+        const float col1 = 70.86614f, col2 = 328.8189f, col3 = 411.0236f, col4 = 493.2283f, right = 561.2598f;
+
+        Text(l, 34.01575f, 537, 8.5f, "ITEM", width: col1 - 34.01575f, align: Align.Center);
+        Text(l, col1, 537, 9, "CONCEPTO", width: col2 - col1, align: Align.Center);
+        Text(l, col2, 552, 8.5f, "VALOR DE VENTA", width: right - col2, align: Align.Center);
+        Text(l, col2, 531, 8.5f, "EXENTAS", width: col3 - col2, align: Align.Center);
+        Text(l, col3, 531, 8.5f, "5%", width: col4 - col3, align: Align.Center);
+        Text(l, col4, 531, 8.5f, "10%", width: right - col4, align: Align.Center);
 
         var lines = LateFeeGrouping.Collapse(
             invoice.Detalle,
@@ -185,27 +197,20 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
             lines.Add(new InvoiceLineDto { Concepto = $"Otros conceptos ({rest.Count})", Monto = rest.Sum(x => x.Monto) });
         }
 
-        var count = Math.Max(lines.Count, 1);
-        var rowHeight = count <= TemplateRows ? TemplateRowHeight : (RowTopY - RowBottomY) / count;
-        var fontSize = count <= TemplateRows ? 7.5f : 6.5f;
-
-        // Separadores de fila como en la plantilla (solo cuando entran en las 6 filas del modelo).
-        if (count <= TemplateRows)
-        {
-            for (var i = 1; i < TemplateRows; i++)
-                HLine(l, 34.01575f, RowTopY - (i * TemplateRowHeight), 561.2598f);
-        }
+        // Los conceptos se listan de arriba hacia abajo, sin lineas de fila, como en el formulario impreso.
+        const float firstBaseline = 510f;
+        var spacing = lines.Count <= 12 ? 13f : 12f;
+        var fontSize = lines.Count <= 12 ? 8.5f : 8f;
 
         for (var i = 0; i < lines.Count; i++)
         {
-            var rowTop = RowTopY - (i * rowHeight);
-            var baseline = rowTop - Math.Min(19f, rowHeight - 2.5f);
-            var line = lines[i];
-
-            Text(l, 40, baseline, fontSize, (i + 1).ToString(CultureInfo.InvariantCulture), width: 28);
-            Text(l, 77, baseline, fontSize, line.Concepto, width: 248);
-            Text(l, 328.8189f, baseline, fontSize, FormatNumber(line.Monto), width: 77, align: Align.Right);
+            var baseline = firstBaseline - (i * spacing);
+            Text(l, 76, baseline, fontSize, lines[i].Concepto, width: 248);
+            Text(l, col2, baseline, fontSize, FormatNumber(lines[i].Monto), width: col3 - col2 - 6, align: Align.Right);
         }
+
+        if (invoice.PeriodDueDate.HasValue)
+            Text(l, 76, 262, 8.5f, $"Vto. {invoice.PeriodDueDate.Value:dd/MM/yyyy}.");
     }
 
     // ─── Subtotales, total, IVA y letras ─────────────────────────────────────
@@ -214,29 +219,26 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
     {
         var total = invoice.MontoTotal;
 
-        Text(l, 45, 225, 8, "SUBTOTALES", bold: true);
-        Text(l, 329, 225, 7.5f, $"EXENTAS: {FormatNumber(total)}");
-        Text(l, 417, 225, 7.5f, "5%: 0");
-        Text(l, 499, 225, 7.5f, "10%: 0");
+        Text(l, 45, 226, 8.5f, "SUBTOTALES");
+        Text(l, 328.8189f, 226, 8.5f, FormatNumber(total), width: 411.0236f - 328.8189f - 6, align: Align.Right);
 
-        Text(l, 45, 203, 8, "TOTAL A PAGAR", bold: true);
-        Text(l, 411.0236f, 203, 9, FormatNumber(total), bold: true, width: 144, align: Align.Right);
+        Text(l, 45, 203, 8.5f, "TOTAL A PAGAR");
+        Text(l, 493.2283f, 203, 9.5f, FormatNumber(total), bold: true, width: 561.2598f - 493.2283f - 6, align: Align.Right);
 
-        Text(l, 45, 180, 8, "LIQUIDACIÓN DEL IVA", bold: true);
-        Text(l, 218, 180, 7.5f, "5%: 0");
-        Text(l, 332, 180, 7.5f, "10%: 0");
-        Text(l, 457, 180, 7.5f, "TOTAL IVA: 0");
+        Text(l, 45, 180, 8.5f, "LIQUIDACION DEL IVA: (5%)");
+        Text(l, 332, 180, 8.5f, "(10%)");
+        Text(l, 470, 180, 8.5f, "TOTAL IVA:");
 
-        Text(l, 45, 156, 8, "SON:", bold: true);
-        Text(l, 79, 156, 7.5f, NumberToWordsEs.Guaranies(total), width: 478);
+        Text(l, 45, 156, 8.5f, "SON:", bold: true);
+        Text(l, 82, 156, 8.5f, NumberToWordsEs.Guaranies(total), width: 474);
     }
 
     // ─── Pie: copias, anulacion y aviso de borrador ──────────────────────────
 
     private void DrawFooter(LayersDescriptor l)
     {
-        Text(l, 34.01575f, 130, 6.5f, "Original: Comprador - Copia: Archivo Tributario", width: 527.2441f, align: Align.Right);
-        Text(l, 34.01575f, 118, 6.5f, "2° Copia: Contabilidad / Archivo (cuando corresponda)", width: 527.2441f, align: Align.Right);
+        Text(l, 34.01575f, 131, 6.5f, "Original: Comprador - Copia: Arch. Tributario", bold: true, width: 527.2441f, align: Align.Right);
+        Text(l, 34.01575f, 122, 6.5f, "2°Copia: Contabilidad(No válido p/ crédito fiscal)", bold: true, width: 527.2441f, align: Align.Right);
 
         if (invoice.Status == InvoiceStatus.Voided)
         {
@@ -254,6 +256,23 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
     // ─── Utilidades de dibujo (coordenadas de la plantilla, origen abajo-izquierda) ─
 
     private enum Align { Left, Center, Right }
+
+    private static readonly string[] Months =
+        ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+
+    // "7 DE AGOSTO DE 2026", como se escribe en el formulario impreso.
+    private static string DateInWords(DateTime date) => $"{date.Day} DE {Months[date.Month - 1]} DE {date.Year}";
+
+    private static void FillRect(LayersDescriptor l, float x, float bottomY, float width, float height, string color) =>
+        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height).Background(color);
+
+    // Casilla cuadrada (Contado / Credito); marcada lleva una X.
+    private static void CheckBox(LayersDescriptor l, float x, float bottomY, float size, bool checkedBox)
+    {
+        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, size)).Width(size).Height(size).Border(0.9f).BorderColor(Colors.Black);
+        if (checkedBox)
+            Text(l, x, bottomY + 2.2f, size - 1.5f, "X", bold: true, width: size, align: Align.Center);
+    }
 
     private static float TopOf(float bottomY, float height) => PageHeight - bottomY - height;
 
