@@ -176,7 +176,9 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         var created = new List<Guid>();
         var skipped = 0;
 
-        foreach (var unitGroup in payments.GroupBy(x => x.Id))
+        // Una factura por comprobante (unidad + periodo). Los pagos aprobados con la regla anterior tenían un
+        // registro por línea; agrupar por comprobante evita generar una factura por cada línea.
+        foreach (var unitGroup in payments.GroupBy(x => (x.UnitId, x.ExpensePeriodId)))
         {
             var unit = unitGroup.First().Unit!;
             if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) continue;
