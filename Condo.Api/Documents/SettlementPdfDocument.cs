@@ -165,6 +165,9 @@ public sealed class SettlementPdfDocument(
         ["ReserveFund"] = "Fondo de reserva",
         ["Extraordinary"] = "Extraordinario",
         ["Supplies"] = "Insumos",
+        ["Ande"] = "ANDE",
+        ["Essap"] = "ESSAP",
+        ["InternetPhone"] = "Internet y telefonia",
         ["Other"] = "Otro"
     };
 

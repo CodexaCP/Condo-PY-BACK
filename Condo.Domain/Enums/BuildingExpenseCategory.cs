@@ -14,5 +14,8 @@ public enum BuildingExpenseCategory
     ReserveFund = 10,
     Extraordinary = 11,
     Supplies = 12,
-    Other = 13
+    Other = 13,
+    Ande = 14,
+    Essap = 15,
+    InternetPhone = 16
 }
