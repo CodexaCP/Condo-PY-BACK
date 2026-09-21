@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
 using QuestPDF.Fluent;
@@ -132,7 +133,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
         Text(l, 447, 530, 7.5f, "5%", bold: true);
         Text(l, 520, 530, 7.5f, "10%", bold: true);
 
-        var lines = invoice.Detalle.ToList();
+        var lines = CollapseLateFees(invoice.Detalle);
         if (lines.Count > MaxRows)
         {
             var rest = lines.Skip(MaxRows - 1).ToList();
@@ -162,6 +163,56 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
             Text(l, 328.8189f, baseline, fontSize, FormatNumber(line.Monto), width: 77, align: Align.Right);
         }
     }
+
+    // Las moras automaticas ("Mora 0.66% (diario) #94 — Mayo 2026") se muestran en una sola linea por
+    // porcentaje: "Mora 0.66% (diario) por un total de 12 días" con la suma. El resto de conceptos va tal cual.
+    private static readonly Regex LateFeePattern =
+        new(@"^Mora\s+(?<rate>[\d.,]+%)\s*\((?<freq>[^)]+)\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static List<InvoiceLineDto> CollapseLateFees(IEnumerable<InvoiceLineDto> detail)
+    {
+        var result = new List<InvoiceLineDto>();
+        var groups = new Dictionary<string, (InvoiceLineDto Line, int Count, string Rate, string Freq)>();
+
+        foreach (var line in detail)
+        {
+            var match = LateFeePattern.Match(line.Concepto ?? string.Empty);
+            if (!match.Success)
+            {
+                result.Add(line);
+                continue;
+            }
+
+            var rate = match.Groups["rate"].Value;
+            var freq = match.Groups["freq"].Value.Trim();
+            var key = $"{rate}|{freq}".ToLowerInvariant();
+
+            if (groups.TryGetValue(key, out var group))
+            {
+                group.Line.Monto += line.Monto;
+                groups[key] = (group.Line, group.Count + 1, rate, freq);
+            }
+            else
+            {
+                var merged = new InvoiceLineDto { Concepto = string.Empty, ChargeType = line.ChargeType, Monto = line.Monto };
+                groups[key] = (merged, 1, rate, freq);
+                result.Add(merged);
+            }
+        }
+
+        foreach (var (line, count, rate, freq) in groups.Values)
+            line.Concepto = $"Mora {rate} ({freq}) por un total de {count} {IntervalLabel(freq, count)}";
+
+        return result;
+    }
+
+    private static string IntervalLabel(string frequency, int count) => frequency.ToLowerInvariant() switch
+    {
+        "diario" => count == 1 ? "día" : "días",
+        "semanal" => count == 1 ? "semana" : "semanas",
+        "quincenal" => count == 1 ? "quincena" : "quincenas",
+        _ => count == 1 ? "intervalo" : "intervalos"
+    };
 
     // ─── Subtotales, total, IVA y letras ─────────────────────────────────────
 
