@@ -17,10 +17,21 @@ public class ExpensePeriodsController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
-    IExpenseSettlementDistributionService distributionService) : ControllerBase
+    IExpenseSettlementDistributionService distributionService,
+    IWebHostEnvironment env) : ControllerBase
 {
     private const decimal CoefficientDistributionExpectedTotal = 1.00m;
     private const decimal CoefficientDistributionTolerance = 0.0001m;
+    // Permisos de liquidacion: CompanyOperator solo calcula; BuildingManager ademas aprueba;
+    // CompanyAdmin (presidente) ademas publica. SuperAdmin equivale a CompanyAdmin.
+    private bool CanApproveSettlement() =>
+        tenantContext.IsSuperAdmin ||
+        string.Equals(tenantContext.Role, "CompanyAdmin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanPublishSettlement() =>
+        tenantContext.IsSuperAdmin ||
+        string.Equals(tenantContext.Role, "CompanyAdmin", StringComparison.OrdinalIgnoreCase);
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ExpensePeriodDto>>> GetAll(CancellationToken cancellationToken)
@@ -464,6 +475,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/approve-settlement")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> ApproveSettlement(Guid id, CancellationToken cancellationToken)
     {
+        if (!CanApproveSettlement()) return Forbid();
+
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
@@ -555,6 +568,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/publish")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> Publish(Guid id, CancellationToken cancellationToken)
     {
+        if (!CanPublishSettlement()) return Forbid();
+
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
@@ -610,6 +625,8 @@ public class ExpensePeriodsController(
         [FromBody] ApplyLateFeesRequest request,
         CancellationToken cancellationToken)
     {
+        if (!CanApproveSettlement()) return Forbid();
+
         if (request.RatePercentage <= 0m)
         {
             return BadRequest("El porcentaje de recargo debe ser mayor que cero.");
@@ -717,6 +734,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/void-settlement")]
     public async Task<ActionResult<VoidSettlementResultDto>> VoidSettlement(Guid id, CancellationToken cancellationToken)
     {
+        if (!CanApproveSettlement()) return Forbid();
+
         var period = await dbContext.ExpensePeriods
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
@@ -776,6 +795,65 @@ public class ExpensePeriodsController(
         });
     }
 
+    // Firma al pie: izquierda quien aprobo la liquidacion, derecha quien la publico (presidente).
+    // Se usa la firma precargada del usuario; si publica el mismo que aprobo, se muestra una sola vez.
+    private async Task<(SettlementSignature? Approver, SettlementSignature? Publisher)> LoadSettlementSignaturesAsync(
+        Guid periodId, CancellationToken cancellationToken)
+    {
+        var settlement = await dbContext.ExpenseSettlements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == periodId, cancellationToken);
+
+        if (settlement is null) return (null, null);
+
+        var userIds = new List<Guid>();
+        if (settlement.ApprovedByUserId.HasValue) userIds.Add(settlement.ApprovedByUserId.Value);
+        if (settlement.PublishedByUserId.HasValue) userIds.Add(settlement.PublishedByUserId.Value);
+
+        var users = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => userIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        SettlementSignature? Build(Guid? userId)
+        {
+            if (!userId.HasValue || !users.TryGetValue(userId.Value, out var user)) return null;
+
+            var name = string.IsNullOrWhiteSpace(user.FullName)
+                ? $"{user.FirstName} {user.LastName}".Trim()
+                : user.FullName;
+            var title = user.Role switch
+            {
+                UserRole.CompanyAdmin => "Presidente de la comunidad",
+                UserRole.BuildingManager => "Encargado de edificio",
+                UserRole.CompanyOperator => "Operador de empresa",
+                _ => "Administrador"
+            };
+
+            return new SettlementSignature(name, title, ReadSignatureImage(user.SignatureUrl));
+        }
+
+        var approver = Build(settlement.ApprovedByUserId);
+        var publisher = settlement.PublishedByUserId == settlement.ApprovedByUserId ? null : Build(settlement.PublishedByUserId);
+        return (approver, publisher);
+    }
+
+    private byte[]? ReadSignatureImage(string? signatureUrl)
+    {
+        if (string.IsNullOrWhiteSpace(signatureUrl) || !Uri.TryCreate(signatureUrl, UriKind.Absolute, out var uri))
+            return null;
+
+        var fileName = Path.GetFileName(uri.AbsolutePath);
+        if (string.IsNullOrEmpty(fileName) || !uri.AbsolutePath.Contains("/uploads/", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        if (extension is not (".png" or ".jpg" or ".jpeg")) return null;
+
+        var path = Path.Combine(env.WebRootPath, "uploads", fileName);
+        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
+    }
+
     [HttpGet("{id:guid}/settlement-pdf")]
     public async Task<IActionResult> DownloadSettlementPdf(Guid id, CancellationToken cancellationToken)
     {
@@ -802,11 +880,15 @@ public class ExpensePeriodsController(
             return BadRequest("El período todavía no tiene una liquidación calculada para exportar.");
         }
 
+        var (approverSignature, publisherSignature) = await LoadSettlementSignaturesAsync(id, cancellationToken);
+
         var document = new SettlementPdfDocument(
             summary,
             period.StartDate.ToString("dd/MM/yyyy"),
             period.EndDate.ToString("dd/MM/yyyy"),
-            period.DueDate.ToString("dd/MM/yyyy"));
+            period.DueDate.ToString("dd/MM/yyyy"),
+            approverSignature,
+            publisherSignature);
 
         var pdfBytes = document.GeneratePdf();
         var fileName = $"liquidacion_{summary.ExpensePeriodName.Replace(" ", "_")}_{summary.BuildingName.Replace(" ", "_")}.pdf";

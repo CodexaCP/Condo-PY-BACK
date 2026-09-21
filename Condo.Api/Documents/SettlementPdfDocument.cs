@@ -5,11 +5,15 @@ using QuestPDF.Infrastructure;
 
 namespace Condo.Api.Documents;
 
+public sealed record SettlementSignature(string Name, string Title, byte[]? Image);
+
 public sealed class SettlementPdfDocument(
     ExpenseSettlementSummaryDto summary,
     string periodStartDate,
     string periodEndDate,
-    string periodDueDate) : IDocument
+    string periodDueDate,
+    SettlementSignature? approver = null,
+    SettlementSignature? publisher = null) : IDocument
 {
     private const string ColorPrimary = "#1385B6";
     private const string ColorAccent = "#1AB7AF";
@@ -24,6 +28,8 @@ public sealed class SettlementPdfDocument(
         Author = "CONDOPY"
     };
 
+    private bool hasSignatures => approver is not null || publisher is not null;
+
     public void Compose(IDocumentContainer container)
     {
         container.Page(page =>
@@ -33,7 +39,14 @@ public sealed class SettlementPdfDocument(
             page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(9));
 
             page.Header().Element(ComposeHeader);
-            page.Content().Element(ComposeBody);
+            page.Content().Layers(layers =>
+            {
+                layers.PrimaryLayer().PaddingBottom(hasSignatures ? 110 : 0).Element(ComposeBody);
+                if (hasSignatures)
+                {
+                    layers.Layer().AlignBottom().Element(ComposeSignatures);
+                }
+            });
             page.Footer().Element(ComposeFooter);
         });
     }
@@ -218,6 +231,32 @@ public sealed class SettlementPdfDocument(
                 table.Cell().Background(ColorAccent).Padding(4).AlignRight()
                     .Text(FormatCurrency(total)).FontColor(ColorWhite).Bold();
             });
+        });
+    }
+
+    private void ComposeSignatures(IContainer container)
+    {
+        container.Row(row =>
+        {
+            row.RelativeItem().Element(c => ComposeSignatureBlock(c, approver));
+            row.ConstantItem(40);
+            row.RelativeItem().Element(c => ComposeSignatureBlock(c, publisher));
+        });
+    }
+
+    private static void ComposeSignatureBlock(IContainer container, SettlementSignature? signature)
+    {
+        if (signature is null) return;
+
+        container.AlignCenter().Column(col =>
+        {
+            col.Item().Height(50).AlignCenter().AlignBottom().Element(img =>
+            {
+                if (signature.Image is { Length: > 0 }) img.Image(signature.Image).FitArea();
+            });
+            col.Item().PaddingTop(2).LineHorizontal(0.75f).LineColor(ColorGray);
+            col.Item().PaddingTop(3).AlignCenter().Text(signature.Name).Bold().FontColor(ColorPrimary);
+            col.Item().AlignCenter().Text(signature.Title).FontColor(ColorGray);
         });
     }
 

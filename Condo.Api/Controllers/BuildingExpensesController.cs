@@ -14,6 +14,7 @@ namespace Condo.Api.Controllers;
 public class BuildingExpensesController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
+    ITenantContext tenantContext,
     IWebHostEnvironment env) : ControllerBase
 {
     private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
@@ -218,6 +219,9 @@ public class BuildingExpensesController(
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
+        // El operador solo carga, edita y adjunta comprobantes; no elimina gastos.
+        if (string.Equals(tenantContext.Role, "CompanyOperator", StringComparison.OrdinalIgnoreCase)) return Forbid();
+
         var entity = await dbContext.BuildingExpenses
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
