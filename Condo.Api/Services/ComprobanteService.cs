@@ -37,7 +37,10 @@ public sealed record ComprobanteCoverage(bool Exact, List<Comprobante> Covered, 
 
 public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService credits)
 {
-    private const decimal Tolerance = 0.01m;
+    // El guarani no tiene decimales y el usuario declara montos enteros, pero los cargos (sobre todo la
+    // mora diaria, redondeada a 2 decimales) suman fracciones. Se acepta hasta medio guarani de diferencia,
+    // igual que la app; al liquidar se imputa el pendiente exacto de cada linea.
+    private const decimal Tolerance = 0.5m;
 
     /// <summary>
     /// Comprobantes pendientes de las unidades (solo periodos publicados), del mas antiguo al mas
