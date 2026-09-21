@@ -507,6 +507,7 @@ public class OwnerPaymentsController(
 
         var charges = await dbContext.ExpenseCharges
             .Include(x => x.ExpensePeriod)
+            .Include(x => x.Unit).ThenInclude(u => u!.Building)
             .Include(x => x.Allocations.Where(a => !a.IsDeleted))
             .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId)
             .ToListAsync(ct);
@@ -516,6 +517,9 @@ public class OwnerPaymentsController(
             .OrderBy(c => c.ExpensePeriod!.Year)
             .ThenBy(c => c.ExpensePeriod!.Month)
             .ThenByDescending(c => c.Amount)
+            // Desempate fijo entre unidades con el mismo periodo y monto: edificio y luego unidad.
+            .ThenBy(c => c.Unit!.Building!.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.Unit!.Code, StringComparer.OrdinalIgnoreCase)
             .ThenBy(c => c.CreatedAtUtc)
             .ToList();
 
@@ -593,6 +597,7 @@ public class OwnerPaymentsController(
 
         var charges = await dbContext.ExpenseCharges
             .Include(x => x.ExpensePeriod)
+            .Include(x => x.Unit).ThenInclude(u => u!.Building)
             .Include(x => x.Allocations.Where(a => !a.IsDeleted))
             .Where(x => !x.IsDeleted && !x.IsReversal && unitIds.Contains(x.UnitId) && x.CompanyId == companyId)
             .ToListAsync(ct);
@@ -602,6 +607,9 @@ public class OwnerPaymentsController(
             .OrderBy(c => c.ExpensePeriod!.Year)
             .ThenBy(c => c.ExpensePeriod!.Month)
             .ThenByDescending(c => c.Amount)
+            // Desempate fijo entre unidades con el mismo periodo y monto: edificio y luego unidad.
+            .ThenBy(c => c.Unit!.Building!.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.Unit!.Code, StringComparer.OrdinalIgnoreCase)
             .ThenBy(c => c.CreatedAtUtc)
             .ToList();
 
