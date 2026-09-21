@@ -499,11 +499,7 @@ public class OwnerPaymentsController(
         if (credit is null || credit.Amount <= 0)
             return BadRequest("El propietario no tiene saldo a favor.");
 
-        var unitIds = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId)
-            .Select(x => x.UnitId)
-            .ToListAsync(ct);
+        var unitIds = await LoadLinkedUnitIdsAsync(ownerId, companyId, ct);
 
         var available = credit.Amount;
         var paymentDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -530,7 +526,8 @@ public class OwnerPaymentsController(
         {
             if (available <= 0) break;
             var pendingAmount = charge.Amount - charge.Allocations.Sum(a => a.AllocatedAmount);
-            if (available < pendingAmount) continue;
+            // Siempre del más antiguo al más reciente: nunca se salta un cargo antiguo.
+            if (available < pendingAmount) break;
 
             var paymentRecord = new Payment
             {
@@ -617,7 +614,9 @@ public class OwnerPaymentsController(
             if (available <= 0) break;
 
             var pendingAmount = charge.Amount - charge.Allocations.Sum(a => a.AllocatedAmount);
-            if (available < pendingAmount) continue;
+            // Regla: siempre del más antiguo al más reciente. Si no alcanza para el cargo más
+            // antiguo pendiente, no se salta a uno más nuevo: el resto queda como saldo a favor.
+            if (available < pendingAmount) break;
 
             var paymentRecord = new Payment
             {
