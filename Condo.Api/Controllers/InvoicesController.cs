@@ -97,11 +97,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         var alreadyInvoiced = await dbContext.Invoices.AnyAsync(x =>
             !x.IsDeleted && x.PaymentId == request.PaymentId && x.Status != InvoiceStatus.Voided, cancellationToken);
 
-        var coveredByOwnerPaymentInvoice = await dbContext.Invoices.AnyAsync(x =>
-            !x.IsDeleted && x.Status != InvoiceStatus.Voided && x.UnitId == payment.UnitId
-            && x.OwnerPayment != null && x.OwnerPayment.Reference == payment.Reference, cancellationToken);
-
-        if (alreadyInvoiced || coveredByOwnerPaymentInvoice)
+        if (alreadyInvoiced)
         {
             return Conflict("Este pago ya tiene una factura vigente (borrador o emitida).");
         }
@@ -147,8 +143,9 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(row!));
     }
 
-    // Un pago de propietario aprobado puede cubrir varias unidades y varios cargos (capital y mora).
-    // Se prepara un borrador por unidad con todo lo aplicado a esa unidad, ligado al pago aprobado.
+    // Un pago de propietario aprobado cubre uno o más comprobantes completos (unidad + periodo). Cada
+    // comprobante queda registrado como un pago; se prepara un borrador de factura por comprobante
+    // (capital y mora), ligado al pago aprobado: unidad, comprobante, pago y factura quedan enlazados.
     [HttpPost("draft-from-owner-payment")]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> CreateDraftsFromOwnerPayment(
         [FromBody] CreateOwnerPaymentInvoiceDraftsRequest request, CancellationToken cancellationToken)
@@ -179,15 +176,14 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         var created = new List<Guid>();
         var skipped = 0;
 
-        foreach (var unitGroup in payments.GroupBy(x => x.UnitId))
+        foreach (var unitGroup in payments.GroupBy(x => x.Id))
         {
             var unit = unitGroup.First().Unit!;
             if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) continue;
 
             var paymentIds = unitGroup.Select(x => x.Id).ToList();
             var alreadyInvoiced = await dbContext.Invoices.AnyAsync(x =>
-                !x.IsDeleted && x.Status != InvoiceStatus.Voided && x.UnitId == unit.Id
-                && (x.OwnerPaymentId == ownerPayment.Id || paymentIds.Contains(x.PaymentId)), cancellationToken);
+                !x.IsDeleted && x.Status != InvoiceStatus.Voided && paymentIds.Contains(x.PaymentId), cancellationToken);
             if (alreadyInvoiced)
             {
                 skipped++;
@@ -229,7 +225,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
 
             await LogAsync(entity.Id, entity.CompanyId, InvoiceAuditAction.DraftCreated, before: null,
                 after: new { entity.Id, entity.OwnerPaymentId, entity.UnitId, entity.MontoTotal, entity.Status },
-                detalle: $"Borrador creado a partir del pago aprobado {ownerPayment.Reference} (unidad {unit.Code}).", cancellationToken);
+                detalle: $"Borrador creado a partir del pago aprobado {ownerPayment.Reference} (comprobante de la unidad {unit.Code}).", cancellationToken);
 
             created.Add(entity.Id);
         }

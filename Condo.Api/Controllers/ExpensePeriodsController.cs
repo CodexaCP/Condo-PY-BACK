@@ -1630,6 +1630,8 @@ public class ExpensePeriodsController(
     // el propietario puede usar "Aplicar" manualmente.
     private async Task ApplyOwnerCreditsAsync(ExpensePeriod period, CancellationToken ct)
     {
+        if (!OwnerCreditFeature.Enabled) return;
+
         var userIds = await GetBuildingUserIdsAsync(period.BuildingId, ct);
         if (userIds.Count == 0) return;
 

@@ -1,4 +1,5 @@
 using Condo.Api.Documents;
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -13,7 +14,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/payments")]
-public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ComprobanteService comprobantes) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<PaymentDto>>> GetAll(
@@ -154,11 +155,17 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
         var (contextError, period, unit) = await LoadAndValidateContextAsync(request, cancellationToken);
         if (contextError is not null) return contextError;
 
-        if (request.Allocations.Count > 0)
-        {
-            var allocValidation = await ValidateAllocationsAsync(request, unit!, cancellationToken);
-            if (allocValidation is not null) return allocValidation;
-        }
+        // Un comprobante = un pago completo: se paga la totalidad de la unidad en el periodo o no se paga.
+        var comprobante = await comprobantes.LoadUnitPeriodAsync(request.UnitId, request.ExpensePeriodId, unit!.CompanyId, cancellationToken);
+        if (comprobante is null)
+            return BadRequest("El comprobante de esta unidad y periodo no tiene deuda pendiente.");
+        if (Math.Abs(request.Amount - comprobante.Total) > 0.01m)
+            return BadRequest($"El pago debe cubrir la totalidad del comprobante: Gs. {ComprobanteService.Gs(comprobante.Total)}. " +
+                              "No se aceptan pagos parciales ni por línea.");
+
+        request.Allocations = comprobante.Lines
+            .Select(l => new AllocationRequest { ExpenseChargeId = l.Charge.Id, Amount = l.Pending })
+            .ToList();
 
         var entity = new Payment
         {
@@ -203,11 +210,13 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
         var (contextError, period, unit) = await LoadAndValidateContextAsync(request, cancellationToken);
         if (contextError is not null) return contextError;
 
-        if (request.Allocations.Count > 0)
-        {
-            var allocValidation = await ValidateAllocationsAsync(request, unit!, cancellationToken, excludePaymentId: id);
-            if (allocValidation is not null) return allocValidation;
-        }
+        // El monto, la unidad y el periodo de un pago no se cambian (un pago es un comprobante completo).
+        if (request.UnitId != entity.UnitId || request.ExpensePeriodId != entity.ExpensePeriodId
+            || Math.Abs(request.Amount - entity.Amount) > 0.01m)
+            return BadRequest("No se puede cambiar el monto, la unidad ni el periodo de un pago: revierta el pago y regístrelo de nuevo.");
+
+        // Las imputaciones existentes se conservan.
+        request.Allocations = new List<AllocationRequest>();
 
         entity.CompanyId = unit!.CompanyId;
         entity.ExpensePeriodId = request.ExpensePeriodId;
@@ -218,21 +227,7 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
         entity.Reference = request.Reference.Trim();
         entity.Notes = request.Notes.Trim();
 
-        var existingAllocations = await dbContext.PaymentAllocations
-            .Where(a => !a.IsDeleted && a.PaymentId == id)
-            .ToListAsync(cancellationToken);
-
-        foreach (var alloc in existingAllocations)
-        {
-            alloc.IsDeleted = true;
-        }
-
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        if (request.Allocations.Count > 0)
-        {
-            await SaveAllocationsAsync(entity, request.Allocations, unit!.CompanyId, cancellationToken);
-        }
 
         return Ok(await BuildDtoAsync(entity, period!.Name, unit!, cancellationToken));
     }
