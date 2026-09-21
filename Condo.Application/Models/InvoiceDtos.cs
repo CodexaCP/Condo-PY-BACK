@@ -58,6 +58,14 @@ public class InvoiceDto
     public string? SeriesRazonSocial { get; set; }
     public string? SeriesRuc { get; set; }
     public string? SeriesNumeroTimbrado { get; set; }
+    public string? SeriesEstablecimiento { get; set; }
+    public string? SeriesPuntoExpedicion { get; set; }
+    public DateOnly? SeriesVigenciaDesde { get; set; }
+    public DateOnly? SeriesVigenciaHasta { get; set; }
+    public string? BuildingAddress { get; set; }
+    public string? BuildingPhone { get; set; }
+    public string? ClienteNombre { get; set; }
+    public string? ClienteDocumento { get; set; }
     public InvoiceStatus Status { get; set; }
     public long? Numero { get; set; }
     public string? NumeroFormateado { get; set; }

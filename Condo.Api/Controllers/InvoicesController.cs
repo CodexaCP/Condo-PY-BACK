@@ -49,6 +49,12 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Series != null ? x.Series.RazonSocial : null,
                 x.Series != null ? x.Series.Ruc : null,
                 x.Series != null ? x.Series.NumeroTimbrado : null,
+                x.Series != null ? x.Series.Establecimiento : null,
+                x.Series != null ? x.Series.PuntoExpedicion : null,
+                x.Series != null ? x.Series.VigenciaDesde : null,
+                x.Series != null ? x.Series.VigenciaHasta : null,
+                x.Building != null ? x.Building.Address : null,
+                x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc))
             .ToListAsync(cancellationToken);
@@ -146,6 +152,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         if (!await accessScope.CanAccessBuildingAsync(row.BuildingId, cancellationToken)) return Forbid();
 
         var dto = ToDto(row);
+        (dto.ClienteNombre, dto.ClienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
         var document = new InvoicePdfDocument(dto);
         var pdfBytes = document.GeneratePdf();
 
@@ -319,6 +326,25 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         return Ok(ToDto(row!));
     }
 
+    // Cliente de la factura: propietario principal de la unidad (o el primero); si no hay, el residente actual.
+    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        var owner = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.Owner != null)
+            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
+            .Select(x => new { x.Owner!.FullName, x.Owner.DocumentNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (owner is not null) return (owner.FullName, owner.DocumentNumber);
+
+        var resident = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null && x.Resident != null)
+            .Select(x => new { x.Resident!.FullName, x.Resident.DocumentNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        return (resident?.FullName, resident?.DocumentNumber);
+    }
+
     private bool CanManageInvoices() =>
         accessScope.IsSuperAdmin ||
         accessScope.IsCompanyAdmin ||
@@ -351,6 +377,12 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Series != null ? x.Series.RazonSocial : null,
                 x.Series != null ? x.Series.Ruc : null,
                 x.Series != null ? x.Series.NumeroTimbrado : null,
+                x.Series != null ? x.Series.Establecimiento : null,
+                x.Series != null ? x.Series.PuntoExpedicion : null,
+                x.Series != null ? x.Series.VigenciaDesde : null,
+                x.Series != null ? x.Series.VigenciaHasta : null,
+                x.Building != null ? x.Building.Address : null,
+                x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
@@ -368,6 +400,12 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         SeriesRazonSocial = row.SeriesRazonSocial,
         SeriesRuc = row.SeriesRuc,
         SeriesNumeroTimbrado = row.SeriesNumeroTimbrado,
+        SeriesEstablecimiento = row.SeriesEstablecimiento,
+        SeriesPuntoExpedicion = row.SeriesPuntoExpedicion,
+        SeriesVigenciaDesde = row.SeriesVigenciaDesde,
+        SeriesVigenciaHasta = row.SeriesVigenciaHasta,
+        BuildingAddress = row.BuildingAddress,
+        BuildingPhone = row.BuildingPhone,
         Status = row.Status,
         Numero = row.Numero,
         NumeroFormateado = row.NumeroFormateado,
@@ -385,6 +423,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         Guid UnitId, string UnitCode,
         Guid PaymentId, Guid? InvoiceSeriesId,
         string? SeriesRazonSocial, string? SeriesRuc, string? SeriesNumeroTimbrado,
+        string? SeriesEstablecimiento, string? SeriesPuntoExpedicion, DateOnly? SeriesVigenciaDesde, DateOnly? SeriesVigenciaHasta,
+        string? BuildingAddress, string? BuildingPhone,
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc);
 }
