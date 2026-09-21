@@ -247,6 +247,42 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         });
     }
 
+    // Facturas emitidas de los pagos de esta unidad en este periodo (para descargarlas desde la app).
+    [HttpGet("units/{unitId:guid}/periods/{expensePeriodId:guid}/invoices")]
+    public async Task<ActionResult<IReadOnlyList<OwnerPaymentInvoiceDto>>> GetUnitPeriodInvoices(
+        Guid unitId, Guid expensePeriodId, CancellationToken cancellationToken)
+    {
+        var unit = await dbContext.Units
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == unitId, cancellationToken);
+
+        if (unit is null) return NotFound();
+        if (!await CanAccessUnitAsync(unit, cancellationToken)) return Forbid();
+
+        var periodVisible = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .AnyAsync(x => !x.IsDeleted && x.Id == expensePeriodId && x.BuildingId == unit.BuildingId
+                           && (!IsEndUser || x.Status == ExpensePeriodStatus.Published), cancellationToken);
+        if (!periodVisible) return NotFound();
+
+        var invoices = await dbContext.Invoices
+            .AsNoTracking()
+            .Where(i => !i.IsDeleted && i.UnitId == unitId && i.Status == InvoiceStatus.Issued
+                        && i.Payment != null && !i.Payment.IsReversed && i.Payment.ExpensePeriodId == expensePeriodId)
+            .OrderBy(i => i.Numero)
+            .Select(i => new OwnerPaymentInvoiceDto
+            {
+                Id = i.Id,
+                NumeroFormateado = i.NumeroFormateado,
+                UnitCode = unit.Code,
+                MontoTotal = i.MontoTotal,
+                FechaEmisionUtc = i.FechaEmisionUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(invoices);
+    }
+
     [HttpGet("units/{unitId:guid}/periods/{expensePeriodId:guid}/receipt")]
     public async Task<ActionResult<ExpenseReceiptDto>> GetExpenseReceipt(Guid unitId, Guid expensePeriodId, CancellationToken cancellationToken)
     {

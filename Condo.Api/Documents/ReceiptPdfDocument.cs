@@ -146,7 +146,16 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                 });
 
                 var isOdd = true;
-                foreach (var charge in receipt.Charges)
+                var charges = LateFeeGrouping.Collapse(
+                    receipt.Charges,
+                    c => c.IsReversal ? null : c.Concept,
+                    c => c.Amount,
+                    (first, sum, label) => new ExpenseReceiptChargeDto
+                    {
+                        Id = first.Id, ChargeType = first.ChargeType, Concept = label, Amount = sum, Notes = string.Empty, IsReversal = false
+                    });
+
+                foreach (var charge in charges)
                 {
                     var bg = charge.IsReversal ? ColorReversalBg : (isOdd ? ColorWhite : ColorRowAlt);
                     if (!charge.IsReversal) isOdd = !isOdd;
