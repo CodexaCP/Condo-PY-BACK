@@ -79,23 +79,64 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
     {
         var issued = invoice.Status != InvoiceStatus.Draft;
 
-        Text(l, 45, 791, 7, "EDIFICIO / EMISOR", color: Colors.Grey.Darken2);
-        Text(l, 45, 765, 14, invoice.BuildingName, bold: true, width: 295);
-        Text(l, 45, 748, 9, invoice.SeriesRazonSocial ?? string.Empty, width: 295);
-        Text(l, 45, 731, 8, string.IsNullOrEmpty(invoice.SeriesRuc) ? string.Empty : $"RUC: {invoice.SeriesRuc}", width: 295);
-        Text(l, 45, 714, 8, invoice.BuildingAddress ?? string.Empty, width: 295);
-        Text(l, 45, 697, 8, string.IsNullOrEmpty(invoice.BuildingPhone) ? string.Empty : $"Tel.: {invoice.BuildingPhone}", width: 295);
+        // Caja izquierda: el edificio a la izquierda; razon social, direccion y telefono a la derecha.
+        Text(l, 48, 793, 7.5f, "Edificio", color: Colors.Grey.Darken1);
+        l.Layer().TranslateX(48).TranslateY(PageHeight - 758f).Width(126f).Column(col =>
+        {
+            col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(15).Bold().FontColor("#14363d");
+        });
 
+        l.Layer().TranslateX(182).TranslateY(PageHeight - 784f).Width(164f).Column(col =>
+        {
+            if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
+                col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(10).Bold();
+
+            if (!string.IsNullOrWhiteSpace(invoice.BuildingAddress))
+                col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(8).Bold();
+
+            if (!string.IsNullOrWhiteSpace(invoice.BuildingPhone))
+                col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(8).Bold();
+        });
+
+        // Caja derecha: timbrado, vigencia, RUC, tipo de documento y numero.
         const float boxX = 362.8346f, boxW = 198.4252f;
-        Text(l, boxX, 791, 8, string.IsNullOrEmpty(invoice.SeriesNumeroTimbrado) ? "TIMBRADO N°" : $"TIMBRADO N° {invoice.SeriesNumeroTimbrado}",
+        Text(l, boxX, 795, 9.5f, string.IsNullOrEmpty(invoice.SeriesNumeroTimbrado) ? "TIMBRADO N°" : $"TIMBRADO N°{invoice.SeriesNumeroTimbrado}",
             bold: true, width: boxW, align: Align.Center);
-        Text(l, boxX, 777, 7, $"Fecha Inicio: {Date(invoice.SeriesVigenciaDesde)}", width: boxW, align: Align.Center);
-        Text(l, boxX, 763, 7, $"Fecha Fin: {Date(invoice.SeriesVigenciaHasta)}", width: boxW, align: Align.Center);
-        Text(l, boxX, 746, 9, string.IsNullOrEmpty(invoice.SeriesRuc) ? "RUC:" : $"RUC: {invoice.SeriesRuc}", bold: true, width: boxW, align: Align.Center);
-        Text(l, boxX, 723, 17, "FACTURA", bold: true, width: boxW, align: Align.Center);
-        Text(l, boxX, 703, 12, issued ? invoice.NumeroFormateado ?? string.Empty : "SIN NUMERAR", bold: true, width: boxW, align: Align.Center,
-            color: issued ? Colors.Black : "#B45309");
-        Text(l, boxX, 686, 7, "CONDICIÓN: CONTADO", width: boxW, align: Align.Center);
+        Text(l, boxX, 783, 7.5f, $"Fecha Inicio Vigencia:{Date(invoice.SeriesVigenciaDesde)}", width: boxW, align: Align.Center);
+        Text(l, boxX, 773, 7.5f, $"Fecha Fin Vigencia:{Date(invoice.SeriesVigenciaHasta)}", width: boxW, align: Align.Center);
+        Text(l, boxX, 760, 10.5f, string.IsNullOrEmpty(invoice.SeriesRuc) ? "RUC:" : $"RUC:{invoice.SeriesRuc}", bold: true, width: boxW, align: Align.Center);
+        Text(l, boxX, 738, 19, "FACTURA", bold: true, width: boxW, align: Align.Center);
+
+        // Linea tenue con el numero y la condicion, como en el formulario impreso.
+        if (issued && !string.IsNullOrEmpty(invoice.NumeroFormateado))
+            Text(l, boxX, 718, 7, $"{invoice.NumeroFormateado}   CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium);
+        else
+            Text(l, boxX, 718, 7, "CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium);
+
+        // Numero grande: "Nº 001-001-" y el correlativo destacado.
+        var (prefix, correlative) = SplitNumber(invoice.NumeroFormateado);
+        var numberBox = l.Layer().TranslateX(boxX).TranslateY(PageHeight - 712f).Width(boxW).AlignCenter();
+        numberBox.Text(t =>
+        {
+            if (issued)
+            {
+                t.Span("Nº ").FontSize(14).Bold();
+                t.Span(prefix).FontSize(14).Bold();
+                t.Span(correlative).FontSize(17).Bold().FontColor("#1f2d3d");
+            }
+            else
+            {
+                t.Span("Nº SIN NUMERAR").FontSize(13).Bold().FontColor("#B45309");
+            }
+        });
+    }
+
+    // "001-001-0002777" -> ("001-001-", "0002777")
+    private static (string Prefix, string Correlative) SplitNumber(string? formatted)
+    {
+        if (string.IsNullOrEmpty(formatted)) return (string.Empty, string.Empty);
+        var index = formatted.LastIndexOf('-');
+        return index < 0 ? (string.Empty, formatted) : (formatted[..(index + 1)], formatted[(index + 1)..]);
     }
 
     // ─── Fecha, condicion, cliente y unidad ──────────────────────────────────
@@ -217,7 +258,16 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice) : IDocument
     private static float TopOf(float bottomY, float height) => PageHeight - bottomY - height;
 
     private static void Rect(LayersDescriptor l, float x, float bottomY, float width, float height) =>
-        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height).Border(0.8f).BorderColor(Colors.Black);
+        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height)
+            .Svg(size =>
+            {
+                var w = size.Width.ToString("0.###", CultureInfo.InvariantCulture);
+                var h = size.Height.ToString("0.###", CultureInfo.InvariantCulture);
+                var rw = (size.Width - 0.9f).ToString("0.###", CultureInfo.InvariantCulture);
+                var rh = (size.Height - 0.9f).ToString("0.###", CultureInfo.InvariantCulture);
+                return $"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}' viewBox='0 0 {w} {h}'>" +
+                       $"<rect x='0.45' y='0.45' width='{rw}' height='{rh}' rx='9' ry='9' fill='none' stroke='black' stroke-width='0.9'/></svg>";
+            });
 
     private static void HLine(LayersDescriptor l, float x1, float y, float x2) =>
         l.Layer().TranslateX(x1).TranslateY(PageHeight - y - 0.4f).Width(x2 - x1).Height(0.8f).Background(Colors.Black);
