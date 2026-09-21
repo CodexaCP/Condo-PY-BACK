@@ -25,12 +25,19 @@ public class ExpensePeriodsController(
 {
     private const decimal CoefficientDistributionExpectedTotal = 1.00m;
     private const decimal CoefficientDistributionTolerance = 0.0001m;
-    // Permisos de liquidacion: CompanyOperator solo calcula; BuildingManager ademas aprueba;
-    // CompanyAdmin (presidente) ademas publica. SuperAdmin equivale a CompanyAdmin.
+    // Permisos de liquidacion: CompanyOperator solo calcula; BuildingManager aprueba; CompanyAdmin
+    // (presidente) publica, y solo una liquidacion ya aprobada por el Encargado de edificio.
     private bool CanApproveSettlement() =>
+        tenantContext.IsSuperAdmin ||
+        string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    // Anular una liquidacion aprobada y aplicar recargos por mora: encargado, presidente o superadmin.
+    private bool CanManageSettlement() =>
         tenantContext.IsSuperAdmin ||
         string.Equals(tenantContext.Role, "CompanyAdmin", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    private ObjectResult Prohibited(string message) => StatusCode(StatusCodes.Status403Forbidden, message);
 
     private bool CanPublishSettlement() =>
         tenantContext.IsSuperAdmin ||
@@ -481,7 +488,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/approve-settlement")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> ApproveSettlement(Guid id, CancellationToken cancellationToken)
     {
-        if (!CanApproveSettlement()) return Forbid();
+        if (!CanApproveSettlement())
+            return Prohibited("Solo el Encargado de edificio (Building Manager) puede aprobar la liquidación. Una vez aprobada por él, el Administrador de empresa podrá publicarla.");
 
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
@@ -574,7 +582,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/publish")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> Publish(Guid id, CancellationToken cancellationToken)
     {
-        if (!CanPublishSettlement()) return Forbid();
+        if (!CanPublishSettlement())
+            return Prohibited("Solo el Administrador de empresa (presidente de la comunidad) puede publicar la liquidación.");
 
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
@@ -601,6 +610,19 @@ public class ExpensePeriodsController(
         if (period.Status == ExpensePeriodStatus.Published)
         {
             return BadRequest("Este periodo ya fue publicado.");
+        }
+
+        // La publicacion exige que la liquidacion haya sido aprobada primero por el Encargado de edificio.
+        var approvedByManager = settlement.ApprovedByUserId.HasValue
+            && await dbContext.ApplicationUsers.AsNoTracking().AnyAsync(
+                u => u.Id == settlement.ApprovedByUserId.Value
+                     && (u.Role == UserRole.BuildingManager || u.Role == UserRole.SuperAdmin),
+                cancellationToken);
+
+        if (!approvedByManager)
+        {
+            return Prohibited("No se puede publicar: la liquidación debe ser aprobada primero por el Encargado de edificio (Building Manager). " +
+                              "Cuando él la apruebe, el Administrador de empresa podrá publicarla.");
         }
 
         if (settlement.Status is not ExpenseSettlementStatus.Approved and not ExpenseSettlementStatus.Applied)
@@ -632,7 +654,8 @@ public class ExpensePeriodsController(
         [FromBody] ApplyLateFeesRequest request,
         CancellationToken cancellationToken)
     {
-        if (!CanApproveSettlement()) return Forbid();
+        if (!CanManageSettlement())
+            return Prohibited("Solo el Encargado de edificio o el Administrador de empresa pueden realizar esta acción.");
 
         if (request.RatePercentage <= 0m)
         {
@@ -741,7 +764,8 @@ public class ExpensePeriodsController(
     [HttpPost("{id:guid}/void-settlement")]
     public async Task<ActionResult<VoidSettlementResultDto>> VoidSettlement(Guid id, CancellationToken cancellationToken)
     {
-        if (!CanApproveSettlement()) return Forbid();
+        if (!CanManageSettlement())
+            return Prohibited("Solo el Encargado de edificio o el Administrador de empresa pueden realizar esta acción.");
 
         var period = await dbContext.ExpensePeriods
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
@@ -1157,6 +1181,13 @@ public class ExpensePeriodsController(
             .AsNoTracking()
             .Where(x => !x.IsDeleted && userIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.FullName, cancellationToken);
+        UserRole? approverRole = settlement.ApprovedByUserId.HasValue
+            ? await dbContext.ApplicationUsers.AsNoTracking()
+                .Where(x => x.Id == settlement.ApprovedByUserId.Value)
+                .Select(x => (UserRole?)x.Role)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
         var generatedChargeCount = await dbContext.ExpenseCharges
             .AsNoTracking()
             .CountAsync(x => !x.IsDeleted && x.ExpensePeriodId == period.Id, cancellationToken);
@@ -1181,6 +1212,7 @@ public class ExpensePeriodsController(
             ApprovedByUserName = settlement.ApprovedByUserId.HasValue
                 ? userNames.GetValueOrDefault(settlement.ApprovedByUserId.Value, string.Empty)
                 : string.Empty,
+            ApprovedByRole = approverRole?.ToString() ?? string.Empty,
             PublishedAtUtc = settlement.PublishedAtUtc,
             PublishedByUserId = settlement.PublishedByUserId,
             PublishedByUserName = settlement.PublishedByUserId.HasValue

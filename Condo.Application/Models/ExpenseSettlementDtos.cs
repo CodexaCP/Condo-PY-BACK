@@ -20,6 +20,7 @@ public class ExpenseSettlementSummaryDto
     public DateTime? ApprovedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public string ApprovedByUserName { get; set; } = string.Empty;
+    public string ApprovedByRole { get; set; } = string.Empty;
     public DateTime? PublishedAtUtc { get; set; }
     public Guid? PublishedByUserId { get; set; }
     public string PublishedByUserName { get; set; } = string.Empty;
