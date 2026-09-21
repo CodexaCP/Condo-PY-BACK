@@ -98,6 +98,46 @@ public class OwnerPaymentsController(
         return Ok(new OwnerCreditDto { Amount = credit?.Amount ?? 0 });
     }
 
+    // ─── CREDIT HISTORY ──────────────────────────────────────────────────────
+    // Cuando se genero cada saldo a favor (y de que comprobante) y cuando/como/a que se aplico.
+    [HttpGet("credit-movements")]
+    public async Task<ActionResult<IReadOnlyList<OwnerCreditMovementDto>>> GetMyCreditMovements(CancellationToken ct)
+    {
+        if (!IsOwner()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        return Ok(await LoadCreditMovementsAsync(tenantContext.UserId, companyId.Value, ct));
+    }
+
+    [HttpGet("credit-movements/{ownerId:guid}")]
+    public async Task<ActionResult<IReadOnlyList<OwnerCreditMovementDto>>> GetOwnerCreditMovements(Guid ownerId, CancellationToken ct)
+    {
+        if (!CanManagePayments()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        return Ok(await LoadCreditMovementsAsync(ownerId, companyId.Value, ct));
+    }
+
+    private async Task<List<OwnerCreditMovementDto>> LoadCreditMovementsAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
+        await dbContext.OwnerCreditMovements
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => new OwnerCreditMovementDto
+            {
+                Id = x.Id,
+                CreatedAtUtc = x.CreatedAtUtc,
+                Kind = x.Kind.ToString(),
+                ApplyMode = x.ApplyMode == null ? null : x.ApplyMode.ToString(),
+                Amount = x.Amount,
+                SourceReference = x.SourceReference,
+                PaymentId = x.PaymentId,
+                Description = x.Description
+            })
+            .ToListAsync(ct);
+
     // ─── GET ALL ─────────────────────────────────────────────────────────────
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<OwnerPaymentDto>>> GetAll(
@@ -474,7 +514,7 @@ public class OwnerPaymentsController(
         if (!IsOwner()) return Forbid();
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
-        return await RunApplyCredit(tenantContext.UserId, companyId.Value, ct);
+        return await RunApplyCredit(tenantContext.UserId, companyId.Value, CreditApplyMode.ManualApp, ct);
     }
 
     // ─── APPLY CREDIT (Manager) ──────────────────────────────────────────────
@@ -484,12 +524,12 @@ public class OwnerPaymentsController(
         if (!CanManagePayments()) return Forbid();
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
-        return await RunApplyCredit(ownerId, companyId.Value, ct);
+        return await RunApplyCredit(ownerId, companyId.Value, CreditApplyMode.ManualManager, ct);
     }
 
-    private async Task<ActionResult<ApplyCreditResultDto>> RunApplyCredit(Guid ownerId, Guid companyId, CancellationToken ct)
+    private async Task<ActionResult<ApplyCreditResultDto>> RunApplyCredit(Guid ownerId, Guid companyId, CreditApplyMode mode, CancellationToken ct)
     {
-        var result = await credits.ApplyCreditAsync(ownerId, companyId, ct);
+        var result = await credits.ApplyCreditAsync(ownerId, companyId, mode, null, ct);
 
         if (result is null)
             return BadRequest("El propietario no tiene saldo a favor.");
@@ -520,7 +560,9 @@ public class OwnerPaymentsController(
             dbContext.OwnerCredits.Add(credit);
         }
 
-        var available = ownerPayment.ReviewedAmount!.Value + credit.Amount;
+        var newMoney = ownerPayment.ReviewedAmount!.Value;
+        var available = newMoney + credit.Amount;
+        var lots = await credits.EnsureLotsAsync(ownerPayment.OwnerId, companyId, credit.Amount, ct);
 
         var (charges, pendingById) = await credits.LoadPendingChargesAsync(unitIds, companyId, true, ct);
 
@@ -559,6 +601,18 @@ public class OwnerPaymentsController(
                 Reference = ownerPayment.Reference,
                 Notes = $"Pago de propietario aprobado. Ref: {ownerPayment.Reference}"
             };
+
+            // Primero se usa el dinero de este pago; lo que falte sale del saldo a favor (mas antiguo primero).
+            var fromNew = decimal.Min(newMoney, pendingAmount);
+            var fromCredit = pendingAmount - fromNew;
+            newMoney -= fromNew;
+            if (fromCredit > 0)
+            {
+                var slices = credits.ConsumeLots(lots, fromCredit, ownerPayment.OwnerId, companyId,
+                    CreditApplyMode.OnPaymentApproval, paymentRecord.Id, charge.Id, OwnerCreditService.DescribeCharge(charge));
+                paymentRecord.Notes += " " + OwnerCreditService.BuildCreditNote(slices, CreditApplyMode.OnPaymentApproval, null);
+            }
+
             dbContext.Payments.Add(paymentRecord);
 
             dbContext.PaymentAllocations.Add(new PaymentAllocation
@@ -594,18 +648,15 @@ public class OwnerPaymentsController(
                 pUnit.AllocatedAmount = allocated;
         }
 
+        if (newMoney > 0)
+            credits.AddGeneratedLot(ownerPayment.OwnerId, companyId, newMoney, ownerPayment.Reference, ownerPayment.Id);
+
         credit.Amount = available;
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
 
-    // Cargos pendientes reales de las unidades. Mismo criterio que el estado de cuenta:
-    // solo periodos publicados, sin reversiones ni cargos ya revertidos, y descontando los pagos
-    // (o partes de pagos) que no tienen imputacion a un cargo, aplicados del mas antiguo al mas
-    // reciente dentro de cada unidad. Devuelve el pendiente de cada cargo por su Id.
-        // Mismas unidades que ve la app en "Mis unidades": vínculo de propietario (UnitOwner)
-    // más vínculo de residente activo (UnitResident.Resident.ApplicationUserId).
-        private bool IsOwner() =>
+    private bool IsOwner() =>
         string.Equals(tenantContext.Role, "Owner", StringComparison.OrdinalIgnoreCase);
 
     private bool CanManagePayments()

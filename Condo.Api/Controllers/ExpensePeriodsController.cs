@@ -1643,7 +1643,7 @@ public class ExpensePeriodsController(
         {
             try
             {
-                await ownerCredits.ApplyCreditAsync(ownerId, period.CompanyId, ct);
+                await ownerCredits.ApplyCreditAsync(ownerId, period.CompanyId, CreditApplyMode.Automatic, period.Name, ct);
             }
             catch (Exception exception)
             {

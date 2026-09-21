@@ -69,6 +69,18 @@ public class OwnerCreditDto
     public decimal Amount { get; set; }
 }
 
+public class OwnerCreditMovementDto
+{
+    public Guid Id { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string? ApplyMode { get; set; }
+    public decimal Amount { get; set; }
+    public string? SourceReference { get; set; }
+    public Guid? PaymentId { get; set; }
+    public string Description { get; set; } = string.Empty;
+}
+
 public class OwnerDebtChargeDto
 {
     public Guid ChargeId { get; set; }

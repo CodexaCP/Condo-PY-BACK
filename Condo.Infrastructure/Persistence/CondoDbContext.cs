@@ -33,6 +33,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<OwnerPayment> OwnerPayments => Set<OwnerPayment>();
     public DbSet<OwnerPaymentUnit> OwnerPaymentUnits => Set<OwnerPaymentUnit>();
     public DbSet<OwnerCredit> OwnerCredits => Set<OwnerCredit>();
+    public DbSet<OwnerCreditMovement> OwnerCreditMovements => Set<OwnerCreditMovement>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Amenity> Amenities => Set<Amenity>();
     public DbSet<AmenityReservation> AmenityReservations => Set<AmenityReservation>();
@@ -538,6 +539,15 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<OwnerCredit>()
             .HasOne(x => x.Owner).WithMany()
             .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── OwnerCreditMovement ────────────────────────────────────────────────
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.ApplyMode).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.RemainingAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.SourceReference).HasMaxLength(100);
+        modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<OwnerCreditMovement>().HasIndex(x => new { x.CompanyId, x.OwnerId, x.CreatedAtUtc });
 
         // ── Notification ───────────────────────────────────────────────────────
         modelBuilder.Entity<Notification>().Property(x => x.Type).HasConversion<string>().HasMaxLength(50);

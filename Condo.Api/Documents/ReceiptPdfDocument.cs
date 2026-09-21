@@ -250,7 +250,12 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                     var refText = string.IsNullOrEmpty(payment.Reference) ? methodLabel : $"{methodLabel} — {payment.Reference}";
 
                     table.Cell().Background(bg).Padding(5).Text(payment.PaymentDate.ToString("dd/MM/yyyy")).FontColor(ColorPrimary);
-                    table.Cell().Background(bg).Padding(5).Text(refText).FontColor(ColorGray);
+                    table.Cell().Background(bg).Padding(5).Column(refCol =>
+                    {
+                        refCol.Item().Text(refText).FontColor(ColorGray);
+                        if (!string.IsNullOrWhiteSpace(payment.Notes))
+                            refCol.Item().PaddingTop(2).Text(payment.Notes).FontSize(7.5f).Italic().FontColor(ColorGray);
+                    });
                     table.Cell().Background(bg).Padding(5).AlignRight().Text(FormatCurrency(payment.Amount)).FontColor(ColorAccent);
                 }
             });
