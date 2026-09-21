@@ -27,6 +27,7 @@ builder.Services.AddCondoInfrastructure(builder.Configuration);
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IUnitOverdueService, UnitOverdueService>();
 builder.Services.AddScoped<IOwnerResidencySyncService, OwnerResidencySyncService>();
+builder.Services.AddScoped<Condo.Api.Services.OwnerCreditService>();
 builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();

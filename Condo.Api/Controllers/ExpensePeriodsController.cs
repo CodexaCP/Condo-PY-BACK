@@ -1,4 +1,5 @@
 using Condo.Api.Documents;
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -18,7 +19,9 @@ public class ExpensePeriodsController(
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
     IExpenseSettlementDistributionService distributionService,
-    IWebHostEnvironment env) : ControllerBase
+    IWebHostEnvironment env,
+    OwnerCreditService ownerCredits,
+    ILogger<ExpensePeriodsController> logger) : ControllerBase
 {
     private const decimal CoefficientDistributionExpectedTotal = 1.00m;
     private const decimal CoefficientDistributionTolerance = 0.0001m;
@@ -619,6 +622,7 @@ public class ExpensePeriodsController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         await NotifyBuildingUsersAsync(period, cancellationToken);
+        await ApplyOwnerCreditsAsync(period, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -1619,6 +1623,33 @@ public class ExpensePeriodsController(
             .AsNoTracking()
             .AnyAsync(x => !x.IsDeleted && x.EndDate == null && x.Unit != null && x.Unit.BuildingId == buildingId
                 && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == uid, cancellationToken);
+    }
+
+    // Al publicar, el saldo a favor de cada propietario del edificio se aplica solo a sus cargos
+    // pendientes (del mas antiguo al mas reciente). Un fallo aqui no revierte la publicacion:
+    // el propietario puede usar "Aplicar" manualmente.
+    private async Task ApplyOwnerCreditsAsync(ExpensePeriod period, CancellationToken ct)
+    {
+        var userIds = await GetBuildingUserIdsAsync(period.BuildingId, ct);
+        if (userIds.Count == 0) return;
+
+        var ownersWithCredit = await dbContext.OwnerCredits
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.CompanyId == period.CompanyId && x.Amount > 0 && userIds.Contains(x.OwnerId))
+            .Select(x => x.OwnerId)
+            .ToListAsync(ct);
+
+        foreach (var ownerId in ownersWithCredit)
+        {
+            try
+            {
+                await ownerCredits.ApplyCreditAsync(ownerId, period.CompanyId, ct);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "No se pudo aplicar automaticamente el saldo a favor del propietario {OwnerId} al publicar el periodo {PeriodId}.", ownerId, period.Id);
+            }
+        }
     }
 
     private async Task NotifyBuildingUsersAsync(ExpensePeriod period, CancellationToken ct)
