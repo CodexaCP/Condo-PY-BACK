@@ -62,6 +62,195 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         return Ok(rows.Select(ToDto).ToList());
     }
 
+    // Consulta profesional de facturas: filtros, orden, paginacion y trazabilidad completa
+    // (factura → comprobante/periodo → liquidacion → pago del propietario → cliente y timbrado).
+    [HttpGet("ledger")]
+    public async Task<ActionResult<InvoiceLedgerDto>> GetLedger([FromQuery] InvoiceLedgerQuery q, CancellationToken cancellationToken)
+    {
+        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+        var query = dbContext.Invoices.AsNoTracking().Where(x => !x.IsDeleted);
+
+        if (!accessScope.IsSuperAdmin)
+        {
+            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
+                query = query.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+            else
+                query = query.Where(x => accessibleBuildingIds.Contains(x.BuildingId));
+        }
+
+        if (q.BuildingId.HasValue) query = query.Where(x => x.BuildingId == q.BuildingId.Value);
+        if (q.UnitId.HasValue) query = query.Where(x => x.UnitId == q.UnitId.Value);
+        if (q.Status.HasValue) query = query.Where(x => x.Status == q.Status.Value);
+        if (q.Year.HasValue) query = query.Where(x => x.Payment!.ExpensePeriod!.Year == q.Year.Value);
+        if (q.Month.HasValue) query = query.Where(x => x.Payment!.ExpensePeriod!.Month == q.Month.Value);
+
+        if (q.From.HasValue)
+        {
+            var from = q.From.Value.ToDateTime(TimeOnly.MinValue);
+            query = query.Where(x => (x.FechaEmisionUtc ?? x.CreatedAtUtc) >= from);
+        }
+        if (q.To.HasValue)
+        {
+            var toExclusive = q.To.Value.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            query = query.Where(x => (x.FechaEmisionUtc ?? x.CreatedAtUtc) < toExclusive);
+        }
+
+        if (q.OwnerPaymentId.HasValue)
+        {
+            var ownerPaymentId = q.OwnerPaymentId.Value;
+            var ownerPaymentRef = await dbContext.OwnerPayments.AsNoTracking()
+                .Where(x => x.Id == ownerPaymentId).Select(x => x.Reference).FirstOrDefaultAsync(cancellationToken);
+            query = query.Where(x => x.OwnerPaymentId == ownerPaymentId
+                                     || (x.OwnerPaymentId == null && ownerPaymentRef != null && x.Payment!.Reference == ownerPaymentRef));
+        }
+
+        if (!string.IsNullOrWhiteSpace(q.Search))
+        {
+            var term = q.Search.Trim();
+            query = query.Where(x =>
+                (x.NumeroFormateado != null && x.NumeroFormateado.Contains(term))
+                || x.Unit!.Code.Contains(term)
+                || x.Building!.Name.Contains(term)
+                || x.Payment!.Reference.Contains(term)
+                || (x.Series != null && x.Series.NumeroTimbrado.Contains(term))
+                || dbContext.UnitOwners.Any(o => !o.IsDeleted && o.UnitId == x.UnitId && o.Owner != null && o.Owner.FullName.Contains(term)));
+        }
+
+        // Resumen por estado sobre todo el conjunto filtrado (no solo la pagina).
+        var byStatus = await query
+            .GroupBy(x => x.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count(), Amount = g.Sum(x => x.MontoTotal) })
+            .ToListAsync(cancellationToken);
+
+        var summary = new InvoiceLedgerSummaryDto
+        {
+            DraftCount = byStatus.Where(x => x.Status == InvoiceStatus.Draft).Sum(x => x.Count),
+            IssuedCount = byStatus.Where(x => x.Status == InvoiceStatus.Issued).Sum(x => x.Count),
+            VoidedCount = byStatus.Where(x => x.Status == InvoiceStatus.Voided).Sum(x => x.Count),
+            DraftAmount = byStatus.Where(x => x.Status == InvoiceStatus.Draft).Sum(x => x.Amount),
+            IssuedAmount = byStatus.Where(x => x.Status == InvoiceStatus.Issued).Sum(x => x.Amount),
+            VoidedAmount = byStatus.Where(x => x.Status == InvoiceStatus.Voided).Sum(x => x.Amount)
+        };
+        var totalCount = summary.DraftCount + summary.IssuedCount + summary.VoidedCount;
+
+        var descending = !string.Equals(q.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
+        IOrderedQueryable<Invoice> ordered = (q.SortBy?.ToLowerInvariant()) switch
+        {
+            "numero" => descending ? query.OrderByDescending(x => x.Numero) : query.OrderBy(x => x.Numero),
+            "monto" => descending ? query.OrderByDescending(x => x.MontoTotal) : query.OrderBy(x => x.MontoTotal),
+            "unidad" => descending ? query.OrderByDescending(x => x.Unit!.Code) : query.OrderBy(x => x.Unit!.Code),
+            "periodo" => descending
+                ? query.OrderByDescending(x => x.Payment!.ExpensePeriod!.Year).ThenByDescending(x => x.Payment!.ExpensePeriod!.Month)
+                : query.OrderBy(x => x.Payment!.ExpensePeriod!.Year).ThenBy(x => x.Payment!.ExpensePeriod!.Month),
+            _ => descending
+                ? query.OrderByDescending(x => x.FechaEmisionUtc ?? x.CreatedAtUtc)
+                : query.OrderBy(x => x.FechaEmisionUtc ?? x.CreatedAtUtc)
+        };
+        ordered = ordered.ThenByDescending(x => x.CreatedAtUtc);
+
+        var page = Math.Max(q.Page, 1);
+        var pageSize = Math.Clamp(q.PageSize, 1, 2000);
+
+        var rows = await ordered
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new
+            {
+                x.Id, x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
+                x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.CreatedAtUtc,
+                x.OwnerPaymentId, x.PaymentId, x.UnitId, x.BuildingId,
+                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
+                SeriesRazonSocial = x.Series != null ? x.Series.RazonSocial : null,
+                SeriesRuc = x.Series != null ? x.Series.Ruc : null,
+                SeriesNumeroTimbrado = x.Series != null ? x.Series.NumeroTimbrado : null,
+                SeriesEstablecimiento = x.Series != null ? x.Series.Establecimiento : null,
+                SeriesPuntoExpedicion = x.Series != null ? x.Series.PuntoExpedicion : null,
+                PaymentReference = x.Payment != null ? x.Payment.Reference : string.Empty,
+                PaymentDate = x.Payment != null ? x.Payment.PaymentDate : default,
+                PaymentAmount = x.Payment != null ? x.Payment.Amount : 0m,
+                ExpensePeriodId = x.Payment != null ? x.Payment.ExpensePeriodId : Guid.Empty,
+                PeriodYear = x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Year : 0,
+                PeriodMonth = x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : 0,
+                PeriodName = x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Name : string.Empty,
+                PeriodStatus = x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Status : default,
+                PeriodDueDate = x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : default
+            })
+            .ToListAsync(cancellationToken);
+
+        var periodIds = rows.Select(r => r.ExpensePeriodId).Distinct().ToList();
+        var unitIds = rows.Select(r => r.UnitId).Distinct().ToList();
+        var ownerPaymentIds = rows.Where(r => r.OwnerPaymentId.HasValue).Select(r => r.OwnerPaymentId!.Value).Distinct().ToList();
+        var paymentRefs = rows.Where(r => !r.OwnerPaymentId.HasValue).Select(r => r.PaymentReference).Distinct().ToList();
+
+        var settlements = await dbContext.ExpenseSettlements.AsNoTracking()
+            .Where(s => !s.IsDeleted && periodIds.Contains(s.ExpensePeriodId))
+            .Select(s => new
+            {
+                s.ExpensePeriodId, s.Status, s.ApprovedAtUtc, s.PublishedAtUtc,
+                ApprovedBy = s.ApprovedByUser != null ? s.ApprovedByUser.FullName : null,
+                PublishedBy = s.PublishedByUser != null ? s.PublishedByUser.FullName : null
+            })
+            .ToListAsync(cancellationToken);
+
+        var ownerPayments = await dbContext.OwnerPayments.AsNoTracking()
+            .Where(o => !o.IsDeleted && (ownerPaymentIds.Contains(o.Id) || paymentRefs.Contains(o.Reference)))
+            .Select(o => new
+            {
+                o.Id, o.Reference, o.Status, o.ResolvedAt,
+                OwnerName = o.Owner != null ? o.Owner.FullName : null,
+                ReviewedBy = o.ReviewedByUser != null ? o.ReviewedByUser.FullName : null
+            })
+            .ToListAsync(cancellationToken);
+
+        var owners = await dbContext.UnitOwners.AsNoTracking()
+            .Where(o => !o.IsDeleted && unitIds.Contains(o.UnitId) && o.Owner != null)
+            .Select(o => new { o.UnitId, o.IsPrimary, o.CreatedAtUtc, Name = o.Owner!.FullName, Doc = o.Owner.DocumentNumber })
+            .ToListAsync(cancellationToken);
+
+        var comprobantes = await dbContext.ExpenseCharges.AsNoTracking()
+            .Where(c => !c.IsDeleted && unitIds.Contains(c.UnitId) && periodIds.Contains(c.ExpensePeriodId))
+            .GroupBy(c => new { c.UnitId, c.ExpensePeriodId })
+            .Select(g => new { g.Key.UnitId, g.Key.ExpensePeriodId, Total = g.Sum(c => c.Amount) })
+            .ToListAsync(cancellationToken);
+
+        var items = rows.Select(r =>
+        {
+            var lines = JsonSerializer.Deserialize<List<InvoiceLineDto>>(r.DetalleSnapshotJson) ?? new();
+            var settlement = settlements.FirstOrDefault(s => s.ExpensePeriodId == r.ExpensePeriodId);
+            var ownerPayment = (r.OwnerPaymentId.HasValue ? ownerPayments.FirstOrDefault(o => o.Id == r.OwnerPaymentId.Value) : null)
+                               ?? ownerPayments.FirstOrDefault(o => o.Reference == r.PaymentReference);
+            var client = owners.Where(o => o.UnitId == r.UnitId).OrderByDescending(o => o.IsPrimary).ThenBy(o => o.CreatedAtUtc).FirstOrDefault();
+            var comprobante = comprobantes.FirstOrDefault(c => c.UnitId == r.UnitId && c.ExpensePeriodId == r.ExpensePeriodId);
+
+            return new InvoiceLedgerRowDto
+            {
+                Id = r.Id, Status = r.Status, Numero = r.Numero, NumeroFormateado = r.NumeroFormateado, MontoTotal = r.MontoTotal,
+                FechaEmisionUtc = r.FechaEmisionUtc, FechaAnulacionUtc = r.FechaAnulacionUtc, MotivoAnulacion = r.MotivoAnulacion,
+                CreatedAtUtc = r.CreatedAtUtc,
+                LineCount = lines.Count,
+                MoraTotal = lines.Where(l => l.Concepto != null && l.Concepto.StartsWith("Mora", StringComparison.OrdinalIgnoreCase)).Sum(l => l.Monto),
+                SeriesRazonSocial = r.SeriesRazonSocial, SeriesRuc = r.SeriesRuc, SeriesNumeroTimbrado = r.SeriesNumeroTimbrado,
+                SeriesEstablecimiento = r.SeriesEstablecimiento, SeriesPuntoExpedicion = r.SeriesPuntoExpedicion,
+                BuildingId = r.BuildingId, BuildingName = r.BuildingName, UnitId = r.UnitId, UnitCode = r.UnitCode,
+                ClienteNombre = client?.Name, ClienteDocumento = client?.Doc,
+                ExpensePeriodId = r.ExpensePeriodId, PeriodYear = r.PeriodYear, PeriodMonth = r.PeriodMonth,
+                PeriodName = r.PeriodName, PeriodStatus = r.PeriodStatus.ToString(), PeriodDueDate = r.PeriodDueDate,
+                ComprobanteTotal = comprobante?.Total ?? 0m,
+                LiquidationStatus = settlement?.Status.ToString(),
+                LiquidationApprovedAtUtc = settlement?.ApprovedAtUtc, LiquidationApprovedBy = settlement?.ApprovedBy,
+                LiquidationPublishedAtUtc = settlement?.PublishedAtUtc, LiquidationPublishedBy = settlement?.PublishedBy,
+                PaymentId = r.PaymentId, PaymentReference = r.PaymentReference, PaymentDate = r.PaymentDate, PaymentAmount = r.PaymentAmount,
+                OwnerPaymentId = ownerPayment?.Id ?? r.OwnerPaymentId,
+                OwnerPaymentReference = ownerPayment?.Reference, OwnerPaymentStatus = ownerPayment?.Status.ToString(),
+                OwnerName = ownerPayment?.OwnerName, OwnerPaymentReviewedBy = ownerPayment?.ReviewedBy,
+                OwnerPaymentResolvedAtUtc = ownerPayment?.ResolvedAt
+            };
+        }).ToList();
+
+        return Ok(new InvoiceLedgerDto { Items = items, TotalCount = totalCount, Page = page, PageSize = pageSize, Summary = summary });
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<InvoiceDto>> GetById(Guid id, CancellationToken cancellationToken)
     {

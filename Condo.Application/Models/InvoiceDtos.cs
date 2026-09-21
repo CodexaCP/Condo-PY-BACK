@@ -78,6 +78,101 @@ public class InvoiceDto
     public DateTime CreatedAtUtc { get; set; }
 }
 
+// ─── Consulta / trazabilidad de facturas ────────────────────────────────────
+
+public class InvoiceLedgerQuery
+{
+    public Guid? BuildingId { get; set; }
+    public Guid? UnitId { get; set; }
+    public InvoiceStatus? Status { get; set; }
+    public int? Year { get; set; }
+    public int? Month { get; set; }
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+    public string? Search { get; set; }
+    public Guid? OwnerPaymentId { get; set; }
+    public string? SortBy { get; set; }
+    public string? SortDir { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+}
+
+public class InvoiceLedgerRowDto
+{
+    // Factura
+    public Guid Id { get; set; }
+    public InvoiceStatus Status { get; set; }
+    public long? Numero { get; set; }
+    public string? NumeroFormateado { get; set; }
+    public decimal MontoTotal { get; set; }
+    public DateTime? FechaEmisionUtc { get; set; }
+    public DateTime? FechaAnulacionUtc { get; set; }
+    public string? MotivoAnulacion { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public int LineCount { get; set; }
+    public decimal MoraTotal { get; set; }
+
+    // Emisor / timbrado
+    public string? SeriesRazonSocial { get; set; }
+    public string? SeriesRuc { get; set; }
+    public string? SeriesNumeroTimbrado { get; set; }
+    public string? SeriesEstablecimiento { get; set; }
+    public string? SeriesPuntoExpedicion { get; set; }
+
+    // Edificio, unidad y cliente
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public Guid UnitId { get; set; }
+    public string UnitCode { get; set; } = string.Empty;
+    public string? ClienteNombre { get; set; }
+    public string? ClienteDocumento { get; set; }
+
+    // Comprobante (unidad + periodo) y liquidacion
+    public Guid ExpensePeriodId { get; set; }
+    public int PeriodYear { get; set; }
+    public int PeriodMonth { get; set; }
+    public string PeriodName { get; set; } = string.Empty;
+    public string PeriodStatus { get; set; } = string.Empty;
+    public DateOnly PeriodDueDate { get; set; }
+    public decimal ComprobanteTotal { get; set; }
+    public string? LiquidationStatus { get; set; }
+    public DateTime? LiquidationApprovedAtUtc { get; set; }
+    public string? LiquidationApprovedBy { get; set; }
+    public DateTime? LiquidationPublishedAtUtc { get; set; }
+    public string? LiquidationPublishedBy { get; set; }
+
+    // Pago
+    public Guid PaymentId { get; set; }
+    public string PaymentReference { get; set; } = string.Empty;
+    public DateOnly PaymentDate { get; set; }
+    public decimal PaymentAmount { get; set; }
+    public Guid? OwnerPaymentId { get; set; }
+    public string? OwnerPaymentReference { get; set; }
+    public string? OwnerPaymentStatus { get; set; }
+    public string? OwnerName { get; set; }
+    public string? OwnerPaymentReviewedBy { get; set; }
+    public DateTime? OwnerPaymentResolvedAtUtc { get; set; }
+}
+
+public class InvoiceLedgerSummaryDto
+{
+    public int DraftCount { get; set; }
+    public int IssuedCount { get; set; }
+    public int VoidedCount { get; set; }
+    public decimal DraftAmount { get; set; }
+    public decimal IssuedAmount { get; set; }
+    public decimal VoidedAmount { get; set; }
+}
+
+public class InvoiceLedgerDto
+{
+    public List<InvoiceLedgerRowDto> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public InvoiceLedgerSummaryDto Summary { get; set; } = new();
+}
+
 public class CreateInvoiceDraftRequest
 {
     public Guid PaymentId { get; set; }
