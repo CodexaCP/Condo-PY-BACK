@@ -262,6 +262,9 @@ public class ExpensePeriodsController(
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
+        // El operador no elimina periodos.
+        if (string.Equals(tenantContext.Role, "CompanyOperator", StringComparison.OrdinalIgnoreCase)) return Forbid();
+
         var entity = await dbContext.ExpensePeriods
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
