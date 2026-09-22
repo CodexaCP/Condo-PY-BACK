@@ -147,6 +147,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("El condominio no existe o no pertenece a la empresa seleccionada.");
         }
 
+        // Por ahora solo el SuperAdmin configura los modelos de documentos; para el resto se ignora lo enviado.
+        if (!accessScope.IsSuperAdmin)
+            request.UseStandardTemplates = null;
+
         var validationError = ValidateRequest(request);
         if (validationError is not null)
         {
@@ -185,7 +189,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
             BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations
         };
-        ApplyTemplates(entity, request);
+        if (request.UseStandardTemplates.HasValue)
+            ApplyTemplates(entity, request);
 
         dbContext.Buildings.Add(entity);
 
@@ -261,6 +266,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         {
             return BadRequest("El condominio no existe o no pertenece a la empresa seleccionada.");
         }
+
+        // Por ahora solo el SuperAdmin configura los modelos de documentos; para el resto se ignora lo enviado.
+        if (!accessScope.IsSuperAdmin)
+            request.UseStandardTemplates = null;
 
         var validationError = ValidateRequest(request);
         if (validationError is not null)
