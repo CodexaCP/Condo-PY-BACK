@@ -820,6 +820,7 @@ public class CreditNotesController(
         x.Id, x.CompanyId, x.BuildingId, x.Building != null ? x.Building.Name : string.Empty,
         x.UnitId, x.Unit != null ? x.Unit.Code : string.Empty,
         x.InvoiceId, x.Invoice != null ? x.Invoice.NumeroFormateado : null, x.Invoice != null ? x.Invoice.MontoTotal : 0,
+        x.Invoice != null ? x.Invoice.Status : InvoiceStatus.Draft,
         x.Motivo, x.Amount, x.Status,
         x.CreatedByUserId, x.CreatedByUser != null ? x.CreatedByUser.FullName : null, x.CreatedAtUtc,
         x.ApprovedAtUtc, x.ApprovedByUser != null ? x.ApprovedByUser.FullName : null,
@@ -847,6 +848,7 @@ public class CreditNotesController(
         InvoiceId = r.InvoiceId,
         InvoiceNumeroFormateado = r.InvoiceNumeroFormateado,
         InvoiceMontoTotal = r.InvoiceMontoTotal,
+        InvoiceStatus = r.InvoiceStatus,
         Motivo = r.Motivo,
         Amount = r.Amount,
         Status = r.Status,
@@ -922,7 +924,7 @@ public class CreditNotesController(
 
     private sealed record CreditNoteRow(
         Guid Id, Guid CompanyId, Guid BuildingId, string BuildingName, Guid UnitId, string UnitCode,
-        Guid InvoiceId, string? InvoiceNumeroFormateado, decimal InvoiceMontoTotal,
+        Guid InvoiceId, string? InvoiceNumeroFormateado, decimal InvoiceMontoTotal, InvoiceStatus InvoiceStatus,
         string Motivo, decimal Amount, CreditNoteStatus Status,
         Guid CreatedByUserId, string? CreatedByName, DateTime CreatedAtUtc,
         DateTime? ApprovedAtUtc, string? ApprovedByName,

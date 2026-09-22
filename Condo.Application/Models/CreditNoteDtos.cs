@@ -35,6 +35,7 @@ public class CreditNoteDto
     public Guid InvoiceId { get; set; }
     public string? InvoiceNumeroFormateado { get; set; }
     public decimal InvoiceMontoTotal { get; set; }
+    public InvoiceStatus InvoiceStatus { get; set; }
 
     // Datos de la factura ajustada, para que el detalle se vea igual de completo que el de Factura.
     public string? BuildingAddress { get; set; }
