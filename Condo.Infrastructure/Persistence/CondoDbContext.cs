@@ -661,13 +661,16 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.ReviewedById).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         // ── InvoiceSeries (timbrado) ───────────────────────────────────────────
+        modelBuilder.Entity<InvoiceSeries>().Property(x => x.DocumentType).HasConversion<string>().HasMaxLength(20);
         modelBuilder.Entity<InvoiceSeries>().Property(x => x.Ruc).HasMaxLength(20);
         modelBuilder.Entity<InvoiceSeries>().Property(x => x.RazonSocial).HasMaxLength(200);
         modelBuilder.Entity<InvoiceSeries>().Property(x => x.Establecimiento).HasMaxLength(3);
         modelBuilder.Entity<InvoiceSeries>().Property(x => x.PuntoExpedicion).HasMaxLength(3);
         modelBuilder.Entity<InvoiceSeries>().Property(x => x.NumeroTimbrado).HasMaxLength(20);
+        // Un mismo timbrado (Establecimiento+PuntoExpedicion+NumeroTimbrado) autoriza rangos
+        // separados por tipo de documento — factura y NC son filas distintas con el mismo timbrado.
         modelBuilder.Entity<InvoiceSeries>()
-            .HasIndex(x => new { x.CompanyId, x.Establecimiento, x.PuntoExpedicion, x.NumeroTimbrado })
+            .HasIndex(x => new { x.CompanyId, x.Establecimiento, x.PuntoExpedicion, x.NumeroTimbrado, x.DocumentType })
             .IsUnique()
             .HasFilter("[IsDeleted] = 0");
         modelBuilder.Entity<InvoiceSeries>().HasIndex(x => new { x.BuildingId, x.Activo });
@@ -741,6 +744,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<CreditNote>().Property(x => x.FiscalObservaciones).HasMaxLength(1000);
         modelBuilder.Entity<CreditNote>().HasIndex(x => x.InvoiceId);
         modelBuilder.Entity<CreditNote>().HasIndex(x => new { x.CompanyId, x.Status, x.CreatedAtUtc });
+        modelBuilder.Entity<CreditNote>().HasIndex(x => new { x.InvoiceSeriesId, x.Numero }).IsUnique()
+            .HasFilter("[Numero] IS NOT NULL");
         modelBuilder.Entity<CreditNote>()
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
@@ -765,6 +770,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<CreditNote>()
             .HasOne(x => x.VoidedByUser).WithMany()
             .HasForeignKey(x => x.VoidedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.Series).WithMany(x => x.CreditNotes)
+            .HasForeignKey(x => x.InvoiceSeriesId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         // ── CreditNoteLine ─────────────────────────────────────────────────────
         modelBuilder.Entity<CreditNoteLine>().Property(x => x.Amount).HasColumnType("decimal(18,2)");

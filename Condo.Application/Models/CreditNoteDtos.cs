@@ -52,6 +52,8 @@ public class CreditNoteDto
     public DateTime? VoidedAtUtc { get; set; }
     public string? VoidedByName { get; set; }
 
+    public Guid? InvoiceSeriesId { get; set; }
+    public long? Numero { get; set; }
     public CreditNoteFiscalDocumentType? FiscalDocumentType { get; set; }
     public string? FiscalNumero { get; set; }
     public string? FiscalTimbrado { get; set; }
@@ -87,6 +89,11 @@ public class CreateCreditNoteRequest
     public Guid InvoiceId { get; set; }
     public string Motivo { get; set; } = string.Empty;
     public List<CreateCreditNoteLineRequest> Lines { get; set; } = new();
+}
+
+public class EmitCreditNoteRequest
+{
+    public Guid InvoiceSeriesId { get; set; }
 }
 
 public class RejectCreditNoteRequest

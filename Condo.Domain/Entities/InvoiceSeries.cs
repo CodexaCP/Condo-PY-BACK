@@ -1,10 +1,12 @@
 using Condo.Domain.Common;
+using Condo.Domain.Enums;
 
 namespace Condo.Domain.Entities;
 
 public class InvoiceSeries : CompanyScopedEntity
 {
     public Guid BuildingId { get; set; }
+    public InvoiceSeriesDocumentType DocumentType { get; set; } = InvoiceSeriesDocumentType.Invoice;
     public string Ruc { get; set; } = string.Empty;
     public string RazonSocial { get; set; } = string.Empty;
     public string Establecimiento { get; set; } = string.Empty;
@@ -20,4 +22,5 @@ public class InvoiceSeries : CompanyScopedEntity
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
+    public ICollection<CreditNote> CreditNotes { get; set; } = new List<CreditNote>();
 }

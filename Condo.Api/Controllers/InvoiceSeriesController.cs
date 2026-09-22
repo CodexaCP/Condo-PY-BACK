@@ -15,7 +15,8 @@ namespace Condo.Api.Controllers;
 public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<InvoiceSeriesDto>>> GetAll([FromQuery] Guid? buildingId, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<InvoiceSeriesDto>>> GetAll(
+        [FromQuery] Guid? buildingId, [FromQuery] InvoiceSeriesDocumentType? documentType, CancellationToken cancellationToken)
     {
         if (!CanManageInvoices())
         {
@@ -43,6 +44,11 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
             query = query.Where(x => x.BuildingId == buildingId.Value);
         }
 
+        if (documentType.HasValue)
+        {
+            query = query.Where(x => x.DocumentType == documentType.Value);
+        }
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         var series = await query
@@ -53,6 +59,7 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
                 CompanyId = x.CompanyId,
                 BuildingId = x.BuildingId,
                 BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                DocumentType = x.DocumentType,
                 Ruc = x.Ruc,
                 RazonSocial = x.RazonSocial,
                 Establecimiento = x.Establecimiento,
@@ -111,17 +118,19 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
             x.CompanyId == companyId.Value &&
             x.Establecimiento == request.Establecimiento &&
             x.PuntoExpedicion == request.PuntoExpedicion &&
-            x.NumeroTimbrado == request.NumeroTimbrado, cancellationToken);
+            x.NumeroTimbrado == request.NumeroTimbrado &&
+            x.DocumentType == request.DocumentType, cancellationToken);
 
         if (duplicate)
         {
-            return Conflict("Ya existe un timbrado con ese establecimiento, punto de expedición y número.");
+            return Conflict("Ya existe un timbrado con ese establecimiento, punto de expedición, número y tipo de documento.");
         }
 
         var entity = new InvoiceSeries
         {
             CompanyId = companyId.Value,
             BuildingId = building.Id,
+            DocumentType = request.DocumentType,
             Ruc = request.Ruc.Trim(),
             RazonSocial = request.RazonSocial.Trim(),
             Establecimiento = request.Establecimiento.Trim(),
@@ -220,6 +229,7 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
         CompanyId = entity.CompanyId,
         BuildingId = entity.BuildingId,
         BuildingName = buildingName,
+        DocumentType = entity.DocumentType,
         Ruc = entity.Ruc,
         RazonSocial = entity.RazonSocial,
         Establecimiento = entity.Establecimiento,

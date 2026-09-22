@@ -8,6 +8,7 @@ public class InvoiceSeriesDto
     public Guid CompanyId { get; set; }
     public Guid BuildingId { get; set; }
     public string BuildingName { get; set; } = string.Empty;
+    public InvoiceSeriesDocumentType DocumentType { get; set; }
     public string Ruc { get; set; } = string.Empty;
     public string RazonSocial { get; set; } = string.Empty;
     public string Establecimiento { get; set; } = string.Empty;
@@ -27,6 +28,7 @@ public class InvoiceSeriesDto
 public class CreateInvoiceSeriesRequest
 {
     public Guid BuildingId { get; set; }
+    public InvoiceSeriesDocumentType DocumentType { get; set; } = InvoiceSeriesDocumentType.Invoice;
     public string Ruc { get; set; } = string.Empty;
     public string RazonSocial { get; set; } = string.Empty;
     public string Establecimiento { get; set; } = string.Empty;

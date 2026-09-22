@@ -26,8 +26,12 @@ public class CreditNote : CompanyScopedEntity
     public DateTime? VoidedAtUtc { get; set; }
     public Guid? VoidedByUserId { get; set; }
 
-    // Documento fiscal oficial de la NC — se registra a mano, en cualquier momento, sea la NC de
-    // papel (timbrado preimpreso) o electronica (con CDC/XML). Ningun campo depende de otro.
+    // Documento fiscal oficial de la NC. Se puede registrar a mano en cualquier momento (papel o
+    // electronica, sin relacion con InvoiceSeries), o numerar automaticamente con un timbrado
+    // registrado como DocumentType=CreditNote (InvoiceSeriesId/Numero, mismo mecanismo que Invoice).
+    // Ambos caminos escriben los mismos campos Fiscal*, por eso conviven sin duplicar datos.
+    public Guid? InvoiceSeriesId { get; set; }
+    public long? Numero { get; set; }
     public CreditNoteFiscalDocumentType? FiscalDocumentType { get; set; }
     public string? FiscalNumero { get; set; }
     public string? FiscalTimbrado { get; set; }
@@ -40,6 +44,7 @@ public class CreditNote : CompanyScopedEntity
     public Building? Building { get; set; }
     public Unit? Unit { get; set; }
     public Invoice? Invoice { get; set; }
+    public InvoiceSeries? Series { get; set; }
     public ApplicationUser? CreatedByUser { get; set; }
     public ApplicationUser? ApprovedByUser { get; set; }
     public ApplicationUser? RejectedByUser { get; set; }
