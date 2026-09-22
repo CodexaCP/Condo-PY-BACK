@@ -236,7 +236,9 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
             Summary = new MorositySummaryDto
             {
                 TotalUnitsInArrears = overdueItems.Select(x => x.UnitId).Distinct().Count(),
-                TotalOverduePeriods = overdueItems.Count,
+                // Periodos distintos con deuda vencida (no la cantidad de renglones unidad+periodo,
+                // que puede ser varias veces más grande si hay varias unidades morosas por periodo).
+                TotalOverduePeriods = overdueItems.Select(x => x.ExpensePeriodId).Distinct().Count(),
                 TotalOverdueAmount = overdueItems.Sum(x => x.Balance),
                 OrdinaryOverdueAmount = overdueItems.Sum(x => x.OrdinaryBalance),
                 ReserveFundOverdueAmount = overdueItems.Sum(x => x.ReserveFundBalance),
