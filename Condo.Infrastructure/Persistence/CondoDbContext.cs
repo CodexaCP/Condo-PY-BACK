@@ -43,6 +43,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<InvoiceSeries> InvoiceSeries => Set<InvoiceSeries>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceAuditLog> InvoiceAuditLogs => Set<InvoiceAuditLog>();
+    public DbSet<CreditNote> CreditNotes => Set<CreditNote>();
+    public DbSet<CreditNoteLine> CreditNoteLines => Set<CreditNoteLine>();
+    public DbSet<CreditNoteAttachment> CreditNoteAttachments => Set<CreditNoteAttachment>();
+    public DbSet<CreditNoteAuditLog> CreditNoteAuditLogs => Set<CreditNoteAuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -306,6 +310,13 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.ReversalOfCharge)
             .WithMany()
             .HasForeignKey(x => x.ReversalOfChargeId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseCharge>().HasIndex(x => x.SourceCreditNoteId);
+        modelBuilder.Entity<ExpenseCharge>()
+            .HasOne(x => x.SourceCreditNote)
+            .WithMany()
+            .HasForeignKey(x => x.SourceCreditNoteId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
@@ -715,6 +726,86 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<InvoiceAuditLog>()
             .HasOne(x => x.InvoiceSeries).WithMany()
             .HasForeignKey(x => x.InvoiceSeriesId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── CreditNote (nota de credito interna) ──────────────────────────────
+        modelBuilder.Entity<CreditNote>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<CreditNote>().Property(x => x.Motivo).HasMaxLength(500);
+        modelBuilder.Entity<CreditNote>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<CreditNote>().Property(x => x.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<CreditNote>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalDocumentType).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalNumero).HasMaxLength(50);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalTimbrado).HasMaxLength(50);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalCdc).HasMaxLength(100);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalEstado).HasMaxLength(100);
+        modelBuilder.Entity<CreditNote>().Property(x => x.FiscalObservaciones).HasMaxLength(1000);
+        modelBuilder.Entity<CreditNote>().HasIndex(x => x.InvoiceId);
+        modelBuilder.Entity<CreditNote>().HasIndex(x => new { x.CompanyId, x.Status, x.CreatedAtUtc });
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.Invoice).WithMany()
+            .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.CreatedByUser).WithMany()
+            .HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.ApprovedByUser).WithMany()
+            .HasForeignKey(x => x.ApprovedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.RejectedByUser).WithMany()
+            .HasForeignKey(x => x.RejectedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNote>()
+            .HasOne(x => x.VoidedByUser).WithMany()
+            .HasForeignKey(x => x.VoidedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── CreditNoteLine ─────────────────────────────────────────────────────
+        modelBuilder.Entity<CreditNoteLine>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<CreditNoteLine>().Property(x => x.Concept).HasMaxLength(300);
+        modelBuilder.Entity<CreditNoteLine>().HasIndex(x => x.ExpenseChargeId);
+        modelBuilder.Entity<CreditNoteLine>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNoteLine>()
+            .HasOne(x => x.CreditNote).WithMany(x => x.Lines)
+            .HasForeignKey(x => x.CreditNoteId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<CreditNoteLine>()
+            .HasOne(x => x.ExpenseCharge).WithMany()
+            .HasForeignKey(x => x.ExpenseChargeId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── CreditNoteAttachment ───────────────────────────────────────────────
+        modelBuilder.Entity<CreditNoteAttachment>().Property(x => x.Url).HasMaxLength(500);
+        modelBuilder.Entity<CreditNoteAttachment>().Property(x => x.FileName).HasMaxLength(260);
+        modelBuilder.Entity<CreditNoteAttachment>().Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<CreditNoteAttachment>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNoteAttachment>()
+            .HasOne(x => x.CreditNote).WithMany(x => x.Attachments)
+            .HasForeignKey(x => x.CreditNoteId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<CreditNoteAttachment>()
+            .HasOne(x => x.UploadedByUser).WithMany()
+            .HasForeignKey(x => x.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── CreditNoteAuditLog ─────────────────────────────────────────────────
+        modelBuilder.Entity<CreditNoteAuditLog>().Property(x => x.Action).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<CreditNoteAuditLog>().Property(x => x.DatosAntesJson).HasColumnType("nvarchar(max)");
+        modelBuilder.Entity<CreditNoteAuditLog>().Property(x => x.DatosDespuesJson).HasColumnType("nvarchar(max)");
+        modelBuilder.Entity<CreditNoteAuditLog>().Property(x => x.Detalle).HasMaxLength(500);
+        modelBuilder.Entity<CreditNoteAuditLog>().HasIndex(x => new { x.CreditNoteId, x.TimestampUtc });
+        modelBuilder.Entity<CreditNoteAuditLog>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<CreditNoteAuditLog>()
+            .HasOne(x => x.CreditNote).WithMany()
+            .HasForeignKey(x => x.CreditNoteId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }

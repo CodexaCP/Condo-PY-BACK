@@ -44,6 +44,10 @@ public interface ICondoDbContext
     DbSet<InvoiceSeries> InvoiceSeries { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceAuditLog> InvoiceAuditLogs { get; }
+    DbSet<CreditNote> CreditNotes { get; }
+    DbSet<CreditNoteLine> CreditNoteLines { get; }
+    DbSet<CreditNoteAttachment> CreditNoteAttachments { get; }
+    DbSet<CreditNoteAuditLog> CreditNoteAuditLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

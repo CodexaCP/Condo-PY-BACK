@@ -18,5 +18,6 @@ public enum NotificationType
     VoteOpened = 14,
     ExpensePeriodPublished = 15,
     SettlementRejected = 16,
-    InvoiceIssued = 17
+    InvoiceIssued = 17,
+    CreditNoteApproved = 18
 }

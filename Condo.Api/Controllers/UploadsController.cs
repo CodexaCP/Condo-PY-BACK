@@ -8,7 +8,7 @@ namespace Condo.Api.Controllers;
 [Route("api/uploads")]
 public class UploadsController(IWebHostEnvironment env) : ControllerBase
 {
-    private static readonly HashSet<string> AllowedExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    private static readonly HashSet<string> AllowedExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".xml"];
     private const long MaxBytes = 10 * 1024 * 1024; // 10 MB
 
     [HttpPost]

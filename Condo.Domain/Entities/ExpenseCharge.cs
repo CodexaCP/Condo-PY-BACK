@@ -18,6 +18,7 @@ public class ExpenseCharge : CompanyScopedEntity
 
     public bool IsReversal { get; set; } = false;
     public Guid? ReversalOfChargeId { get; set; }
+    public Guid? SourceCreditNoteId { get; set; }
 
     public Company? Company { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
@@ -25,5 +26,6 @@ public class ExpenseCharge : CompanyScopedEntity
     public BuildingExpense? SourceBuildingExpense { get; set; }
     public ExpenseSettlement? SourceSettlement { get; set; }
     public ExpenseCharge? ReversalOfCharge { get; set; }
+    public CreditNote? SourceCreditNote { get; set; }
     public ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
 }
