@@ -16,8 +16,11 @@ public class OwnerCreditMovement : CompanyScopedEntity
     public decimal RemainingAmount { get; set; }
     public string? SourceReference { get; set; }
     public Guid? OwnerPaymentId { get; set; }
+    public Guid? CreditNoteId { get; set; }
     public CreditApplyMode? ApplyMode { get; set; }
     public Guid? PaymentId { get; set; }
     public Guid? ExpenseChargeId { get; set; }
     public string Description { get; set; } = string.Empty;
+
+    public CreditNote? CreditNote { get; set; }
 }

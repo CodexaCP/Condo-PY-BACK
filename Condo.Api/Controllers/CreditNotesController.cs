@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -17,7 +18,8 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/credit-notes")]
-public class CreditNotesController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
+public class CreditNotesController(
+    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, OwnerCreditService credits) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<CreditNoteDto>>> GetAll(
@@ -232,10 +234,16 @@ public class CreditNotesController(ICondoDbContext dbContext, IAccessScopeServic
             var tracked = await dbContext.CreditNotes.Include(x => x.Lines)
                 .FirstAsync(x => x.Id == id, cancellationToken);
 
+            var totalExcess = 0m;
+
             foreach (var line in tracked.Lines)
             {
                 var originalCharge = await dbContext.ExpenseCharges
                     .FirstAsync(x => x.Id == line.ExpenseChargeId, cancellationToken);
+
+                // El excedente se calcula ANTES de crear el reverso (compara contra lo ya pagado del
+                // cargo original), sino GetLineExcessAsync se veria a si misma como "ya ajustado".
+                totalExcess += await GetLineExcessAsync(line, cancellationToken);
 
                 dbContext.ExpenseCharges.Add(new ExpenseCharge
                 {
@@ -251,6 +259,16 @@ public class CreditNotesController(ICondoDbContext dbContext, IAccessScopeServic
                     ReversalOfChargeId = originalCharge.Id,
                     SourceCreditNoteId = tracked.Id
                 });
+            }
+
+            if (totalExcess > 0)
+            {
+                var ownerId = await GetUnitOwnerIdAsync(tracked.UnitId, cancellationToken);
+                if (ownerId.HasValue)
+                {
+                    var reference = tracked.FiscalNumero ?? tracked.Motivo;
+                    await credits.AddCreditNoteExcessLotAsync(ownerId.Value, tracked.CompanyId, totalExcess, tracked.Id, reference, cancellationToken);
+                }
             }
 
             tracked.Status = CreditNoteStatus.Approved;
@@ -605,9 +623,9 @@ public class CreditNotesController(ICondoDbContext dbContext, IAccessScopeServic
         accessScope.IsSuperAdmin || accessScope.IsCompanyAdmin;
 
     // Verifica que el importe de una linea no exceda lo que todavia se puede ajustar de ese cargo
-    // (monto original menos lo ya reducido por otras NC Approved), y que no deje el cargo por
-    // debajo de lo ya pagado — el saldo a favor automatico por excedente no esta habilitado hoy
-    // (OwnerCreditFeature.Enabled = false), asi que un excedente asi debe resolverse a mano.
+    // (monto original menos lo ya reducido por otras NC Approved). Si el cargo ya tenia pagos por
+    // encima del nuevo monto neto, el excedente NO bloquea la NC: se acredita como saldo a favor
+    // del propietario al aprobar (ver GetExcessAsync/Approve), trazado a esta NC.
     private async Task<(string? Error, decimal Adjustable)> ValidateLineAmountAsync(
         Guid expenseChargeId, decimal amount, Guid? excludeCreditNoteId, CancellationToken cancellationToken)
     {
@@ -617,31 +635,46 @@ public class CreditNotesController(ICondoDbContext dbContext, IAccessScopeServic
         if (charge is null) return ($"El cargo {expenseChargeId} no existe.", 0);
         if (charge.IsReversal) return ($"El cargo {expenseChargeId} ya es una reversión, no se puede ajustar con una NC.", 0);
 
-        var alreadyAdjusted = await dbContext.CreditNoteLines
+        var alreadyAdjusted = await GetAlreadyAdjustedAsync(expenseChargeId, excludeCreditNoteId, cancellationToken);
+
+        var adjustable = charge.Amount - alreadyAdjusted;
+        if (amount > adjustable)
+            return ($"El cargo \"{charge.Concept}\" solo admite un ajuste de hasta Gs. {adjustable:N0} (ya tiene Gs. {alreadyAdjusted:N0} ajustados).", adjustable);
+
+        return (null, adjustable);
+    }
+
+    private async Task<decimal> GetAlreadyAdjustedAsync(Guid expenseChargeId, Guid? excludeCreditNoteId, CancellationToken cancellationToken) =>
+        await dbContext.CreditNoteLines
             .AsNoTracking()
             .Where(l => !l.IsDeleted && l.ExpenseChargeId == expenseChargeId
                         && l.CreditNote!.Status == CreditNoteStatus.Approved
                         && (!excludeCreditNoteId.HasValue || l.CreditNoteId != excludeCreditNoteId.Value))
             .SumAsync(l => (decimal?)l.Amount, cancellationToken) ?? 0m;
 
-        var adjustable = charge.Amount - alreadyAdjusted;
-        if (amount > adjustable)
-            return ($"El cargo \"{charge.Concept}\" solo admite un ajuste de hasta Gs. {adjustable:N0} (ya tiene Gs. {alreadyAdjusted:N0} ajustados).", adjustable);
-
-        var alreadyPaid = await dbContext.PaymentAllocations
-            .AsNoTracking()
-            .Where(a => !a.IsDeleted && a.ExpenseChargeId == expenseChargeId && a.Payment != null && !a.Payment.IsReversed)
+    // Cuanto excedente deja una linea aprobada: lo ya pagado del cargo menos lo que queda neto
+    // despues de este ajuste (y de los previos ya aprobados). Positivo = hay que acreditarlo.
+    private async Task<decimal> GetLineExcessAsync(CreditNoteLine line, CancellationToken cancellationToken)
+    {
+        var charge = await dbContext.ExpenseCharges.AsNoTracking()
+            .FirstAsync(x => x.Id == line.ExpenseChargeId, cancellationToken);
+        var alreadyAdjusted = await GetAlreadyAdjustedAsync(line.ExpenseChargeId, line.CreditNoteId, cancellationToken);
+        var alreadyPaid = await dbContext.PaymentAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.ExpenseChargeId == line.ExpenseChargeId && a.Payment != null && !a.Payment.IsReversed)
             .SumAsync(a => (decimal?)a.AllocatedAmount, cancellationToken) ?? 0m;
 
-        var netAfter = charge.Amount - alreadyAdjusted - amount;
-        if (netAfter < alreadyPaid)
-        {
-            var excess = alreadyPaid - netAfter;
-            return ($"El cargo \"{charge.Concept}\" ya tiene Gs. {alreadyPaid:N0} pagados; este ajuste dejaría un excedente de Gs. {excess:N0} sin cubrir (el saldo a favor automático no está habilitado). Reducí el importe de la línea o resolvé el excedente manualmente.", adjustable);
-        }
-
-        return (null, adjustable);
+        var netAfter = charge.Amount - alreadyAdjusted - line.Amount;
+        return Math.Max(0, alreadyPaid - netAfter);
     }
+
+    // Dueño principal de la unidad, a quien se le acredita el excedente. Igual criterio que ya usan
+    // Invoice/AccountStatements para resolver "el propietario" de una unidad.
+    private async Task<Guid?> GetUnitOwnerIdAsync(Guid unitId, CancellationToken cancellationToken) =>
+        await dbContext.UnitOwners.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId)
+            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
+            .Select(x => (Guid?)x.OwnerId)
+            .FirstOrDefaultAsync(cancellationToken);
 
     private async Task AddCreditNoteApprovedNotificationAsync(CreditNote creditNote, CancellationToken cancellationToken)
     {

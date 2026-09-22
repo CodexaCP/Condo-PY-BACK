@@ -564,6 +564,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.SourceReference).HasMaxLength(100);
         modelBuilder.Entity<OwnerCreditMovement>().Property(x => x.Description).HasMaxLength(500);
         modelBuilder.Entity<OwnerCreditMovement>().HasIndex(x => new { x.CompanyId, x.OwnerId, x.CreatedAtUtc });
+        modelBuilder.Entity<OwnerCreditMovement>().HasIndex(x => x.CreditNoteId);
+        modelBuilder.Entity<OwnerCreditMovement>()
+            .HasOne(x => x.CreditNote).WithMany()
+            .HasForeignKey(x => x.CreditNoteId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         // ── Notification ───────────────────────────────────────────────────────
         modelBuilder.Entity<Notification>().Property(x => x.Type).HasConversion<string>().HasMaxLength(50);

@@ -77,8 +77,6 @@ public class OwnerPaymentsController(
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
 
-        if (!OwnerCreditFeature.Enabled) return Ok(new OwnerCreditDto { Amount = 0 });
-
         var credit = await dbContext.OwnerCredits
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == tenantContext.UserId && x.CompanyId == companyId.Value, ct);
@@ -93,8 +91,6 @@ public class OwnerPaymentsController(
         if (!CanManagePayments()) return Forbid();
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
-
-        if (!OwnerCreditFeature.Enabled) return Ok(new OwnerCreditDto { Amount = 0 });
 
         var credit = await dbContext.OwnerCredits
             .AsNoTracking()
@@ -283,10 +279,12 @@ public class OwnerPaymentsController(
         if (request.UnitIds.Except(ownerUnitIds).Any())
             return BadRequest("Una o más unidades no pertenecen a este propietario.");
 
-        // El pago solo se acepta si cubre exactamente comprobantes completos (del más antiguo al más reciente).
+        // El pago solo se acepta si cubre exactamente comprobantes completos (del más antiguo al más
+        // reciente), sumando el saldo a favor disponible del propietario (se descuenta solo, nunca lo elige).
         var openComprobantes = await comprobantes.LoadAsync(ownerUnitIds, companyId.Value, false, ct);
-        if (!ComprobanteService.Cover(request.DeclaredAmount, openComprobantes).Exact)
-            return BadRequest(ComprobanteService.MismatchMessage(request.DeclaredAmount, openComprobantes));
+        var availableCreditForCreate = await GetAvailableCreditAsync(ownerId, companyId.Value, ct);
+        if (!ComprobanteService.Cover(request.DeclaredAmount + availableCreditForCreate, openComprobantes).Exact)
+            return BadRequest(ComprobanteService.MismatchMessage(request.DeclaredAmount + availableCreditForCreate, openComprobantes));
 
         var year = DateTime.UtcNow.Year;
         var countThisYear = await dbContext.OwnerPayments
@@ -375,8 +373,9 @@ public class OwnerPaymentsController(
             return BadRequest("El monto revisado debe ser mayor a cero.");
 
         var openForReview = await LoadOpenComprobantesAsync(payment, companyId.Value, ct);
-        if (!ComprobanteService.Cover(request.ReviewedAmount, openForReview).Exact)
-            return BadRequest(ComprobanteService.MismatchMessage(request.ReviewedAmount, openForReview)
+        var availableCreditForReview = await GetAvailableCreditAsync(payment.OwnerId, companyId.Value, ct);
+        if (!ComprobanteService.Cover(request.ReviewedAmount + availableCreditForReview, openForReview).Exact)
+            return BadRequest(ComprobanteService.MismatchMessage(request.ReviewedAmount + availableCreditForReview, openForReview)
                               + " Rechace el pago para que el propietario lo envíe nuevamente.");
 
         payment.Status = OwnerPaymentStatus.UnderReview;
@@ -615,20 +614,30 @@ public class OwnerPaymentsController(
     }
 
     // Un comprobante = un pago completo. Se cubren comprobantes enteros, del más antiguo al más
-    // reciente, y el monto debe coincidir exactamente: sin pagos parciales, sin pago por línea y sin saldo.
+    // reciente, y el monto (sumado al saldo a favor disponible) debe coincidir exactamente: sin
+    // pagos parciales ni pago por línea. El Payment de cada comprobante siempre vale su monto
+    // completo (eso es lo que factura Invoice) — el saldo a favor es un detalle de cómo se
+    // financió, se descuenta aparte vía OwnerCreditMovement, nunca reduce el Payment/la factura.
     private async Task SettlePaymentAsync(OwnerPayment ownerPayment, Guid companyId, CancellationToken ct)
     {
         var open = await LoadOpenComprobantesAsync(ownerPayment, companyId, ct);
-        var amount = ownerPayment.ReviewedAmount!.Value;
-        var coverage = ComprobanteService.Cover(amount, open);
+        var reviewedAmount = ownerPayment.ReviewedAmount!.Value;
+
+        var ownerCredit = await dbContext.OwnerCredits
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerPayment.OwnerId && x.CompanyId == companyId, ct);
+        var availableCredit = ownerCredit?.Amount ?? 0m;
+
+        var coverage = ComprobanteService.Cover(reviewedAmount + availableCredit, open);
 
         if (!coverage.Exact)
-            throw new InvalidOperationException(ComprobanteService.MismatchMessage(amount, open)
+            throw new InvalidOperationException(ComprobanteService.MismatchMessage(reviewedAmount + availableCredit, open)
                                                 + " Rechace el pago para que el propietario lo envíe nuevamente.");
 
         var allocatedPerUnit = ownerPayment.Units
             .Where(u => !u.IsDeleted)
             .ToDictionary(u => u.UnitId, u => 0m);
+
+        var createdPayments = new List<(Comprobante Comprobante, Payment Payment)>();
 
         foreach (var comprobante in coverage.Covered)
         {
@@ -644,6 +653,7 @@ public class OwnerPaymentsController(
                 Notes = $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
             };
             dbContext.Payments.Add(paymentRecord);
+            createdPayments.Add((comprobante, paymentRecord));
 
             foreach (var (charge, pending) in comprobante.Lines)
             {
@@ -678,7 +688,31 @@ public class OwnerPaymentsController(
             if (allocatedPerUnit.TryGetValue(pUnit.UnitId, out var allocated))
                 pUnit.AllocatedAmount = allocated;
         }
+
+        // Saldo a favor consumido automáticamente (nunca lo elige el propietario), del comprobante
+        // más antiguo cubierto en adelante.
+        var creditUsed = Math.Min(availableCredit, Math.Max(0, coverage.CoveredTotal - reviewedAmount));
+        if (creditUsed > 0 && ownerCredit is not null)
+        {
+            var lots = await credits.EnsureLotsAsync(ownerPayment.OwnerId, companyId, ownerCredit.Amount, ct);
+            var remaining = creditUsed;
+            foreach (var (comprobante, paymentRecord) in createdPayments)
+            {
+                if (remaining <= 0) break;
+                var take = Math.Min(remaining, comprobante.Total);
+                credits.ConsumeLots(lots, take, ownerPayment.OwnerId, companyId, CreditApplyMode.OnPaymentApproval,
+                    paymentRecord.Id, null, $"Aplicado automáticamente al comprobante {comprobante.Label}.");
+                paymentRecord.Notes += $" Incluye Gs. {ComprobanteService.Gs(take)} de saldo a favor.";
+                remaining -= take;
+            }
+
+            ownerCredit.Amount -= creditUsed;
+        }
     }
+
+    private async Task<decimal> GetAvailableCreditAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
+        (await dbContext.OwnerCredits.AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct))?.Amount ?? 0m;
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
 

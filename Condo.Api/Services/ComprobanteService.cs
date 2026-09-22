@@ -6,9 +6,13 @@ using Microsoft.EntityFrameworkCore;
 namespace Condo.Api.Services;
 
 /// <summary>
-/// Interruptor del saldo a favor de propietarios. Mientras este apagado, los pagos deben cubrir
-/// exactamente comprobantes completos, no se genera ni se usa saldo, y la funcion no es visible.
-/// El codigo del saldo se conserva para reactivarlo mas adelante.
+/// Interruptor de la aplicacion MANUAL/legacy de saldo a favor (cargo por cargo, vía
+/// OwnerCreditService.ApplyCreditAsync desde /apply-credit). Sigue apagada porque ese algoritmo es
+/// anterior a la regla "un comprobante es un pago completo" y puede dejar un comprobante a medio
+/// pagar. El saldo a favor SI esta activo por otras dos vias, ninguna gobernada por este flag:
+/// (1) se genera cuando una nota de credito reduce un cargo ya pagado (ver CreditNotesController),
+/// (2) se consume automaticamente y completo en SettlePaymentAsync al aprobar el proximo pago del
+/// propietario (nunca elige el propietario a que cargo se aplica).
 /// </summary>
 public static class OwnerCreditFeature
 {
@@ -159,7 +163,7 @@ public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService cr
         }
 
         return $"El monto Gs. {Gs(amount)} no cubre la totalidad de un comprobante. " +
-               "No se aceptan pagos parciales ni saldos a favor: el pago debe ser exactamente " +
+               "No se aceptan pagos parciales: el pago (sumado al saldo a favor si lo hay, aplicado automáticamente) debe cubrir exactamente " +
                string.Join(" o ", options) + ".";
     }
 

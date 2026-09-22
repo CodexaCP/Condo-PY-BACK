@@ -232,10 +232,45 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
         });
     }
 
-    /// <summary>Consume el monto de los lotes (mas antiguo primero) y registra cada porcion aplicada.</summary>
+    /// <summary>
+    /// Saldo a favor generado porque una nota de credito redujo un cargo que ya estaba pagado por
+    /// encima del nuevo monto neto. Crea (o suma a) el OwnerCredit del propietario y registra el
+    /// lote con el motivo/numero de la NC como referencia, para que quede trazable al consumirse.
+    /// </summary>
+    public async Task AddCreditNoteExcessLotAsync(
+        Guid ownerId, Guid companyId, decimal amount, Guid creditNoteId, string reference, CancellationToken ct)
+    {
+        var credit = await dbContext.OwnerCredits
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct);
+
+        if (credit is null)
+        {
+            credit = new OwnerCredit { CompanyId = companyId, OwnerId = ownerId, Amount = 0 };
+            dbContext.OwnerCredits.Add(credit);
+        }
+
+        credit.Amount += amount;
+
+        dbContext.OwnerCreditMovements.Add(new OwnerCreditMovement
+        {
+            CompanyId = companyId,
+            OwnerId = ownerId,
+            // Kind=Generated (no un valor propio) para que EnsureLotsAsync lo encuentre como lote
+            // consumible igual que cualquier otro; CreditNoteId es lo que marca el origen NC.
+            Kind = OwnerCreditMovementKind.Generated,
+            Amount = amount,
+            RemainingAmount = amount,
+            SourceReference = reference,
+            CreditNoteId = creditNoteId,
+            Description = $"Saldo a favor generado por la nota de crédito {reference} (el cargo ya estaba pagado por encima del nuevo monto)."
+        });
+    }
+
+    /// <summary>Consume el monto de los lotes (mas antiguo primero) y registra cada porcion aplicada.
+    /// chargeId es null cuando el credito cubre un comprobante completo (varios cargos a la vez).</summary>
     public List<(string? Reference, decimal Amount)> ConsumeLots(
         List<OwnerCreditMovement> lots, decimal amount, Guid ownerId, Guid companyId,
-        CreditApplyMode mode, Guid paymentId, Guid chargeId, string description)
+        CreditApplyMode mode, Guid paymentId, Guid? chargeId, string description)
     {
         var slices = new List<(string? Reference, decimal Amount)>();
 

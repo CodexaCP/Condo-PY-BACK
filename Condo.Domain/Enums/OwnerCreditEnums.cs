@@ -3,8 +3,7 @@ namespace Condo.Domain.Enums;
 public enum OwnerCreditMovementKind
 {
     Generated = 1,
-    Applied = 2,
-    CreditNoteExcess = 3
+    Applied = 2
 }
 
 public enum CreditApplyMode
