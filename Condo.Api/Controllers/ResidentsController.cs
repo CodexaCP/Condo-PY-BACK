@@ -93,7 +93,8 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpPost]
     public async Task<ActionResult<ResidentDto>> Create([FromBody] ResidentUpsertRequest request, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin
+            && !User.IsInRole("BuildingManager") && !User.IsInRole("CompanyOperator"))
         {
             return Forbid();
         }
@@ -110,7 +111,20 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("La empresa es obligatoria para crear un residente.");
         }
 
-        if (!await accessScope.CanManageCompanyAsync(companyId.Value, cancellationToken))
+        // No usar CanManageCompanyAsync aquí: solo autoriza SuperAdmin/CompanyAdmin y dejaría sin
+        // efecto el permiso de BuildingManager/CompanyOperator recién validado arriba. Como
+        // companyId ya es siempre accessScope.CompanyId para quien no es SuperAdmin, alcanza con
+        // la misma verificación de alcance que usan Update y Delete más abajo; para SuperAdmin se
+        // conserva la validación de que la empresa indicada exista.
+        if (accessScope.IsSuperAdmin)
+        {
+            var companyExists = await dbContext.Companies.AnyAsync(x => x.Id == companyId.Value && !x.IsDeleted, cancellationToken);
+            if (!companyExists)
+            {
+                return BadRequest("La empresa indicada no existe.");
+            }
+        }
+        else if (accessScope.CompanyId != companyId)
         {
             return Forbid();
         }
@@ -157,7 +171,8 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<ResidentDto>> Update(Guid id, [FromBody] ResidentUpsertRequest request, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin
+            && !User.IsInRole("BuildingManager") && !User.IsInRole("CompanyOperator"))
         {
             return Forbid();
         }
@@ -218,7 +233,8 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin && !User.IsInRole("BuildingManager"))
+        if (!accessScope.IsSuperAdmin && !accessScope.IsCompanyAdmin
+            && !User.IsInRole("BuildingManager") && !User.IsInRole("CompanyOperator"))
         {
             return Forbid();
         }

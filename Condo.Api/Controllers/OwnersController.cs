@@ -223,7 +223,8 @@ public class OwnersController(
         if (tenantContext.IsSuperAdmin) return true;
         var role = tenantContext.Role;
         return string.Equals(role, "BuildingManager", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(role, "CompanyAdmin",    StringComparison.OrdinalIgnoreCase);
+            || string.Equals(role, "CompanyAdmin",    StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "CompanyOperator", StringComparison.OrdinalIgnoreCase);
     }
 
     private ActionResult? ValidateRequest(OwnerUpsertRequest request)
