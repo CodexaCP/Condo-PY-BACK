@@ -492,6 +492,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.InvoiceSeriesId, cancellationToken);
 
         if (series is null) return BadRequest("El timbrado no existe.");
+        if (series.DocumentType != InvoiceSeriesDocumentType.Invoice)
+            return BadRequest("El timbrado seleccionado no está registrado para facturas.");
         if (series.BuildingId != invoice.BuildingId) return BadRequest("El timbrado no corresponde al edificio de la factura.");
 
         var beforeSnapshot = new { invoice.Status, invoice.Numero };
