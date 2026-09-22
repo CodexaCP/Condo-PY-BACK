@@ -280,10 +280,12 @@ public class OwnerPaymentsController(
             return BadRequest("Una o más unidades no pertenecen a este propietario.");
 
         // El pago solo se acepta si cubre exactamente comprobantes completos (del más antiguo al más
-        // reciente), sumando el saldo a favor disponible del propietario (se descuenta solo, nunca lo elige).
+        // reciente); si el monto solo no alcanza, se prueba sumando el saldo a favor disponible
+        // (se descuenta solo, nunca lo elige el propietario).
         var openComprobantes = await comprobantes.LoadAsync(ownerUnitIds, companyId.Value, false, ct);
         var availableCreditForCreate = await GetAvailableCreditAsync(ownerId, companyId.Value, ct);
-        if (!ComprobanteService.Cover(request.DeclaredAmount + availableCreditForCreate, openComprobantes).Exact)
+        var (createCoverage, _) = CoverWithCredit(request.DeclaredAmount, availableCreditForCreate, openComprobantes);
+        if (!createCoverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.DeclaredAmount + availableCreditForCreate, openComprobantes));
 
         var year = DateTime.UtcNow.Year;
@@ -374,7 +376,8 @@ public class OwnerPaymentsController(
 
         var openForReview = await LoadOpenComprobantesAsync(payment, companyId.Value, ct);
         var availableCreditForReview = await GetAvailableCreditAsync(payment.OwnerId, companyId.Value, ct);
-        if (!ComprobanteService.Cover(request.ReviewedAmount + availableCreditForReview, openForReview).Exact)
+        var (reviewCoverage, _) = CoverWithCredit(request.ReviewedAmount, availableCreditForReview, openForReview);
+        if (!reviewCoverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.ReviewedAmount + availableCreditForReview, openForReview)
                               + " Rechace el pago para que el propietario lo envíe nuevamente.");
 
@@ -627,7 +630,7 @@ public class OwnerPaymentsController(
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerPayment.OwnerId && x.CompanyId == companyId, ct);
         var availableCredit = ownerCredit?.Amount ?? 0m;
 
-        var coverage = ComprobanteService.Cover(reviewedAmount + availableCredit, open);
+        var (coverage, creditNeeded) = CoverWithCredit(reviewedAmount, availableCredit, open);
 
         if (!coverage.Exact)
             throw new InvalidOperationException(ComprobanteService.MismatchMessage(reviewedAmount + availableCredit, open)
@@ -690,8 +693,8 @@ public class OwnerPaymentsController(
         }
 
         // Saldo a favor consumido automáticamente (nunca lo elige el propietario), del comprobante
-        // más antiguo cubierto en adelante.
-        var creditUsed = Math.Min(availableCredit, Math.Max(0, coverage.CoveredTotal - reviewedAmount));
+        // más antiguo cubierto en adelante. creditNeeded ya viene en 0 si el monto solo alcanzaba.
+        var creditUsed = creditNeeded;
         if (creditUsed > 0 && ownerCredit is not null)
         {
             var lots = await credits.EnsureLotsAsync(ownerPayment.OwnerId, companyId, ownerCredit.Amount, ct);
@@ -713,6 +716,24 @@ public class OwnerPaymentsController(
     private async Task<decimal> GetAvailableCreditAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
         (await dbContext.OwnerCredits.AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct))?.Amount ?? 0m;
+
+    // Prueba primero el monto solo (comportamiento de siempre, no se toca un pago que ya cerraba
+    // exacto aunque el propietario tenga saldo a favor sin usar) y, solo si no alcanza a cubrir
+    // comprobantes completos, prueba sumando el saldo a favor disponible. Nunca fuerza el crédito
+    // cuando no hace falta — sumarlo siempre rompía pagos exactos si quedaba un resto de crédito.
+    private static (ComprobanteCoverage Coverage, decimal CreditUsed) CoverWithCredit(
+        decimal amount, decimal availableCredit, IReadOnlyList<Comprobante> comprobantes)
+    {
+        var withoutCredit = ComprobanteService.Cover(amount, comprobantes);
+        if (withoutCredit.Exact) return (withoutCredit, 0m);
+        if (availableCredit <= 0) return (withoutCredit, 0m);
+
+        var withCredit = ComprobanteService.Cover(amount + availableCredit, comprobantes);
+        if (!withCredit.Exact) return (withCredit, 0m);
+
+        var creditUsed = Math.Min(availableCredit, Math.Max(0, withCredit.CoveredTotal - amount));
+        return (withCredit, creditUsed);
+    }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
 
