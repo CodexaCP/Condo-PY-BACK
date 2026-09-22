@@ -16,5 +16,6 @@ public enum NotificationType
     ClaimStatusUpdated = 12,
     AmenityReservationCreated = 13,
     VoteOpened = 14,
-    ExpensePeriodPublished = 15
+    ExpensePeriodPublished = 15,
+    SettlementRejected = 16
 }

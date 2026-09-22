@@ -266,6 +266,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany()
             .HasForeignKey(x => x.PublishedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseSettlement>()
+            .HasOne(x => x.RejectedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.RejectedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // ── ExpenseCharge ──────────────────────────────────────────────────────
         modelBuilder.Entity<ExpenseCharge>().Property(x => x.Amount).HasColumnType("decimal(18,2)");

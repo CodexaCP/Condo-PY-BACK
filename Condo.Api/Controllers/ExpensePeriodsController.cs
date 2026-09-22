@@ -573,6 +573,9 @@ public class ExpensePeriodsController(
         settlement.Status = ExpenseSettlementStatus.Approved;
         settlement.ApprovedAtUtc = DateTime.UtcNow;
         settlement.ApprovedByUserId = tenantContext.UserId;
+        settlement.RejectionReason = string.Empty;
+        settlement.RejectedAtUtc = null;
+        settlement.RejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Closed;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -645,6 +648,93 @@ public class ExpensePeriodsController(
         await dbContext.SaveChangesAsync(cancellationToken);
         await NotifyBuildingUsersAsync(period, cancellationToken);
         await ApplyOwnerCreditsAsync(period, cancellationToken);
+        return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/reject-settlement")]
+    public async Task<ActionResult<ExpenseSettlementSummaryDto>> RejectSettlement(
+        Guid id, [FromBody] RejectSettlementRequest request, CancellationToken cancellationToken)
+    {
+        if (!CanPublishSettlement())
+            return Prohibited("Solo el Administrador de empresa (presidente de la comunidad) puede rechazar la liquidación.");
+
+        var period = await dbContext.ExpensePeriods
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        if (period.Status == ExpensePeriodStatus.Published)
+        {
+            return BadRequest("No se puede rechazar una liquidación ya publicada.");
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null)
+        {
+            return BadRequest("El periodo todavia no tiene una liquidacion calculada.");
+        }
+
+        if (settlement.Status != ExpenseSettlementStatus.Approved)
+        {
+            return BadRequest("Solo se puede rechazar una liquidación que ya fue aprobada por el Encargado de edificio.");
+        }
+
+        var reason = request.RejectionReason?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest("El motivo de rechazo es obligatorio.");
+        }
+
+        if (reason.Length > 500)
+        {
+            return BadRequest("El motivo no puede superar los 500 caracteres.");
+        }
+
+        var approvedByUserId = settlement.ApprovedByUserId;
+
+        var settlementCharges = await dbContext.ExpenseCharges
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId != null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var charge in settlementCharges)
+        {
+            charge.IsDeleted = true;
+        }
+
+        settlement.Status = ExpenseSettlementStatus.Rejected;
+        settlement.RejectionReason = reason;
+        settlement.RejectedAtUtc = DateTime.UtcNow;
+        settlement.RejectedByUserId = tenantContext.UserId;
+        settlement.ApprovedAtUtc = null;
+        settlement.ApprovedByUserId = null;
+        period.Status = ExpensePeriodStatus.Draft;
+
+        if (approvedByUserId.HasValue)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = period.CompanyId,
+                RecipientId = approvedByUserId.Value,
+                Type = NotificationType.SettlementRejected,
+                Title = "La liquidación fue rechazada",
+                Body = $"La liquidación del periodo {period.Name} fue rechazada por el Administrador de empresa. Motivo: {reason}.",
+                EntityType = "ExpensePeriod",
+                EntityId = period.Id
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -1171,7 +1261,7 @@ public class ExpensePeriodsController(
             return await BuildLiveSettlementSummaryAsync(period, cancellationToken);
         }
 
-        var userIds = new[] { settlement.GeneratedByUserId, settlement.ApprovedByUserId, settlement.PublishedByUserId }
+        var userIds = new[] { settlement.GeneratedByUserId, settlement.ApprovedByUserId, settlement.PublishedByUserId, settlement.RejectedByUserId }
             .Where(x => x.HasValue)
             .Select(x => x!.Value)
             .Distinct()
@@ -1217,6 +1307,12 @@ public class ExpensePeriodsController(
             PublishedByUserId = settlement.PublishedByUserId,
             PublishedByUserName = settlement.PublishedByUserId.HasValue
                 ? userNames.GetValueOrDefault(settlement.PublishedByUserId.Value, string.Empty)
+                : string.Empty,
+            RejectionReason = settlement.RejectionReason,
+            RejectedAtUtc = settlement.RejectedAtUtc,
+            RejectedByUserId = settlement.RejectedByUserId,
+            RejectedByUserName = settlement.RejectedByUserId.HasValue
+                ? userNames.GetValueOrDefault(settlement.RejectedByUserId.Value, string.Empty)
                 : string.Empty,
             Status = settlement.Status,
             PeriodStatus = period.Status,

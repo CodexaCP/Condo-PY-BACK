@@ -18,6 +18,9 @@ public class ExpenseSettlement : CompanyScopedEntity
     public Guid? ApprovedByUserId { get; set; }
     public DateTime? PublishedAtUtc { get; set; }
     public Guid? PublishedByUserId { get; set; }
+    public string RejectionReason { get; set; } = string.Empty;
+    public DateTime? RejectedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
     public ExpenseSettlementStatus Status { get; set; } = ExpenseSettlementStatus.Draft;
 
     public Company? Company { get; set; }
@@ -26,5 +29,6 @@ public class ExpenseSettlement : CompanyScopedEntity
     public ApplicationUser? GeneratedByUser { get; set; }
     public ApplicationUser? ApprovedByUser { get; set; }
     public ApplicationUser? PublishedByUser { get; set; }
+    public ApplicationUser? RejectedByUser { get; set; }
     public ICollection<ExpenseCharge> ExpenseCharges { get; set; } = new List<ExpenseCharge>();
 }

@@ -24,6 +24,10 @@ public class ExpenseSettlementSummaryDto
     public DateTime? PublishedAtUtc { get; set; }
     public Guid? PublishedByUserId { get; set; }
     public string PublishedByUserName { get; set; } = string.Empty;
+    public string RejectionReason { get; set; } = string.Empty;
+    public DateTime? RejectedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public string RejectedByUserName { get; set; } = string.Empty;
     public ExpenseSettlementStatus? Status { get; set; }
     public ExpensePeriodStatus PeriodStatus { get; set; }
     public int GeneratedChargeCount { get; set; }
@@ -74,6 +78,11 @@ public class VoidSettlementResultDto
 {
     public string ExpensePeriodName { get; set; } = string.Empty;
     public int DeletedChargeCount { get; set; }
+}
+
+public class RejectSettlementRequest
+{
+    public string RejectionReason { get; set; } = string.Empty;
 }
 
 public class ApplyLateFeesRequest
