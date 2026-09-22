@@ -58,4 +58,8 @@ public class MorosityReportDto
 {
     public MorositySummaryDto Summary { get; set; } = new();
     public IReadOnlyList<MorosityItemDto> Items { get; set; } = [];
+    // Total de filas del reporte (con los filtros aplicados, antes de paginar).
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
 }

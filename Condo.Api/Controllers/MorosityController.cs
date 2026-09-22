@@ -15,9 +15,17 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
     [HttpGet]
     public async Task<ActionResult<MorosityReportDto>> GetReport(
         [FromQuery] Guid? buildingId,
+        [FromQuery] Guid? unitId,
+        [FromQuery] Guid? expensePeriodId,
+        [FromQuery] string? ownerSearch,
         [FromQuery] string? agingBucket,
-        CancellationToken cancellationToken)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken cancellationToken = default)
     {
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
@@ -60,6 +68,18 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
 
             chargesQuery = chargesQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
             paymentsQuery = paymentsQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
+        }
+
+        if (unitId.HasValue)
+        {
+            chargesQuery = chargesQuery.Where(x => x.UnitId == unitId.Value);
+            paymentsQuery = paymentsQuery.Where(x => x.UnitId == unitId.Value);
+        }
+
+        if (expensePeriodId.HasValue)
+        {
+            chargesQuery = chargesQuery.Where(x => x.ExpensePeriodId == expensePeriodId.Value);
+            paymentsQuery = paymentsQuery.Where(x => x.ExpensePeriodId == expensePeriodId.Value);
         }
 
         var chargeSnapshots = await chargesQuery
@@ -181,10 +201,19 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
             })
             .ToList();
 
-        var overdueItems = allItems.Where(x => x.Balance > 0m).ToList();
+        var overdueItemsRaw = allItems.Where(x => x.Balance > 0m);
+
+        // El propietario se busca por texto libre (nombre parcial); afecta el resumen igual que
+        // edificio/unidad/periodo, a diferencia de la antiguedad que solo filtra la lista.
+        var overdueItems = string.IsNullOrWhiteSpace(ownerSearch)
+            ? overdueItemsRaw.ToList()
+            : overdueItemsRaw
+                .Where(x => x.OwnerName.Contains(ownerSearch, StringComparison.OrdinalIgnoreCase)
+                            || x.ResponsibleName.Contains(ownerSearch, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
         // Apply aging bucket filter after computing all items (summary always uses full dataset)
-        var items = (string.IsNullOrWhiteSpace(agingBucket)
+        var filteredItems = (string.IsNullOrWhiteSpace(agingBucket)
             ? overdueItems
             : overdueItems.Where(x => x.AgingBucket == agingBucket))
             .OrderByDescending(x => x.Balance)
@@ -193,8 +222,17 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
             .ThenBy(x => x.UnitCode)
             .ToList();
 
+        var totalCount = filteredItems.Count;
+        var items = filteredItems
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
         return Ok(new MorosityReportDto
         {
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
             Summary = new MorositySummaryDto
             {
                 TotalUnitsInArrears = overdueItems.Select(x => x.UnitId).Distinct().Count(),
