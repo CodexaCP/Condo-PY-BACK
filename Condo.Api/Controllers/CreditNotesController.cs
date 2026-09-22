@@ -201,8 +201,12 @@ public class CreditNotesController(
         return CreatedAtAction(nameof(GetById), new { id = creditNote.Id }, ToDto(row!, lines, []));
     }
 
+    // Aprobar Y numerar es un solo paso obligatorio, igual que Invoice.Emit(): sin timbrado NC
+    // valido no hay aprobacion. El correlativo se incrementa atomicamente en la misma transaccion
+    // que genera los ExpenseCharge de reverso — si el timbrado esta agotado/vencido, se revierte
+    // todo (la NC sigue en Draft, no queda "aprobada a medias" sin numero).
     [HttpPost("{id:guid}/approve")]
-    public async Task<ActionResult<CreditNoteDto>> Approve(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<CreditNoteDto>> Approve(Guid id, [FromBody] ApproveCreditNoteRequest request, CancellationToken cancellationToken)
     {
         if (!CanApproveCreditNotes()) return Forbid();
 
@@ -215,6 +219,16 @@ public class CreditNotesController(
         if (creditNote.Status != CreditNoteStatus.Draft)
             return Conflict("Solo se puede aprobar una nota de crédito en borrador.");
 
+        var series = await dbContext.InvoiceSeries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.InvoiceSeriesId, cancellationToken);
+
+        if (series is null) return BadRequest("El timbrado no existe.");
+        if (series.DocumentType != InvoiceSeriesDocumentType.CreditNote)
+            return BadRequest("El timbrado seleccionado no está registrado para notas de crédito.");
+        if (series.BuildingId != creditNote.BuildingId)
+            return BadRequest("El timbrado no corresponde al edificio de la nota de crédito.");
+
         // Revalidar contra el estado actual: pudo haber cambiado desde que se armo el borrador
         // (otra NC aprobada sobre el mismo cargo, un pago nuevo aplicado, etc).
         foreach (var line in creditNote.Lines)
@@ -223,13 +237,43 @@ public class CreditNotesController(
             if (error is not null) return Conflict(error);
         }
 
-        var beforeSnapshot = new { creditNote.Status };
+        var beforeSnapshot = new { creditNote.Status, creditNote.Numero };
+        var exhausted = false;
 
         var strategy = dbContext.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
             dbContext.ChangeTracker.Clear();
+            exhausted = false;
             await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            var connection = dbContext.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction.GetDbTransaction();
+            command.CommandText = """
+                UPDATE InvoiceSeries
+                SET CorrelativoActual = CorrelativoActual + 1
+                OUTPUT INSERTED.CorrelativoActual
+                WHERE Id = @seriesId
+                  AND IsDeleted = 0
+                  AND Activo = 1
+                  AND CorrelativoActual < RangoHasta
+                  AND CAST(GETUTCDATE() AS date) BETWEEN VigenciaDesde AND VigenciaHasta
+                """;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@seriesId";
+            parameter.Value = request.InvoiceSeriesId;
+            command.Parameters.Add(parameter);
+
+            var scalar = await command.ExecuteScalarAsync(cancellationToken);
+            if (scalar is null or DBNull)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                exhausted = true;
+                return;
+            }
+
+            var numero = Convert.ToInt64(scalar);
 
             var tracked = await dbContext.CreditNotes.Include(x => x.Lines)
                 .FirstAsync(x => x.Id == id, cancellationToken);
@@ -261,13 +305,18 @@ public class CreditNotesController(
                 });
             }
 
+            tracked.InvoiceSeriesId = series.Id;
+            tracked.Numero = numero;
+            tracked.FiscalNumero = $"{series.Establecimiento}-{series.PuntoExpedicion}-{numero:D7}";
+            tracked.FiscalTimbrado = series.NumeroTimbrado;
+            tracked.FiscalFechaEmisionUtc = DateTime.UtcNow;
+
             if (totalExcess > 0)
             {
                 var ownerId = await GetUnitOwnerIdAsync(tracked.UnitId, cancellationToken);
                 if (ownerId.HasValue)
                 {
-                    var reference = tracked.FiscalNumero ?? tracked.Motivo;
-                    await credits.AddCreditNoteExcessLotAsync(ownerId.Value, tracked.CompanyId, totalExcess, tracked.Id, reference, cancellationToken);
+                    await credits.AddCreditNoteExcessLotAsync(ownerId.Value, tracked.CompanyId, totalExcess, tracked.Id, tracked.FiscalNumero, cancellationToken);
                 }
             }
 
@@ -283,8 +332,8 @@ public class CreditNotesController(
                 UserId = tenantContext.UserId,
                 TimestampUtc = DateTime.UtcNow,
                 DatosAntesJson = JsonSerializer.Serialize(beforeSnapshot),
-                DatosDespuesJson = JsonSerializer.Serialize(new { tracked.Status, tracked.ApprovedAtUtc }),
-                Detalle = $"Nota de crédito aprobada por Gs. {tracked.Amount:N0}."
+                DatosDespuesJson = JsonSerializer.Serialize(new { tracked.Status, tracked.ApprovedAtUtc, tracked.Numero, tracked.FiscalNumero }),
+                Detalle = $"Nota de crédito aprobada y numerada como {tracked.FiscalNumero} (timbrado {tracked.FiscalTimbrado}) por Gs. {tracked.Amount:N0}."
             });
 
             await AddCreditNoteApprovedNotificationAsync(tracked, cancellationToken);
@@ -293,104 +342,8 @@ public class CreditNotesController(
             await transaction.CommitAsync(cancellationToken);
         });
 
-        var row = await LoadRowAsync(id, cancellationToken);
-        var lines = await LoadLinesAsync(id, cancellationToken);
-        var attachments = await LoadAttachmentsAsync(id, cancellationToken);
-        return Ok(ToDto(row!, lines, attachments));
-    }
-
-    // Numeracion automatica con un timbrado registrado como DocumentType=CreditNote (mismo
-    // mecanismo que InvoicesController.Emit: correlativo atomico, sin CDC/XML/SIFEN). Es opcional
-    // y separado de Approve(): la NC ya aplico su efecto en el saldo al aprobarse; esto solo le
-    // asigna el numero fiscal. Convive con el registro manual de PUT .../fiscal-data.
-    [HttpPost("{id:guid}/emit")]
-    public async Task<ActionResult<CreditNoteDto>> Emit(Guid id, [FromBody] EmitCreditNoteRequest request, CancellationToken cancellationToken)
-    {
-        if (!CanCreateCreditNotes()) return Forbid();
-
-        var creditNote = await dbContext.CreditNotes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-        if (creditNote is null) return NotFound();
-
-        if (!await accessScope.CanAccessBuildingAsync(creditNote.BuildingId, cancellationToken)) return Forbid();
-        if (creditNote.Status != CreditNoteStatus.Approved)
-            return Conflict("Solo se puede numerar una nota de crédito ya aprobada.");
-        if (creditNote.Numero.HasValue)
-            return Conflict("Esta nota de crédito ya tiene un número fiscal asignado.");
-
-        var series = await dbContext.InvoiceSeries
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.InvoiceSeriesId, cancellationToken);
-
-        if (series is null) return BadRequest("El timbrado no existe.");
-        if (series.DocumentType != InvoiceSeriesDocumentType.CreditNote)
-            return BadRequest("El timbrado seleccionado no está registrado para notas de crédito.");
-        if (series.BuildingId != creditNote.BuildingId)
-            return BadRequest("El timbrado no corresponde al edificio de la nota de crédito.");
-
-        var beforeSnapshot = new { creditNote.Numero, creditNote.FiscalNumero };
-        var exhausted = false;
-
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
-        {
-            dbContext.ChangeTracker.Clear();
-            exhausted = false;
-
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
-            var connection = dbContext.Database.GetDbConnection();
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction.GetDbTransaction();
-            command.CommandText = """
-                UPDATE InvoiceSeries
-                SET CorrelativoActual = CorrelativoActual + 1
-                OUTPUT INSERTED.CorrelativoActual
-                WHERE Id = @seriesId
-                  AND IsDeleted = 0
-                  AND Activo = 1
-                  AND CorrelativoActual < RangoHasta
-                  AND CAST(GETUTCDATE() AS date) BETWEEN VigenciaDesde AND VigenciaHasta
-                """;
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = "@seriesId";
-            parameter.Value = request.InvoiceSeriesId;
-            command.Parameters.Add(parameter);
-
-            var scalar = await command.ExecuteScalarAsync(cancellationToken);
-            if (scalar is null or DBNull)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                exhausted = true;
-                return;
-            }
-
-            var numero = Convert.ToInt64(scalar);
-
-            var tracked = await dbContext.CreditNotes.FirstAsync(x => x.Id == id, cancellationToken);
-            tracked.InvoiceSeriesId = series.Id;
-            tracked.Numero = numero;
-            tracked.FiscalNumero = $"{series.Establecimiento}-{series.PuntoExpedicion}-{numero:D7}";
-            tracked.FiscalTimbrado = series.NumeroTimbrado;
-            tracked.FiscalFechaEmisionUtc = DateTime.UtcNow;
-
-            dbContext.CreditNoteAuditLogs.Add(new CreditNoteAuditLog
-            {
-                CompanyId = tracked.CompanyId,
-                CreditNoteId = tracked.Id,
-                Action = CreditNoteAuditAction.Issued,
-                UserId = tenantContext.UserId,
-                TimestampUtc = DateTime.UtcNow,
-                DatosAntesJson = JsonSerializer.Serialize(beforeSnapshot),
-                DatosDespuesJson = JsonSerializer.Serialize(new { tracked.Numero, tracked.FiscalNumero }),
-                Detalle = $"Numerada con el timbrado {tracked.FiscalTimbrado} como {tracked.FiscalNumero}."
-            });
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        });
-
         if (exhausted)
-            return Conflict("El timbrado está agotado, vencido o inactivo. Cargá un nuevo timbrado antes de emitir.");
+            return Conflict("El timbrado está agotado, vencido o inactivo. Cargá un nuevo timbrado antes de aprobar.");
 
         var row = await LoadRowAsync(id, cancellationToken);
         var lines = await LoadLinesAsync(id, cancellationToken);
@@ -524,21 +477,17 @@ public class CreditNotesController(
 
         var beforeSnapshot = new
         {
-            creditNote.FiscalDocumentType, creditNote.FiscalNumero, creditNote.FiscalTimbrado,
-            creditNote.FiscalCdc, creditNote.FiscalFechaEmisionUtc, creditNote.FiscalEstado
+            creditNote.FiscalDocumentType, creditNote.FiscalCdc, creditNote.FiscalEstado, creditNote.FiscalObservaciones
         };
 
         creditNote.FiscalDocumentType = request.DocumentType;
-        creditNote.FiscalNumero = Trim(request.Numero, 50);
-        creditNote.FiscalTimbrado = Trim(request.Timbrado, 50);
         creditNote.FiscalCdc = Trim(request.Cdc, 100);
-        creditNote.FiscalFechaEmisionUtc = request.FechaEmisionUtc;
         creditNote.FiscalEstado = Trim(request.Estado, 100);
         creditNote.FiscalObservaciones = Trim(request.Observaciones, 1000);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         await LogAsync(creditNote.Id, creditNote.CompanyId, CreditNoteAuditAction.FiscalDataRegistered, before: beforeSnapshot,
-            after: new { creditNote.FiscalDocumentType, creditNote.FiscalNumero, creditNote.FiscalTimbrado, creditNote.FiscalCdc },
+            after: new { creditNote.FiscalDocumentType, creditNote.FiscalCdc, creditNote.FiscalEstado },
             detalle: "Datos del documento fiscal oficial registrados/actualizados.", cancellationToken);
 
         var row = await LoadRowAsync(id, cancellationToken);

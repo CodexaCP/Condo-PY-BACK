@@ -91,7 +91,7 @@ public class CreateCreditNoteRequest
     public List<CreateCreditNoteLineRequest> Lines { get; set; } = new();
 }
 
-public class EmitCreditNoteRequest
+public class ApproveCreditNoteRequest
 {
     public Guid InvoiceSeriesId { get; set; }
 }
@@ -106,13 +106,13 @@ public class VoidCreditNoteRequest
     public string Motivo { get; set; } = string.Empty;
 }
 
+// Numero/Timbrado/FechaEmisionUtc ya no se cargan a mano: los asigna Approve() junto con el
+// timbrado. Este endpoint solo completa datos complementarios (CDC si en el futuro hay
+// facturacion electronica real, estado y observaciones libres).
 public class RegisterCreditNoteFiscalDataRequest
 {
     public CreditNoteFiscalDocumentType? DocumentType { get; set; }
-    public string? Numero { get; set; }
-    public string? Timbrado { get; set; }
     public string? Cdc { get; set; }
-    public DateTime? FechaEmisionUtc { get; set; }
     public string? Estado { get; set; }
     public string? Observaciones { get; set; }
 }
