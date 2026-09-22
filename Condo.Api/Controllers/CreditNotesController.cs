@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Text.Json;
 using Condo.Api.Documents;
 using Condo.Api.Services;
@@ -48,7 +49,7 @@ public class CreditNotesController(
 
         var rows = await query
             .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(x => ToRow(x))
+            .Select(ToRowProjection)
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(r => ToDto(r, [], [])).ToList());
@@ -816,7 +817,12 @@ public class CreditNotesController(
             })
             .ToListAsync(cancellationToken);
 
-    private static CreditNoteRow ToRow(CreditNote x) => new(
+    // Expression (no metodo/delegado suelto) para que EF Core la traduzca a SQL con sus joins. Un
+    // `.Select(x => ToRow(x))` que llame a un metodo aparte NO es traducible: EF lo evalua del lado
+    // del cliente materializando solo la fila de CreditNote, sin ningun Include, así que Building,
+    // Unit, Invoice y CreatedByUser llegan null y todo lo que depende de ellos sale vacio/0 (bug real,
+    // reportado 2026-09-22: la factura y su monto aparecian vacios en el listado y en el detalle).
+    private static readonly Expression<Func<CreditNote, CreditNoteRow>> ToRowProjection = x => new CreditNoteRow(
         x.Id, x.CompanyId, x.BuildingId, x.Building != null ? x.Building.Name : string.Empty,
         x.UnitId, x.Unit != null ? x.Unit.Code : string.Empty,
         x.InvoiceId, x.Invoice != null ? x.Invoice.NumeroFormateado : null, x.Invoice != null ? x.Invoice.MontoTotal : 0,
@@ -834,7 +840,7 @@ public class CreditNotesController(
         await dbContext.CreditNotes
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.Id == id)
-            .Select(x => ToRow(x))
+            .Select(ToRowProjection)
             .FirstOrDefaultAsync(cancellationToken);
 
     private static CreditNoteDto ToDto(CreditNoteRow r, List<CreditNoteLineDto> lines, List<CreditNoteAttachmentDto> attachments) => new()
