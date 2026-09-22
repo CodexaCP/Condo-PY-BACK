@@ -21,3 +21,5 @@ publish/
 ## OS
 .DS_Store
 Thumbs.db
+add_signature_url.sql
+add_signature_url_short.sql

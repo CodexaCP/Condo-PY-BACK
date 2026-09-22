@@ -550,6 +550,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 Detalle = $"Factura emitida con el número {tracked.NumeroFormateado}."
             });
 
+            await AddInvoiceIssuedNotificationAsync(tracked, cancellationToken);
+
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         });
@@ -661,6 +663,52 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         accessScope.IsSuperAdmin ||
         accessScope.IsCompanyAdmin ||
         string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    // Notifica al propietario cuando su factura pasa a Emitida. El comprobante (OwnerPayment) destino de la
+    // notificación se resuelve directo si la factura lo tiene enlazado; si no (facturas creadas por /draft,
+    // no por /draft-from-owner-payment), se busca por Payment.Reference, mismo patrón que OwnerPaymentsController.GetInvoices.
+    private async Task AddInvoiceIssuedNotificationAsync(Invoice invoice, CancellationToken cancellationToken)
+    {
+        Guid? ownerPaymentId = invoice.OwnerPaymentId;
+        Guid? recipientId = null;
+        string reference = string.Empty;
+
+        if (ownerPaymentId.HasValue)
+        {
+            var ownerPayment = await dbContext.OwnerPayments.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == ownerPaymentId.Value, cancellationToken);
+            recipientId = ownerPayment?.OwnerId;
+            reference = ownerPayment?.Reference ?? string.Empty;
+        }
+        else
+        {
+            var payment = await dbContext.Payments.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == invoice.PaymentId, cancellationToken);
+            if (payment is not null)
+            {
+                var ownerPayment = await dbContext.OwnerPayments.AsNoTracking()
+                    .Where(x => !x.IsDeleted && x.CompanyId == invoice.CompanyId && x.Reference == payment.Reference)
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+                ownerPaymentId = ownerPayment?.Id;
+                recipientId = ownerPayment?.OwnerId;
+                reference = ownerPayment?.Reference ?? string.Empty;
+            }
+        }
+
+        if (recipientId is null) return;
+
+        dbContext.Notifications.Add(new Notification
+        {
+            CompanyId = invoice.CompanyId,
+            RecipientId = recipientId.Value,
+            Type = NotificationType.InvoiceIssued,
+            Title = "Tu factura fue emitida",
+            Body = $"Se emitió la factura {invoice.NumeroFormateado} para el comprobante {reference}. Toca para descargarla.",
+            EntityType = "OwnerPayment",
+            EntityId = ownerPaymentId
+        });
+    }
 
     private async Task LogAsync(Guid invoiceId, Guid companyId, InvoiceAuditAction action, object? before, object? after, string detalle, CancellationToken cancellationToken)
     {
