@@ -19,6 +19,17 @@ public class Building : BaseEntity
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
+    // Modelos de documentos (factura, nota de credito y comprobante). Con UseStandardTemplates los PDF
+    // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
+    // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.
+    public bool UseStandardTemplates { get; set; } = true;
+    public string? InvoiceTemplateUrl { get; set; }
+    public string? InvoiceTemplateFileName { get; set; }
+    public string? CreditNoteTemplateUrl { get; set; }
+    public string? CreditNoteTemplateFileName { get; set; }
+    public string? ReceiptTemplateUrl { get; set; }
+    public string? ReceiptTemplateFileName { get; set; }
+
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
     public ICollection<Unit> Units { get; set; } = new List<Unit>();

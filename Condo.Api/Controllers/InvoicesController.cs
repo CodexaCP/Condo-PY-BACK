@@ -452,7 +452,11 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
 
         var dto = ToDto(row);
         (dto.ClienteNombre, dto.ClienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
-        var document = new InvoicePdfDocument(dto);
+        var standardTemplate = await dbContext.Buildings.AsNoTracking()
+            .Where(x => x.Id == dto.BuildingId)
+            .Select(x => (bool?)x.UseStandardTemplates)
+            .FirstOrDefaultAsync(cancellationToken) ?? true;
+        var document = new InvoicePdfDocument(dto, standardTemplate);
         var pdfBytes = document.GeneratePdf();
 
         await LogAsync(dto.Id, dto.CompanyId, InvoiceAuditAction.Printed, before: null,

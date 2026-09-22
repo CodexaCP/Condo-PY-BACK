@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using QuestPDF.Fluent;
 
 namespace Condo.Api.Controllers;
 
@@ -465,6 +467,61 @@ public class CreditNotesController(
         return Ok(ToDto(row!, lines, attachments));
     }
 
+    // PDF de la NC con el modelo del edificio: estandar de CONDOPY (colores de la marca) o, si el
+    // edificio usa modelos propios, el mismo formato en blanco y negro. Personal del edificio, o el
+    // propietario/residente de la unidad cuando la NC ya esta aprobada.
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken cancellationToken)
+    {
+        var creditNote = await dbContext.CreditNotes.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Id == id)
+            .Select(x => new
+            {
+                x.Id, x.BuildingId, x.UnitId, x.Status, x.Motivo, x.Amount, x.CreatedAtUtc,
+                x.RejectionReason, x.VoidReason, x.FiscalNumero, x.FiscalTimbrado, x.FiscalFechaEmisionUtc,
+                x.FiscalCdc, x.FiscalEstado,
+                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                BuildingAddress = x.Building != null ? x.Building.Address : null,
+                BuildingPhone = x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
+                UseStandardTemplates = x.Building == null || x.Building.UseStandardTemplates,
+                UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
+                InvoiceNumero = x.Invoice != null ? x.Invoice.NumeroFormateado : null,
+                InvoiceFecha = x.Invoice != null ? x.Invoice.FechaEmisionUtc : null,
+                // Emisor: el timbrado de la NC; mientras no esta numerada, el de la factura original.
+                RazonSocial = x.Series != null ? x.Series.RazonSocial : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.RazonSocial : null,
+                Ruc = x.Series != null ? x.Series.Ruc : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.Ruc : null,
+                VigenciaDesde = x.Series != null ? x.Series.VigenciaDesde : (DateOnly?)null,
+                VigenciaHasta = x.Series != null ? x.Series.VigenciaHasta : (DateOnly?)null
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (creditNote is null) return NotFound();
+
+        var isStaff = await accessScope.CanAccessBuildingAsync(creditNote.BuildingId, cancellationToken);
+        if (!isStaff && !(creditNote.Status == CreditNoteStatus.Approved && await IsLinkedToUnitAsync(creditNote.UnitId, cancellationToken)))
+            return Forbid();
+
+        var lines = await LoadLinesAsync(id, cancellationToken);
+        var (clienteNombre, clienteDocumento) = await LoadClientAsync(creditNote.UnitId, cancellationToken);
+
+        var data = new CreditNotePdfData(
+            creditNote.BuildingName, creditNote.BuildingAddress, creditNote.BuildingPhone,
+            creditNote.RazonSocial, creditNote.Ruc, creditNote.FiscalTimbrado,
+            creditNote.VigenciaDesde, creditNote.VigenciaHasta,
+            creditNote.FiscalNumero, creditNote.FiscalFechaEmisionUtc, creditNote.CreatedAtUtc,
+            creditNote.InvoiceNumero, creditNote.InvoiceFecha,
+            clienteNombre, clienteDocumento, creditNote.UnitCode,
+            creditNote.Motivo, creditNote.Amount, creditNote.Status,
+            creditNote.RejectionReason, creditNote.VoidReason, creditNote.FiscalCdc, creditNote.FiscalEstado,
+            lines.Select(l => new CreditNotePdfLine(string.IsNullOrWhiteSpace(l.Concept) ? l.ChargeConcept : l.Concept, l.Amount)).ToList());
+
+        var pdfBytes = new CreditNotePdfDocument(data, creditNote.UseStandardTemplates).GeneratePdf();
+
+        var fileNameSuffix = creditNote.FiscalNumero is not null
+            ? creditNote.FiscalNumero.Replace("-", "_")
+            : $"borrador_{creditNote.Id.ToString()[..8]}";
+        return File(pdfBytes, "application/pdf", $"nota_credito_{creditNote.UnitCode}_{fileNameSuffix}.pdf");
+    }
+
     [HttpPut("{id:guid}/fiscal-data")]
     public async Task<ActionResult<CreditNoteDto>> RegisterFiscalData(
         Guid id, [FromBody] RegisterCreditNoteFiscalDataRequest request, CancellationToken cancellationToken)
@@ -624,6 +681,38 @@ public class CreditNotesController(
             .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
             .Select(x => (Guid?)x.OwnerId)
             .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task<bool> IsLinkedToUnitAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        var userId = tenantContext.UserId;
+
+        if (await dbContext.UnitOwners.AsNoTracking()
+                .AnyAsync(x => !x.IsDeleted && x.UnitId == unitId && x.OwnerId == userId, cancellationToken))
+            return true;
+
+        return await dbContext.UnitResidents.AsNoTracking()
+            .AnyAsync(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null
+                           && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == userId, cancellationToken);
+    }
+
+    // Cliente de la NC: el mismo de la factura (propietario principal de la unidad; si no hay, el residente actual).
+    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid unitId, CancellationToken cancellationToken)
+    {
+        var owner = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.Owner != null)
+            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
+            .Select(x => new { x.Owner!.FullName, x.Owner.DocumentNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (owner is not null) return (owner.FullName, owner.DocumentNumber);
+
+        var resident = await dbContext.UnitResidents
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null && x.Resident != null)
+            .Select(x => new { x.Resident!.FullName, x.Resident.DocumentNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        return (resident?.FullName, resident?.DocumentNumber);
+    }
 
     private async Task AddCreditNoteApprovedNotificationAsync(CreditNote creditNote, CancellationToken cancellationToken)
     {

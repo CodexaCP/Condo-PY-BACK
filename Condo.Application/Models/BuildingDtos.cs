@@ -17,6 +17,15 @@ public class BuildingUpsertRequest
     public decimal? LateFeeRatePercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
+
+    // Null = no tocar la configuracion de modelos (formularios que no la editan); al crear, null = estandar.
+    public bool? UseStandardTemplates { get; set; }
+    public string? InvoiceTemplateUrl { get; set; }
+    public string? InvoiceTemplateFileName { get; set; }
+    public string? CreditNoteTemplateUrl { get; set; }
+    public string? CreditNoteTemplateFileName { get; set; }
+    public string? ReceiptTemplateUrl { get; set; }
+    public string? ReceiptTemplateFileName { get; set; }
 }
 
 public class BuildingDto
@@ -36,4 +45,11 @@ public class BuildingDto
     public decimal? LateFeeRatePercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; }
+    public bool UseStandardTemplates { get; set; }
+    public string? InvoiceTemplateUrl { get; set; }
+    public string? InvoiceTemplateFileName { get; set; }
+    public string? CreditNoteTemplateUrl { get; set; }
+    public string? CreditNoteTemplateFileName { get; set; }
+    public string? ReceiptTemplateUrl { get; set; }
+    public string? ReceiptTemplateFileName { get; set; }
 }

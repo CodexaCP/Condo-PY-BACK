@@ -63,7 +63,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
-                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations
+                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
+                UseStandardTemplates = x.UseStandardTemplates,
+                InvoiceTemplateUrl = x.InvoiceTemplateUrl,
+                InvoiceTemplateFileName = x.InvoiceTemplateFileName,
+                CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
+                CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
+                ReceiptTemplateUrl = x.ReceiptTemplateUrl,
+                ReceiptTemplateFileName = x.ReceiptTemplateFileName
             })
             .ToListAsync(cancellationToken);
 
@@ -97,7 +104,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
-                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations
+                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
+                UseStandardTemplates = x.UseStandardTemplates,
+                InvoiceTemplateUrl = x.InvoiceTemplateUrl,
+                InvoiceTemplateFileName = x.InvoiceTemplateFileName,
+                CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
+                CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
+                ReceiptTemplateUrl = x.ReceiptTemplateUrl,
+                ReceiptTemplateFileName = x.ReceiptTemplateFileName
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -171,6 +185,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
             BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations
         };
+        ApplyTemplates(entity, request);
 
         dbContext.Buildings.Add(entity);
 
@@ -289,6 +304,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.LateFeeRatePercentage = newRate;
         entity.LateFeeFrequency = newFrequency;
         entity.BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations;
+        if (request.UseStandardTemplates.HasValue)
+            ApplyTemplates(entity, request);
 
         var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
         if (lateFeeChanged && effectiveCompanyId.HasValue)
@@ -498,8 +515,31 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return "Definí el incremento de la mora (diario, semanal o quincenal).";
         }
 
+        if (request.UseStandardTemplates == false &&
+            (string.IsNullOrWhiteSpace(request.InvoiceTemplateUrl) ||
+             string.IsNullOrWhiteSpace(request.CreditNoteTemplateUrl) ||
+             string.IsNullOrWhiteSpace(request.ReceiptTemplateUrl)))
+        {
+            return "Adjuntá los 3 modelos (factura, nota de crédito y comprobante) o marcá \"Usar modelos estándar de CONDOPY\".";
+        }
+
         return null;
     }
+
+    // Con modelos estandar no se guardan adjuntos: si el edificio vuelve al estandar se limpian los propios.
+    private static void ApplyTemplates(Building entity, BuildingUpsertRequest request)
+    {
+        var standard = request.UseStandardTemplates ?? true;
+        entity.UseStandardTemplates = standard;
+        entity.InvoiceTemplateUrl = standard ? null : TrimOrNull(request.InvoiceTemplateUrl);
+        entity.InvoiceTemplateFileName = standard ? null : TrimOrNull(request.InvoiceTemplateFileName);
+        entity.CreditNoteTemplateUrl = standard ? null : TrimOrNull(request.CreditNoteTemplateUrl);
+        entity.CreditNoteTemplateFileName = standard ? null : TrimOrNull(request.CreditNoteTemplateFileName);
+        entity.ReceiptTemplateUrl = standard ? null : TrimOrNull(request.ReceiptTemplateUrl);
+        entity.ReceiptTemplateFileName = standard ? null : TrimOrNull(request.ReceiptTemplateFileName);
+    }
+
+    private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool IsUniqueCodeViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException sqlException &&
@@ -537,6 +577,13 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactEmail = entity.ContactEmail,
             LateFeeRatePercentage = entity.LateFeeRatePercentage,
             LateFeeFrequency = entity.LateFeeFrequency,
-            BlockOverdueAmenityReservations = entity.BlockOverdueAmenityReservations
+            BlockOverdueAmenityReservations = entity.BlockOverdueAmenityReservations,
+            UseStandardTemplates = entity.UseStandardTemplates,
+            InvoiceTemplateUrl = entity.InvoiceTemplateUrl,
+            InvoiceTemplateFileName = entity.InvoiceTemplateFileName,
+            CreditNoteTemplateUrl = entity.CreditNoteTemplateUrl,
+            CreditNoteTemplateFileName = entity.CreditNoteTemplateFileName,
+            ReceiptTemplateUrl = entity.ReceiptTemplateUrl,
+            ReceiptTemplateFileName = entity.ReceiptTemplateFileName
         };
 }

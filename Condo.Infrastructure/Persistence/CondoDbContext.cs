@@ -128,6 +128,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.ContactEmail).HasMaxLength(160);
         modelBuilder.Entity<Building>().Property(x => x.LateFeeRatePercentage).HasColumnType("decimal(5,2)");
         modelBuilder.Entity<Building>().Property(x => x.LateFeeFrequency).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateFileName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateFileName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.ReceiptTemplateUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.ReceiptTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Buildings)
