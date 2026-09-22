@@ -64,7 +64,9 @@ public class CreditNotesController(
 
         var lines = await LoadLinesAsync(id, cancellationToken);
         var attachments = await LoadAttachmentsAsync(id, cancellationToken);
-        return Ok(ToDto(row, lines, attachments));
+        var dto = ToDto(row, lines, attachments);
+        await EnrichWithInvoiceDataAsync(dto, cancellationToken);
+        return Ok(dto);
     }
 
     // Cargos del comprobante de esta factura que todavia admiten ajuste (para armar el formulario
@@ -871,6 +873,52 @@ public class CreditNotesController(
         Lines = lines,
         Attachments = attachments
     };
+
+    // Datos de la factura ajustada (cliente, emisor/timbrado, comprobante y pago), igual de completos
+    // que el detalle de Factura. Solo se cargan para el detalle (GetById/PDF), no en el listado, para
+    // no pagar estos joins extra en cada fila de la tabla.
+    private async Task EnrichWithInvoiceDataAsync(CreditNoteDto dto, CancellationToken cancellationToken)
+    {
+        var (clienteNombre, clienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
+        dto.ClienteNombre = clienteNombre;
+        dto.ClienteDocumento = clienteDocumento;
+
+        var extra = await dbContext.CreditNotes.AsNoTracking()
+            .Where(x => x.Id == dto.Id)
+            .Select(x => new
+            {
+                BuildingAddress = x.Building != null ? x.Building.Address : null,
+                // Emisor: el timbrado propio de la NC si ya esta numerada; mientras no, el de la factura original.
+                RazonSocial = x.Series != null ? x.Series.RazonSocial : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.RazonSocial : null,
+                Ruc = x.Series != null ? x.Series.Ruc : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.Ruc : null,
+                Timbrado = x.Series != null ? x.Series.NumeroTimbrado : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.NumeroTimbrado : null,
+                Establecimiento = x.Series != null ? x.Series.Establecimiento : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.Establecimiento : null,
+                PuntoExpedicion = x.Series != null ? x.Series.PuntoExpedicion : x.Invoice != null && x.Invoice.Series != null ? x.Invoice.Series.PuntoExpedicion : null,
+                PeriodName = x.Invoice != null && x.Invoice.Payment != null && x.Invoice.Payment.ExpensePeriod != null ? x.Invoice.Payment.ExpensePeriod.Name : null,
+                PeriodDueDate = x.Invoice != null && x.Invoice.Payment != null && x.Invoice.Payment.ExpensePeriod != null ? x.Invoice.Payment.ExpensePeriod.DueDate : (DateOnly?)null,
+                PaymentReference = x.Invoice != null && x.Invoice.Payment != null ? x.Invoice.Payment.Reference : null,
+                PaymentDate = x.Invoice != null && x.Invoice.Payment != null ? x.Invoice.Payment.PaymentDate : (DateOnly?)null,
+                PaymentAmount = x.Invoice != null && x.Invoice.Payment != null ? x.Invoice.Payment.Amount : (decimal?)null,
+                OwnerPaymentId = x.Invoice != null ? x.Invoice.OwnerPaymentId : null,
+                OwnerName = x.Invoice != null && x.Invoice.OwnerPayment != null && x.Invoice.OwnerPayment.Owner != null ? x.Invoice.OwnerPayment.Owner.FullName : null
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (extra is null) return;
+
+        dto.BuildingAddress = extra.BuildingAddress;
+        dto.EmisorRazonSocial = extra.RazonSocial;
+        dto.EmisorRuc = extra.Ruc;
+        dto.EmisorTimbrado = extra.Timbrado;
+        dto.EmisorEstablecimiento = extra.Establecimiento;
+        dto.EmisorPuntoExpedicion = extra.PuntoExpedicion;
+        dto.PeriodName = extra.PeriodName;
+        dto.PeriodDueDate = extra.PeriodDueDate;
+        dto.PaymentReference = extra.PaymentReference;
+        dto.PaymentDate = extra.PaymentDate;
+        dto.PaymentAmount = extra.PaymentAmount;
+        dto.OwnerPaymentId = extra.OwnerPaymentId;
+        dto.OwnerName = extra.OwnerName;
+    }
 
     private sealed record CreditNoteRow(
         Guid Id, Guid CompanyId, Guid BuildingId, string BuildingName, Guid UnitId, string UnitCode,

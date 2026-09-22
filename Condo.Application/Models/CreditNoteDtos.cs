@@ -36,6 +36,23 @@ public class CreditNoteDto
     public string? InvoiceNumeroFormateado { get; set; }
     public decimal InvoiceMontoTotal { get; set; }
 
+    // Datos de la factura ajustada, para que el detalle se vea igual de completo que el de Factura.
+    public string? BuildingAddress { get; set; }
+    public string? ClienteNombre { get; set; }
+    public string? ClienteDocumento { get; set; }
+    public string? EmisorRazonSocial { get; set; }
+    public string? EmisorRuc { get; set; }
+    public string? EmisorTimbrado { get; set; }
+    public string? EmisorEstablecimiento { get; set; }
+    public string? EmisorPuntoExpedicion { get; set; }
+    public string? PeriodName { get; set; }
+    public DateOnly? PeriodDueDate { get; set; }
+    public string? PaymentReference { get; set; }
+    public DateOnly? PaymentDate { get; set; }
+    public decimal? PaymentAmount { get; set; }
+    public Guid? OwnerPaymentId { get; set; }
+    public string? OwnerName { get; set; }
+
     public string Motivo { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public CreditNoteStatus Status { get; set; }
