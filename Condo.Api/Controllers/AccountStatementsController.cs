@@ -265,13 +265,14 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
                            && (!IsEndUser || x.Status == ExpensePeriodStatus.Published), cancellationToken);
         if (!periodVisible) return NotFound();
 
+        // Cada factura queda ligada a un unico comprobante (unidad + periodo) a traves de i.Payment
+        // (ver InvoicesController.CreateDraftsFromOwnerPayment). No hace falta (ni conviene) buscar por
+        // Reference del OwnerPayment: eso traia tambien facturas de OTROS periodos cubiertos por el mismo
+        // pago aprobado, mostrando en un mes facturas que en realidad correspondian a otros meses.
         var invoices = await dbContext.Invoices
             .AsNoTracking()
             .Where(i => !i.IsDeleted && i.UnitId == unitId && i.Status == InvoiceStatus.Issued
-                        && ((i.Payment != null && !i.Payment.IsReversed && i.Payment.ExpensePeriodId == expensePeriodId)
-                            || (i.OwnerPayment != null && dbContext.Payments.Any(p =>
-                                !p.IsDeleted && !p.IsReversed && p.UnitId == unitId && p.ExpensePeriodId == expensePeriodId
-                                && p.Reference == i.OwnerPayment.Reference))))
+                        && i.Payment != null && !i.Payment.IsReversed && i.Payment.ExpensePeriodId == expensePeriodId)
             .OrderBy(i => i.Numero)
             .Select(i => new OwnerPaymentInvoiceDto
             {
