@@ -80,6 +80,8 @@ public class ExpenseReceiptDto
     public string? ResidentDocumentType { get; set; }
     public string? ResidentDocumentNumber { get; set; }
     public decimal UnitCoefficient { get; set; }
+    // Suma de cargos Ordinary de TODAS las unidades del edificio en el periodo, para la nota de coeficiente del PDF.
+    public decimal BuildingOrdinaryTotal { get; set; }
     public IReadOnlyList<ExpenseReceiptChargeDto> Charges { get; set; } = [];
     public IReadOnlyList<AccountStatementPaymentDto> Payments { get; set; } = [];
     public decimal OrdinaryAmount { get; set; }

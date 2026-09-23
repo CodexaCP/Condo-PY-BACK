@@ -439,6 +439,13 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         var totalAmount = charges.Sum(x => x.Amount);
         var totalPaid = payments.Where(x => !x.IsReversed).Sum(x => x.Amount);
 
+        var buildingOrdinaryTotal = await dbContext.ExpenseCharges
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && !x.IsReversal
+                        && x.ExpensePeriodId == expensePeriodId
+                        && x.ChargeType == ExpenseChargeType.Ordinary)
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
         var receipt = new ExpenseReceiptDto
         {
             UnitId = unit.Id,
@@ -457,6 +464,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             ResidentDocumentType = residentDocType,
             ResidentDocumentNumber = residentDocNum,
             UnitCoefficient = unit.Coefficient,
+            BuildingOrdinaryTotal = buildingOrdinaryTotal,
             Charges = charges,
             Payments = payments,
             OrdinaryAmount = charges.Where(x => x.ChargeType == ExpenseChargeType.Ordinary).Sum(x => x.Amount),

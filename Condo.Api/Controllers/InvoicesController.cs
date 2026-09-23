@@ -57,7 +57,11 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc,
-                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null))
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null,
+                x.Payment != null ? x.Payment.ExpensePeriodId : (Guid?)null,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Year : (int?)null,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
+                x.Unit != null ? x.Unit.Coefficient : 0m))
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
@@ -456,6 +460,17 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
             .Where(x => x.Id == dto.BuildingId)
             .Select(x => (bool?)x.UseStandardTemplates)
             .FirstOrDefaultAsync(cancellationToken) ?? true;
+
+        if (row.PeriodId.HasValue)
+        {
+            dto.BuildingOrdinaryTotal = await dbContext.ExpenseCharges
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && !x.IsReversal
+                            && x.ExpensePeriodId == row.PeriodId.Value
+                            && x.ChargeType == ExpenseChargeType.Ordinary)
+                .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+        }
+
         var document = new InvoicePdfDocument(dto, standardTemplate);
         var pdfBytes = document.GeneratePdf();
 
@@ -752,7 +767,11 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Building != null ? ((x.Building.ContactPhonePrefix ?? "") + " " + (x.Building.ContactPhone ?? "")).Trim() : null,
                 x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.ReemplazadaPorInvoiceId, x.CreatedAtUtc,
-                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null))
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.DueDate : (DateOnly?)null,
+                x.Payment != null ? x.Payment.ExpensePeriodId : (Guid?)null,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Year : (int?)null,
+                x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
+                x.Unit != null ? x.Unit.Coefficient : 0m))
             .FirstOrDefaultAsync(cancellationToken);
 
     private static InvoiceDto ToDto(InvoiceRow row) => new()
@@ -775,6 +794,9 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         BuildingAddress = row.BuildingAddress,
         BuildingPhone = row.BuildingPhone,
         PeriodDueDate = row.PeriodDueDate,
+        PeriodYear = row.PeriodYear,
+        PeriodMonth = row.PeriodMonth,
+        UnitCoefficient = row.UnitCoefficient,
         Status = row.Status,
         Numero = row.Numero,
         NumeroFormateado = row.NumeroFormateado,
@@ -796,5 +818,5 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         string? BuildingAddress, string? BuildingPhone,
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
-        DateOnly? PeriodDueDate);
+        DateOnly? PeriodDueDate, Guid? PeriodId, int? PeriodYear, int? PeriodMonth, decimal UnitCoefficient);
 }

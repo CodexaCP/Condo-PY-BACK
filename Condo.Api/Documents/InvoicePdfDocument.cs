@@ -33,7 +33,6 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     private const float PageWidth = 595.2756f;
     private const float PageHeight = 841.8898f;
     private const float RowTopY = 524.4094f;      // linea bajo el encabezado de la tabla
-    private const int MaxRows = 18;
 
     public DocumentMetadata GetMetadata() => new()
     {
@@ -206,32 +205,67 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         Text(l, col3, 531, 8.5f, "5%", bold: bold, width: col4 - col3, align: Align.Center, color: p.Label);
         Text(l, col4, 531, 8.5f, "10%", bold: bold, width: right - col4, align: Align.Center, color: p.Label);
 
-        var lines = LateFeeGrouping.Collapse(
-            invoice.Detalle,
-            l => l.Concepto,
-            l => l.Monto,
-            (first, sum, label) => new InvoiceLineDto { Concepto = label, ChargeType = first.ChargeType, Monto = sum });
-        if (lines.Count > MaxRows)
-        {
-            var rest = lines.Skip(MaxRows - 1).ToList();
-            lines = lines.Take(MaxRows - 1).ToList();
-            lines.Add(new InvoiceLineDto { Concepto = $"Otros conceptos ({rest.Count})", Monto = rest.Sum(x => x.Monto) });
-        }
+        var lines = BuildConsolidatedLines();
 
         // Los conceptos se listan de arriba hacia abajo, sin lineas de fila, como en el formulario impreso.
+        // La primera linea (expensas) lleva una segunda linea mas chica debajo con el coeficiente.
         const float firstBaseline = 510f;
-        var spacing = lines.Count <= 12 ? 13f : 12f;
-        var fontSize = lines.Count <= 12 ? 8.5f : 8f;
+        const float fontSize = 8.5f;
+        const float spacing = 13f;
+        const float subNoteSpacing = 10f;
 
-        for (var i = 0; i < lines.Count; i++)
+        var baseline = firstBaseline;
+        foreach (var (concepto, subNota, monto) in lines)
         {
-            var baseline = firstBaseline - (i * spacing);
-            Text(l, 76, baseline, fontSize, lines[i].Concepto, width: 248);
-            Text(l, col2, baseline, fontSize, FormatNumber(lines[i].Monto), width: col3 - col2 - 6, align: Align.Right);
+            Text(l, 76, baseline, fontSize, concepto, width: 248);
+            Text(l, col2, baseline, fontSize, FormatNumber(monto), width: col3 - col2 - 6, align: Align.Right);
+            baseline -= spacing;
+
+            if (subNota is not null)
+            {
+                Text(l, 76, baseline, 7.5f, subNota, width: 248, color: Colors.Grey.Darken1);
+                baseline -= subNoteSpacing;
+            }
         }
 
         if (invoice.PeriodDueDate.HasValue)
             Text(l, 76, 262, 8.5f, $"Vto. {invoice.PeriodDueDate.Value:dd/MM/yyyy}.");
+    }
+
+    // Todo lo que no es Extraordinary se junta en una sola linea "Expensas correspondiente al mes de X"
+    // (ordinaria, fondo de reserva, individual, ajustes/mora); lo Extraordinary va aparte, con el % que
+    // representa sobre esa expensa. Asi sale el formulario impreso, sin desglosar cada concepto suelto.
+    private List<(string Concepto, string? SubNota, decimal Monto)> BuildConsolidatedLines()
+    {
+        var extraordinario = invoice.Detalle.Where(x => x.ChargeType == ExpenseChargeType.Extraordinary).Sum(x => x.Monto);
+        var expensas = invoice.Detalle.Where(x => x.ChargeType != ExpenseChargeType.Extraordinary).Sum(x => x.Monto);
+
+        var result = new List<(string, string?, decimal)>();
+
+        var mes = invoice.PeriodMonth is >= 1 and <= 12 ? Months[invoice.PeriodMonth.Value - 1][..3] : null;
+        var periodo = mes is not null && invoice.PeriodYear.HasValue ? $"{mes}/{invoice.PeriodYear.Value}" : null;
+        var concepto = periodo is not null
+            ? $"EXPENSAS CORRESPONDIENTE AL MES DE {periodo}"
+            : "EXPENSAS CORRESPONDIENTE AL PERIODO";
+
+        string? subNota = null;
+        if (invoice.BuildingOrdinaryTotal > 0)
+        {
+            var coefPct = (invoice.UnitCoefficient * 100m).ToString("0.####", CultureInfo.InvariantCulture).Replace(".", ",");
+            subNota = $"Coeficiente: {coefPct} % de {FormatNumber(invoice.BuildingOrdinaryTotal)}";
+        }
+
+        result.Add((concepto, subNota, expensas));
+
+        if (extraordinario > 0)
+        {
+            var pctText = expensas > 0
+                ? $" {Math.Round(extraordinario / expensas * 100m, MidpointRounding.AwayFromZero):0}%"
+                : string.Empty;
+            result.Add(($"APORTE EXTRAORDINARIO{pctText}", null, extraordinario));
+        }
+
+        return result;
     }
 
     // ─── Subtotales, total, IVA y letras ─────────────────────────────────────

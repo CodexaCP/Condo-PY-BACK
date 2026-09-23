@@ -78,6 +78,12 @@ public class InvoiceDto
     public string? BuildingAddress { get; set; }
     public string? BuildingPhone { get; set; }
     public DateOnly? PeriodDueDate { get; set; }
+    public int? PeriodYear { get; set; }
+    public int? PeriodMonth { get; set; }
+    public decimal UnitCoefficient { get; set; }
+    // Suma de cargos Ordinary de TODAS las unidades del edificio en el periodo (presupuesto sobre el que
+    // se aplica el coeficiente). Se calcula aparte porque no depende de esta factura sino del periodo entero.
+    public decimal BuildingOrdinaryTotal { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
     public InvoiceStatus Status { get; set; }

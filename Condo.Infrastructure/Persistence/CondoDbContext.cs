@@ -147,7 +147,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .OnDelete(DeleteBehavior.Restrict);
 
         // ── ExpensePeriod ──────────────────────────────────────────────────────
-        modelBuilder.Entity<ExpensePeriod>().HasIndex(x => new { x.BuildingId, x.Year, x.Month }).IsUnique();
+        // Filtrado por IsDeleted = 0: sin esto, un periodo borrado (soft-delete) deja su combinacion
+        // edificio+anio+mes bloqueada para siempre en el indice fisico, aunque para la app ya no exista.
+        modelBuilder.Entity<ExpensePeriod>().HasIndex(x => new { x.BuildingId, x.Year, x.Month })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
         modelBuilder.Entity<ExpensePeriod>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
         modelBuilder.Entity<ExpensePeriod>().Property(x => x.Name).HasMaxLength(200);
         modelBuilder.Entity<ExpensePeriod>().Property(x => x.Notes).HasMaxLength(1000);
