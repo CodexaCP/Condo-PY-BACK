@@ -33,8 +33,10 @@ public class UploadsController(IWebHostEnvironment env) : ControllerBase
         await using var stream = System.IO.File.Create(filePath);
         await file.CopyToAsync(stream, ct);
 
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        return Ok(new UploadResultDto { Url = $"{baseUrl}/uploads/{fileName}" });
+        // Ruta relativa (no absoluta): si se guardara con Request.Scheme/Host, el link queda atado
+        // al dominio de ese momento (p.ej. un tunel de desarrollo) y se rompe para siempre si cambia.
+        // Cada cliente arma la URL completa con su propio apiUrl configurado al momento de mostrarla.
+        return Ok(new UploadResultDto { Url = $"/uploads/{fileName}" });
     }
 }
 
