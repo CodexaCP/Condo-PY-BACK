@@ -14,7 +14,8 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/invoice-series")]
-public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
+public class InvoiceSeriesController(
+    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceSeriesDto>>> GetAll(
@@ -281,7 +282,8 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
             CreatedAtUtc = DateTime.UtcNow
         };
 
-        var document = new InvoicePdfDocument(sample, standardTemplate: true);
+        var backgroundImage = TryReadReferenceScan(entity.ReferenceScanUrl);
+        var document = new InvoicePdfDocument(sample, standardTemplate: true, backgroundImage);
         var pdfBytes = document.GeneratePdf();
         return File(pdfBytes, "application/pdf", $"calibracion_{entity.NumeroTimbrado}.pdf");
     }
@@ -438,4 +440,20 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
         !string.IsNullOrWhiteSpace(value) && value.Trim().Length == expectedLength && value.Trim().All(char.IsDigit);
 
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Lee el escaneo de referencia del disco para incrustarlo de fondo en el PDF de prueba (no en facturas
+    // reales). Solo funciona con imagenes (jpg/png/webp/gif); un PDF de referencia no se puede incrustar asi,
+    // se ignora silenciosamente (el editor igual lo muestra en pantalla via iframe).
+    private byte[]? TryReadReferenceScan(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        var fileName = Path.GetFileName(Uri.TryCreate(url, UriKind.Absolute, out var abs) ? abs.AbsolutePath : url);
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".gif")) return null;
+
+        var path = Path.Combine(env.WebRootPath, "uploads", fileName);
+        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
+    }
 }

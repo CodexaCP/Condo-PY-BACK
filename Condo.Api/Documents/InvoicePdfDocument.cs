@@ -16,7 +16,7 @@ namespace Condo.Api.Documents;
 /// Si el timbrado tiene posiciones calibradas (invoice.FieldPositionsJson), cada campo se corre por su
 /// offset guardado, para calzar sobre el papel preimpreso real de esa imprenta.
 /// </summary>
-public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate = false) : IDocument
+public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate = false, byte[]? backgroundImage = null) : IDocument
 {
     private sealed record FieldOffset(float Dx, float Dy);
 
@@ -80,6 +80,10 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
             page.Content().Layers(layers =>
             {
                 layers.PrimaryLayer().Text(string.Empty);
+                // Solo en el "PDF de prueba" de calibracion: el escaneo del papel real de fondo, para
+                // poder comparar en pantalla sin tener que imprimir. Las facturas reales nunca llevan esto.
+                if (backgroundImage is not null)
+                    layers.Layer().Width(PageWidth).Height(PageHeight).Image(backgroundImage).FitArea();
                 DrawFrame(layers);
                 DrawHeader(layers);
                 DrawClientBlock(layers);
