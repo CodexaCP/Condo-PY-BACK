@@ -163,72 +163,6 @@ public class RecurringBuildingExpensesController(
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, building.Name, targetUnit));
     }
 
-    // Crea la misma plantilla para los edificios elegidos (o todos los accesibles, si no se elige ninguno
-    // puntual), una fila por edificio. No disponible para distribucion por unidad individual (la unidad es
-    // especifica de un solo edificio).
-    [HttpPost("create-for-all")]
-    public async Task<ActionResult<IReadOnlyList<RecurringBuildingExpenseDto>>> CreateForAll(
-        [FromBody] RecurringBuildingExpenseCreateForAllRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.DistributionType == BuildingExpenseDistributionType.IndividualUnit)
-        {
-            return BadRequest("La distribucion por unidad individual no esta disponible para varios edificios: elegi un edificio puntual.");
-        }
-
-        if (!IsValidCreateForAllRequest(request, out var error))
-        {
-            return BadRequest(error);
-        }
-
-        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-        var targetIds = request.BuildingIds.Count > 0
-            ? request.BuildingIds.Where(id => accessibleBuildingIds.Contains(id)).ToList()
-            : accessibleBuildingIds.ToList();
-
-        if (targetIds.Count == 0)
-        {
-            return BadRequest("No hay edificios accesibles para crear la plantilla.");
-        }
-
-        var buildings = await dbContext.Buildings
-            .AsNoTracking()
-            .Include(x => x.Condominium)
-            .Where(x => !x.IsDeleted && targetIds.Contains(x.Id))
-            .ToListAsync(cancellationToken);
-
-        if (buildings.Count == 0)
-        {
-            return BadRequest("No hay edificios accesibles para crear la plantilla.");
-        }
-
-        var created = new List<RecurringBuildingExpenseDto>();
-        foreach (var building in buildings)
-        {
-            var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
-            if (!effectiveCompanyId.HasValue) continue;
-
-            var entity = new RecurringBuildingExpense
-            {
-                CompanyId = effectiveCompanyId.Value,
-                BuildingId = building.Id,
-                Category = request.Category,
-                SupplierName = request.SupplierName.Trim(),
-                Description = request.Description.Trim(),
-                Amount = request.Amount,
-                DistributionType = request.DistributionType,
-                TargetUnitId = null,
-                Notes = request.Notes.Trim(),
-                IsActive = request.IsActive
-            };
-            dbContext.RecurringBuildingExpenses.Add(entity);
-            created.Add(ToDto(entity, building.Name, null));
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(created);
-    }
-
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<RecurringBuildingExpenseDto>> Update(
         Guid id,
@@ -438,48 +372,6 @@ public class RecurringBuildingExpensesController(
         if (request.DistributionType == BuildingExpenseDistributionType.IndividualUnit && !request.TargetUnitId.HasValue)
         {
             error = "La unidad destino es obligatoria cuando la distribucion es por unidad individual.";
-            return false;
-        }
-
-        error = string.Empty;
-        return true;
-    }
-
-    private static bool IsValidCreateForAllRequest(RecurringBuildingExpenseCreateForAllRequest request, out string error)
-    {
-        if (request.DistributionType == BuildingExpenseDistributionType.ManualGroup)
-        {
-            error = "La distribucion ManualGroup todavia no esta disponible.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Description))
-        {
-            error = "La descripcion es obligatoria.";
-            return false;
-        }
-
-        if (request.Description.Trim().Length > 200)
-        {
-            error = "La descripcion no puede superar los 200 caracteres.";
-            return false;
-        }
-
-        if (request.SupplierName.Trim().Length > 160)
-        {
-            error = "El proveedor no puede superar los 160 caracteres.";
-            return false;
-        }
-
-        if (request.Notes.Trim().Length > 500)
-        {
-            error = "Las notas no pueden superar los 500 caracteres.";
-            return false;
-        }
-
-        if (request.Amount <= 0)
-        {
-            error = "El monto debe ser mayor que cero.";
             return false;
         }
 
