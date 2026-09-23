@@ -15,6 +15,8 @@ public class RecurringBuildingExpensesController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope) : ControllerBase
 {
+    private const string GeneralBuildingName = "Todos los edificios";
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<RecurringBuildingExpenseDto>>> GetAll(
         [FromQuery] Guid? buildingId,
@@ -34,24 +36,31 @@ public class RecurringBuildingExpensesController(
             }
             else
             {
-                query = query.Where(x => accessibleBuildingIds.Contains(x.BuildingId));
+                // Ademas de sus edificios, un BuildingManager tiene que ver las plantillas generales
+                // de su empresa (BuildingId null), que tambien le aplican.
+                var companyId = accessScope.CompanyId;
+                query = query.Where(x =>
+                    accessibleBuildingIds.Contains(x.BuildingId!.Value) ||
+                    (x.BuildingId == null && companyId.HasValue && x.CompanyId == companyId.Value));
             }
         }
 
         if (buildingId.HasValue)
         {
-            query = query.Where(x => x.BuildingId == buildingId.Value);
+            // Filtrar "por este edificio" muestra tambien las generales, porque esas tambien le aplican.
+            var bId = buildingId.Value;
+            query = query.Where(x => x.BuildingId == bId || x.BuildingId == null);
         }
 
         var items = await query
-            .OrderBy(x => x.Building!.Name)
+            .OrderBy(x => x.Building != null ? x.Building.Name : string.Empty)
             .ThenBy(x => x.Description)
             .Select(x => new RecurringBuildingExpenseDto
             {
                 Id = x.Id,
                 CompanyId = x.CompanyId,
                 BuildingId = x.BuildingId,
-                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                BuildingName = x.Building != null ? x.Building.Name : GeneralBuildingName,
                 Category = x.Category,
                 SupplierName = x.SupplierName,
                 Description = x.Description,
@@ -78,7 +87,7 @@ public class RecurringBuildingExpensesController(
                 Id = x.Id,
                 CompanyId = x.CompanyId,
                 BuildingId = x.BuildingId,
-                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                BuildingName = x.Building != null ? x.Building.Name : GeneralBuildingName,
                 Category = x.Category,
                 SupplierName = x.SupplierName,
                 Description = x.Description,
@@ -96,7 +105,7 @@ public class RecurringBuildingExpensesController(
             return NotFound();
         }
 
-        return await accessScope.CanAccessBuildingAsync(item.BuildingId, cancellationToken) ? Ok(item) : Forbid();
+        return await CanAccessAsync(item.BuildingId, item.CompanyId, cancellationToken) ? Ok(item) : Forbid();
     }
 
     [HttpPost]
@@ -109,25 +118,41 @@ public class RecurringBuildingExpensesController(
             return BadRequest(error);
         }
 
-        var building = await dbContext.Buildings
-            .AsNoTracking()
-            .Include(x => x.Condominium)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId, cancellationToken);
+        Building? building = null;
+        Guid effectiveCompanyId;
 
-        if (building is null)
+        if (request.BuildingId.HasValue)
         {
-            return BadRequest("El edificio indicado no existe.");
+            building = await dbContext.Buildings
+                .AsNoTracking()
+                .Include(x => x.Condominium)
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId.Value, cancellationToken);
+
+            if (building is null)
+            {
+                return BadRequest("El edificio indicado no existe.");
+            }
+
+            if (!await accessScope.CanAccessBuildingAsync(building.Id, cancellationToken))
+            {
+                return Forbid();
+            }
+
+            var ec = building.CompanyId ?? building.Condominium?.CompanyId;
+            if (!ec.HasValue)
+            {
+                return BadRequest("El edificio no tiene empresa asignada.");
+            }
+            effectiveCompanyId = ec.Value;
         }
-
-        if (!await accessScope.CanAccessBuildingAsync(building.Id, cancellationToken))
+        else
         {
-            return Forbid();
-        }
-
-        var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
-        if (!effectiveCompanyId.HasValue)
-        {
-            return BadRequest("El edificio no tiene empresa asignada.");
+            // Plantilla general (sin edificio): se guarda contra la empresa de quien la crea.
+            if (!accessScope.CompanyId.HasValue)
+            {
+                return BadRequest("No se pudo determinar la empresa.");
+            }
+            effectiveCompanyId = accessScope.CompanyId.Value;
         }
 
         Unit? targetUnit = null;
@@ -145,7 +170,7 @@ public class RecurringBuildingExpensesController(
 
         var entity = new RecurringBuildingExpense
         {
-            CompanyId = effectiveCompanyId.Value,
+            CompanyId = effectiveCompanyId,
             BuildingId = request.BuildingId,
             Category = request.Category,
             SupplierName = request.SupplierName.Trim(),
@@ -160,73 +185,7 @@ public class RecurringBuildingExpensesController(
         dbContext.RecurringBuildingExpenses.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, building.Name, targetUnit));
-    }
-
-    // Crea la misma plantilla para los edificios elegidos (o todos los accesibles, si no se elige ninguno
-    // puntual), una fila por edificio. No disponible para distribucion por unidad individual (la unidad es
-    // especifica de un solo edificio).
-    [HttpPost("create-for-all")]
-    public async Task<ActionResult<IReadOnlyList<RecurringBuildingExpenseDto>>> CreateForAll(
-        [FromBody] RecurringBuildingExpenseCreateForAllRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.DistributionType == BuildingExpenseDistributionType.IndividualUnit)
-        {
-            return BadRequest("La distribucion por unidad individual no esta disponible para varios edificios: elegi un edificio puntual.");
-        }
-
-        if (!IsValidCreateForAllRequest(request, out var error))
-        {
-            return BadRequest(error);
-        }
-
-        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-        var targetIds = request.BuildingIds.Count > 0
-            ? request.BuildingIds.Where(id => accessibleBuildingIds.Contains(id)).ToList()
-            : accessibleBuildingIds.ToList();
-
-        if (targetIds.Count == 0)
-        {
-            return BadRequest("No hay edificios accesibles para crear la plantilla.");
-        }
-
-        var buildings = await dbContext.Buildings
-            .AsNoTracking()
-            .Include(x => x.Condominium)
-            .Where(x => !x.IsDeleted && targetIds.Contains(x.Id))
-            .ToListAsync(cancellationToken);
-
-        if (buildings.Count == 0)
-        {
-            return BadRequest("No hay edificios accesibles para crear la plantilla.");
-        }
-
-        var created = new List<RecurringBuildingExpenseDto>();
-        foreach (var building in buildings)
-        {
-            var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
-            if (!effectiveCompanyId.HasValue) continue;
-
-            var entity = new RecurringBuildingExpense
-            {
-                CompanyId = effectiveCompanyId.Value,
-                BuildingId = building.Id,
-                Category = request.Category,
-                SupplierName = request.SupplierName.Trim(),
-                Description = request.Description.Trim(),
-                Amount = request.Amount,
-                DistributionType = request.DistributionType,
-                TargetUnitId = null,
-                Notes = request.Notes.Trim(),
-                IsActive = request.IsActive
-            };
-            dbContext.RecurringBuildingExpenses.Add(entity);
-            created.Add(ToDto(entity, building.Name, null));
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(created);
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit));
     }
 
     [HttpPut("{id:guid}")]
@@ -248,25 +207,45 @@ public class RecurringBuildingExpensesController(
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        if (!await CanAccessAsync(entity.BuildingId, entity.CompanyId, cancellationToken))
         {
             return Forbid();
         }
 
-        var building = await dbContext.Buildings
-            .AsNoTracking()
-            .Include(x => x.Condominium)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId, cancellationToken);
+        Building? building = null;
+        Guid effectiveCompanyId;
 
-        if (building is null)
+        if (request.BuildingId.HasValue)
         {
-            return BadRequest("El edificio indicado no existe.");
+            building = await dbContext.Buildings
+                .AsNoTracking()
+                .Include(x => x.Condominium)
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId.Value, cancellationToken);
+
+            if (building is null)
+            {
+                return BadRequest("El edificio indicado no existe.");
+            }
+
+            if (!await accessScope.CanAccessBuildingAsync(building.Id, cancellationToken))
+            {
+                return Forbid();
+            }
+
+            var ec = building.CompanyId ?? building.Condominium?.CompanyId;
+            if (!ec.HasValue)
+            {
+                return BadRequest("El edificio no tiene empresa asignada.");
+            }
+            effectiveCompanyId = ec.Value;
         }
-
-        var effectiveCompanyId = building.CompanyId ?? building.Condominium?.CompanyId;
-        if (!effectiveCompanyId.HasValue)
+        else
         {
-            return BadRequest("El edificio no tiene empresa asignada.");
+            if (!accessScope.CompanyId.HasValue && !accessScope.IsSuperAdmin)
+            {
+                return BadRequest("No se pudo determinar la empresa.");
+            }
+            effectiveCompanyId = accessScope.CompanyId ?? entity.CompanyId;
         }
 
         Unit? targetUnit = null;
@@ -282,7 +261,7 @@ public class RecurringBuildingExpensesController(
             }
         }
 
-        entity.CompanyId = effectiveCompanyId.Value;
+        entity.CompanyId = effectiveCompanyId;
         entity.BuildingId = request.BuildingId;
         entity.Category = request.Category;
         entity.SupplierName = request.SupplierName.Trim();
@@ -294,7 +273,7 @@ public class RecurringBuildingExpensesController(
         entity.IsActive = request.IsActive;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ToDto(entity, building.Name, targetUnit));
+        return Ok(ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit));
     }
 
     [HttpDelete("{id:guid}")]
@@ -308,7 +287,7 @@ public class RecurringBuildingExpensesController(
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        if (!await CanAccessAsync(entity.BuildingId, entity.CompanyId, cancellationToken))
         {
             return Forbid();
         }
@@ -347,9 +326,11 @@ public class RecurringBuildingExpensesController(
             return BadRequest("Los gastos recurrentes solo se pueden aplicar mientras el periodo este en borrador.");
         }
 
+        // Se aplican las plantillas de ese edificio puntual y tambien las generales (sin edificio) de la empresa.
         var templates = await dbContext.RecurringBuildingExpenses
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == period.BuildingId)
+            .Where(x => !x.IsDeleted && x.IsActive
+                        && (x.BuildingId == period.BuildingId || (x.BuildingId == null && x.CompanyId == period.CompanyId)))
             .ToListAsync(cancellationToken);
 
         if (templates.Count == 0)
@@ -391,17 +372,29 @@ public class RecurringBuildingExpensesController(
         return Ok(result);
     }
 
-    private static bool IsValidRequest(RecurringBuildingExpenseUpsertRequest request, out string error)
+    // Una plantilla sin edificio (general) no tiene un edificio puntual contra el cual chequear acceso;
+    // se autoriza por empresa en su lugar (o SuperAdmin, que ve todo).
+    private async Task<bool> CanAccessAsync(Guid? buildingId, Guid companyId, CancellationToken cancellationToken)
     {
-        if (request.BuildingId == Guid.Empty)
+        if (buildingId.HasValue)
         {
-            error = "El edificio es obligatorio.";
-            return false;
+            return await accessScope.CanAccessBuildingAsync(buildingId.Value, cancellationToken);
         }
 
+        return accessScope.IsSuperAdmin || accessScope.CompanyId == companyId;
+    }
+
+    private static bool IsValidRequest(RecurringBuildingExpenseUpsertRequest request, out string error)
+    {
         if (request.DistributionType == BuildingExpenseDistributionType.ManualGroup)
         {
             error = "La distribucion ManualGroup todavia no esta disponible.";
+            return false;
+        }
+
+        if (request.DistributionType == BuildingExpenseDistributionType.IndividualUnit && !request.BuildingId.HasValue)
+        {
+            error = "La distribucion por unidad individual no esta disponible para una plantilla general: elegi un edificio puntual.";
             return false;
         }
 
@@ -438,48 +431,6 @@ public class RecurringBuildingExpensesController(
         if (request.DistributionType == BuildingExpenseDistributionType.IndividualUnit && !request.TargetUnitId.HasValue)
         {
             error = "La unidad destino es obligatoria cuando la distribucion es por unidad individual.";
-            return false;
-        }
-
-        error = string.Empty;
-        return true;
-    }
-
-    private static bool IsValidCreateForAllRequest(RecurringBuildingExpenseCreateForAllRequest request, out string error)
-    {
-        if (request.DistributionType == BuildingExpenseDistributionType.ManualGroup)
-        {
-            error = "La distribucion ManualGroup todavia no esta disponible.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Description))
-        {
-            error = "La descripcion es obligatoria.";
-            return false;
-        }
-
-        if (request.Description.Trim().Length > 200)
-        {
-            error = "La descripcion no puede superar los 200 caracteres.";
-            return false;
-        }
-
-        if (request.SupplierName.Trim().Length > 160)
-        {
-            error = "El proveedor no puede superar los 160 caracteres.";
-            return false;
-        }
-
-        if (request.Notes.Trim().Length > 500)
-        {
-            error = "Las notas no pueden superar los 500 caracteres.";
-            return false;
-        }
-
-        if (request.Amount <= 0)
-        {
-            error = "El monto debe ser mayor que cero.";
             return false;
         }
 

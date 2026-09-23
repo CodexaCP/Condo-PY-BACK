@@ -4,7 +4,8 @@ namespace Condo.Application.Models;
 
 public class RecurringBuildingExpenseUpsertRequest
 {
-    public Guid BuildingId { get; set; }
+    // Null = plantilla general para todos los edificios de la empresa.
+    public Guid? BuildingId { get; set; }
     public BuildingExpenseCategory Category { get; set; } = BuildingExpenseCategory.Other;
     public string SupplierName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
@@ -19,7 +20,7 @@ public class RecurringBuildingExpenseDto
 {
     public Guid Id { get; set; }
     public Guid CompanyId { get; set; }
-    public Guid BuildingId { get; set; }
+    public Guid? BuildingId { get; set; }
     public string BuildingName { get; set; } = string.Empty;
     public BuildingExpenseCategory Category { get; set; }
     public string SupplierName { get; set; } = string.Empty;
@@ -30,21 +31,6 @@ public class RecurringBuildingExpenseDto
     public string TargetUnitCode { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public bool IsActive { get; set; }
-}
-
-// Misma plantilla creada de una vez para todos los edificios accesibles del que la crea (uno por edificio,
-// cada uno con su propia fila editable/eliminable despues, igual que si se hubiera creado edificio por edificio).
-public class RecurringBuildingExpenseCreateForAllRequest
-{
-    // Vacio = todos los edificios accesibles; con valores = solo esos (elegidos a mano con checkboxes).
-    public List<Guid> BuildingIds { get; set; } = [];
-    public BuildingExpenseCategory Category { get; set; } = BuildingExpenseCategory.Other;
-    public string SupplierName { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-    public BuildingExpenseDistributionType DistributionType { get; set; } = BuildingExpenseDistributionType.ByCoefficient;
-    public string Notes { get; set; } = string.Empty;
-    public bool IsActive { get; set; } = true;
 }
 
 public class ApplyRecurringExpensesRequest
