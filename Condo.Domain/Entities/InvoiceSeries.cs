@@ -28,6 +28,14 @@ public class InvoiceSeries : CompanyScopedEntity
     public string? ImprentaRuc { get; set; }
     public string? ImprentaRazonSocial { get; set; }
 
+    // Calibracion de posiciones para que la factura calce sobre el papel preimpreso de este timbrado
+    // (cada imprenta puede entregarlo con un desvio distinto). JSON: {"campo": {"dx": 0, "dy": 0}, ...},
+    // en puntos PDF. Sin datos, se dibuja en las posiciones base de siempre (mismo resultado que hoy).
+    public string? FieldPositionsJson { get; set; }
+
+    // Escaneo del papel preimpreso de este timbrado, usado de fondo en el editor de calibracion.
+    public string? ReferenceScanUrl { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();

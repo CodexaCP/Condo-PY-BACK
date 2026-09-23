@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Condo.Api.Documents;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -6,6 +7,7 @@ using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
 
 namespace Condo.Api.Controllers;
 
@@ -78,7 +80,9 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
                 ActividadEconomica = x.ActividadEconomica,
                 ImprentaNumeroHabilitacion = x.ImprentaNumeroHabilitacion,
                 ImprentaRuc = x.ImprentaRuc,
-                ImprentaRazonSocial = x.ImprentaRazonSocial
+                ImprentaRazonSocial = x.ImprentaRazonSocial,
+                FieldPositionsJson = x.FieldPositionsJson,
+                ReferenceScanUrl = x.ReferenceScanUrl
             })
             .ToListAsync(cancellationToken);
 
@@ -187,6 +191,101 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
         return CreatedAtAction(nameof(GetAll), null, ToDto(entity, building.Name, today: DateOnly.FromDateTime(DateTime.UtcNow)));
     }
 
+    // Calibracion de posiciones para que la factura calce sobre el papel preimpreso de este timbrado puntual
+    // (cada imprenta puede entregarlo con un desvio distinto). No afecta a otros timbrados ni al diseno base.
+    [HttpPut("{id:guid}/field-positions")]
+    public async Task<ActionResult<InvoiceSeriesDto>> UpdateFieldPositions(
+        Guid id, [FromBody] UpdateInvoiceSeriesCalibrationRequest request, CancellationToken cancellationToken)
+    {
+        if (!CanManageInvoices())
+        {
+            return Forbid();
+        }
+
+        var entity = await dbContext.InvoiceSeries
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null) return NotFound();
+
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        entity.FieldPositionsJson = request.Positions.Count > 0 ? JsonSerializer.Serialize(request.Positions) : null;
+        entity.ReferenceScanUrl = string.IsNullOrWhiteSpace(request.ReferenceScanUrl) ? null : request.ReferenceScanUrl.Trim();
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToDto(entity, entity.Building?.Name ?? string.Empty, today: DateOnly.FromDateTime(DateTime.UtcNow)));
+    }
+
+    // Factura de datos de ejemplo (no una real) con las posiciones calibradas guardadas en este timbrado,
+    // para poder imprimir sobre el papel preimpreso y verificar que calza antes de emitir facturas de verdad.
+    [HttpGet("{id:guid}/sample-pdf")]
+    public async Task<IActionResult> DownloadSamplePdf(Guid id, CancellationToken cancellationToken)
+    {
+        if (!CanManageInvoices())
+        {
+            return Forbid();
+        }
+
+        var entity = await dbContext.InvoiceSeries
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (entity is null) return NotFound();
+
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var sample = new InvoiceDto
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = entity.CompanyId,
+            BuildingId = entity.BuildingId,
+            BuildingName = entity.Building?.Name ?? "EDIFICIO DE EJEMPLO",
+            UnitId = Guid.NewGuid(),
+            UnitCode = "01-01",
+            InvoiceSeriesId = entity.Id,
+            SeriesRazonSocial = entity.RazonSocial,
+            SeriesRuc = entity.Ruc,
+            SeriesNumeroTimbrado = entity.NumeroTimbrado,
+            SeriesEstablecimiento = entity.Establecimiento,
+            SeriesPuntoExpedicion = entity.PuntoExpedicion,
+            SeriesVigenciaDesde = entity.VigenciaDesde,
+            SeriesVigenciaHasta = entity.VigenciaHasta,
+            BuildingAddress = entity.Building?.Address ?? entity.DireccionEstablecimiento,
+            BuildingPhone = entity.Building?.ContactPhone,
+            PeriodDueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(15)),
+            PeriodYear = DateTime.UtcNow.Year,
+            PeriodMonth = DateTime.UtcNow.Month,
+            UnitCoefficient = 0.007m,
+            BuildingOrdinaryTotal = 68_666_823m,
+            FieldPositionsJson = entity.FieldPositionsJson,
+            ClienteNombre = "CLIENTE DE EJEMPLO",
+            ClienteDocumento = "1234567",
+            Status = InvoiceStatus.Issued,
+            Numero = entity.CorrelativoActual + 1,
+            NumeroFormateado = $"{entity.Establecimiento}-{entity.PuntoExpedicion}-{(entity.CorrelativoActual + 1):D7}",
+            MontoTotal = 576_802m,
+            Detalle =
+            [
+                new InvoiceLineDto { Concepto = "Expensa ordinaria", ChargeType = ExpenseChargeType.Ordinary, Monto = 576_802m }
+            ],
+            FechaEmisionUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        var document = new InvoicePdfDocument(sample, standardTemplate: true);
+        var pdfBytes = document.GeneratePdf();
+        return File(pdfBytes, "application/pdf", $"calibracion_{entity.NumeroTimbrado}.pdf");
+    }
+
     [HttpPut("{id:guid}/desactivar")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken cancellationToken)
     {
@@ -258,7 +357,9 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
         ActividadEconomica = entity.ActividadEconomica,
         ImprentaNumeroHabilitacion = entity.ImprentaNumeroHabilitacion,
         ImprentaRuc = entity.ImprentaRuc,
-        ImprentaRazonSocial = entity.ImprentaRazonSocial
+        ImprentaRazonSocial = entity.ImprentaRazonSocial,
+        FieldPositionsJson = entity.FieldPositionsJson,
+        ReferenceScanUrl = entity.ReferenceScanUrl
     };
 
     private static bool IsValidRequest(CreateInvoiceSeriesRequest request, out string error)
