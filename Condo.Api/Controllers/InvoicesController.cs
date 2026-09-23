@@ -603,6 +603,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
             BuildingId = invoice.BuildingId,
             UnitId = invoice.UnitId,
             PaymentId = invoice.PaymentId,
+            OwnerPaymentId = invoice.OwnerPaymentId,
             Status = InvoiceStatus.Draft,
             MontoTotal = invoice.MontoTotal,
             DetalleSnapshotJson = invoice.DetalleSnapshotJson,
