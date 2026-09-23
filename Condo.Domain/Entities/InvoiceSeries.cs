@@ -36,6 +36,11 @@ public class InvoiceSeries : CompanyScopedEntity
     // Escaneo del papel preimpreso de este timbrado, usado de fondo en el editor de calibracion.
     public string? ReferenceScanUrl { get; set; }
 
+    // El papel de este cliente ya trae su propio marco/lineas/casillas impresas por su imprenta (distinto
+    // al preimpreso generico del sistema): con esto en true, la factura no dibuja ningun marco propio,
+    // solo el texto encima, para no pisar el diseno que ya esta impreso en el papel.
+    public bool HideFrame { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();

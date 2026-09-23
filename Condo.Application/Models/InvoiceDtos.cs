@@ -30,6 +30,7 @@ public class InvoiceSeriesDto
     public string? ImprentaRazonSocial { get; set; }
     public string? FieldPositionsJson { get; set; }
     public string? ReferenceScanUrl { get; set; }
+    public bool HideFrame { get; set; }
 }
 
 public class FieldOffsetDto
@@ -42,6 +43,7 @@ public class UpdateInvoiceSeriesCalibrationRequest
 {
     public Dictionary<string, FieldOffsetDto> Positions { get; set; } = new();
     public string? ReferenceScanUrl { get; set; }
+    public bool HideFrame { get; set; }
 }
 
 public class CreateInvoiceSeriesRequest
@@ -99,6 +101,7 @@ public class InvoiceDto
     // se aplica el coeficiente). Se calcula aparte porque no depende de esta factura sino del periodo entero.
     public decimal BuildingOrdinaryTotal { get; set; }
     public string? FieldPositionsJson { get; set; }
+    public bool HideFrame { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
     public InvoiceStatus Status { get; set; }

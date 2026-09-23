@@ -84,7 +84,10 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
                 // poder comparar en pantalla sin tener que imprimir. Las facturas reales nunca llevan esto.
                 if (backgroundImage is not null)
                     layers.Layer().Width(PageWidth).Height(PageHeight).Image(backgroundImage).FitArea();
-                DrawFrame(layers);
+                // Si el cliente ya tiene su propio marco/casillas impresas en el papel, no dibujamos el
+                // nuestro encima (pisaria el diseno real de su imprenta).
+                if (!invoice.HideFrame)
+                    DrawFrame(layers);
                 DrawHeader(layers);
                 DrawClientBlock(layers);
                 DrawDetail(layers);

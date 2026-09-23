@@ -83,7 +83,8 @@ public class InvoiceSeriesController(
                 ImprentaRuc = x.ImprentaRuc,
                 ImprentaRazonSocial = x.ImprentaRazonSocial,
                 FieldPositionsJson = x.FieldPositionsJson,
-                ReferenceScanUrl = x.ReferenceScanUrl
+                ReferenceScanUrl = x.ReferenceScanUrl,
+                HideFrame = x.HideFrame
             })
             .ToListAsync(cancellationToken);
 
@@ -216,6 +217,7 @@ public class InvoiceSeriesController(
 
         entity.FieldPositionsJson = request.Positions.Count > 0 ? JsonSerializer.Serialize(request.Positions) : null;
         entity.ReferenceScanUrl = string.IsNullOrWhiteSpace(request.ReferenceScanUrl) ? null : request.ReferenceScanUrl.Trim();
+        entity.HideFrame = request.HideFrame;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -268,6 +270,7 @@ public class InvoiceSeriesController(
             UnitCoefficient = 0.007m,
             BuildingOrdinaryTotal = 68_666_823m,
             FieldPositionsJson = entity.FieldPositionsJson,
+            HideFrame = entity.HideFrame,
             ClienteNombre = "CLIENTE DE EJEMPLO",
             ClienteDocumento = "1234567",
             Status = InvoiceStatus.Issued,
@@ -361,7 +364,8 @@ public class InvoiceSeriesController(
         ImprentaRuc = entity.ImprentaRuc,
         ImprentaRazonSocial = entity.ImprentaRazonSocial,
         FieldPositionsJson = entity.FieldPositionsJson,
-        ReferenceScanUrl = entity.ReferenceScanUrl
+        ReferenceScanUrl = entity.ReferenceScanUrl,
+        HideFrame = entity.HideFrame
     };
 
     private static bool IsValidRequest(CreateInvoiceSeriesRequest request, out string error)

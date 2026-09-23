@@ -62,7 +62,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Year : (int?)null,
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
                 x.Unit != null ? x.Unit.Coefficient : 0m,
-                x.Series != null ? x.Series.FieldPositionsJson : null))
+                x.Series != null ? x.Series.FieldPositionsJson : null,
+                x.Series != null && x.Series.HideFrame))
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
@@ -773,7 +774,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Year : (int?)null,
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
                 x.Unit != null ? x.Unit.Coefficient : 0m,
-                x.Series != null ? x.Series.FieldPositionsJson : null))
+                x.Series != null ? x.Series.FieldPositionsJson : null,
+                x.Series != null && x.Series.HideFrame))
             .FirstOrDefaultAsync(cancellationToken);
 
     private static InvoiceDto ToDto(InvoiceRow row) => new()
@@ -800,6 +802,7 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         PeriodMonth = row.PeriodMonth,
         UnitCoefficient = row.UnitCoefficient,
         FieldPositionsJson = row.FieldPositionsJson,
+        HideFrame = row.HideFrame,
         Status = row.Status,
         Numero = row.Numero,
         NumeroFormateado = row.NumeroFormateado,
@@ -822,5 +825,5 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
         DateOnly? PeriodDueDate, Guid? PeriodId, int? PeriodYear, int? PeriodMonth, decimal UnitCoefficient,
-        string? FieldPositionsJson);
+        string? FieldPositionsJson, bool HideFrame);
 }
