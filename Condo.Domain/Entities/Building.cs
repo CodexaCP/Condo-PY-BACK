@@ -19,6 +19,9 @@ public class Building : BaseEntity
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
+    // Modo de facturacion del edificio. Solo lo configura el superadmin (creacion/edicion del edificio).
+    public InvoicingMode InvoicingMode { get; set; } = InvoicingMode.Preimpresa;
+
     // Modelos de documentos (factura, nota de credito y comprobante). Con UseStandardTemplates los PDF
     // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
     // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.

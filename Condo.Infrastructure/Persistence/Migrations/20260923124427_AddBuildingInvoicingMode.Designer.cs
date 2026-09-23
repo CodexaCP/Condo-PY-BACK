@@ -4,6 +4,7 @@ using Condo.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Condo.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CondoDbContext))]
-    partial class CondoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260923124427_AddBuildingInvoicingMode")]
+    partial class AddBuildingInvoicingMode
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1575,10 +1578,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("ActividadEconomica")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<bool>("Activo")
                         .HasColumnType("bit");
 
@@ -1594,10 +1593,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("DireccionEstablecimiento")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("DocumentType")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1607,15 +1602,6 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
-
-                    b.Property<string>("ImprentaNumeroHabilitacion")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ImprentaRazonSocial")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ImprentaRuc")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");

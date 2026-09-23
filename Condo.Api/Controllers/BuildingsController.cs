@@ -64,6 +64,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
                 BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
+                InvoicingMode = x.InvoicingMode,
                 UseStandardTemplates = x.UseStandardTemplates,
                 InvoiceTemplateUrl = x.InvoiceTemplateUrl,
                 InvoiceTemplateFileName = x.InvoiceTemplateFileName,
@@ -105,6 +106,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
                 BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
+                InvoicingMode = x.InvoicingMode,
                 UseStandardTemplates = x.UseStandardTemplates,
                 InvoiceTemplateUrl = x.InvoiceTemplateUrl,
                 InvoiceTemplateFileName = x.InvoiceTemplateFileName,
@@ -149,7 +151,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         // Por ahora solo el SuperAdmin configura los modelos de documentos; para el resto se ignora lo enviado.
         if (!accessScope.IsSuperAdmin)
+        {
             request.UseStandardTemplates = null;
+            request.InvoicingMode = null;
+        }
+        else if (!request.InvoicingMode.HasValue)
+        {
+            return BadRequest("El modo de facturación es obligatorio.");
+        }
 
         var validationError = ValidateRequest(request);
         if (validationError is not null)
@@ -187,7 +196,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant(),
             LateFeeRatePercentage = NormalizedLateFeeRate(request),
             LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
-            BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations
+            BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations,
+            InvoicingMode = request.InvoicingMode ?? Domain.Enums.InvoicingMode.Preimpresa
         };
         if (request.UseStandardTemplates.HasValue)
             ApplyTemplates(entity, request);
@@ -269,7 +279,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         // Por ahora solo el SuperAdmin configura los modelos de documentos; para el resto se ignora lo enviado.
         if (!accessScope.IsSuperAdmin)
+        {
             request.UseStandardTemplates = null;
+            request.InvoicingMode = null;
+        }
+        else if (!request.InvoicingMode.HasValue)
+        {
+            return BadRequest("El modo de facturación es obligatorio.");
+        }
 
         var validationError = ValidateRequest(request);
         if (validationError is not null)
@@ -313,6 +330,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.LateFeeRatePercentage = newRate;
         entity.LateFeeFrequency = newFrequency;
         entity.BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations;
+        if (request.InvoicingMode.HasValue)
+            entity.InvoicingMode = request.InvoicingMode.Value;
         if (request.UseStandardTemplates.HasValue)
             ApplyTemplates(entity, request);
 
@@ -587,6 +606,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             LateFeeRatePercentage = entity.LateFeeRatePercentage,
             LateFeeFrequency = entity.LateFeeFrequency,
             BlockOverdueAmenityReservations = entity.BlockOverdueAmenityReservations,
+            InvoicingMode = entity.InvoicingMode,
             UseStandardTemplates = entity.UseStandardTemplates,
             InvoiceTemplateUrl = entity.InvoiceTemplateUrl,
             InvoiceTemplateFileName = entity.InvoiceTemplateFileName,

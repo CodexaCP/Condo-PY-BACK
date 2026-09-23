@@ -23,6 +23,11 @@ public class InvoiceSeriesDto
     public bool Activo { get; set; }
     public bool ProximoAAgotarse { get; set; }
     public bool ProximoAVencer { get; set; }
+    public string DireccionEstablecimiento { get; set; } = string.Empty;
+    public string ActividadEconomica { get; set; } = string.Empty;
+    public string? ImprentaNumeroHabilitacion { get; set; }
+    public string? ImprentaRuc { get; set; }
+    public string? ImprentaRazonSocial { get; set; }
 }
 
 public class CreateInvoiceSeriesRequest
@@ -36,8 +41,14 @@ public class CreateInvoiceSeriesRequest
     public string NumeroTimbrado { get; set; } = string.Empty;
     public long RangoDesde { get; set; }
     public long RangoHasta { get; set; }
+    public long ProximoNumero { get; set; }
     public DateOnly VigenciaDesde { get; set; }
     public DateOnly VigenciaHasta { get; set; }
+    public string DireccionEstablecimiento { get; set; } = string.Empty;
+    public string ActividadEconomica { get; set; } = string.Empty;
+    public string? ImprentaNumeroHabilitacion { get; set; }
+    public string? ImprentaRuc { get; set; }
+    public string? ImprentaRazonSocial { get; set; }
 }
 
 public class InvoiceLineDto

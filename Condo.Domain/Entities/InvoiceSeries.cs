@@ -19,6 +19,15 @@ public class InvoiceSeries : CompanyScopedEntity
     public DateOnly VigenciaHasta { get; set; }
     public bool Activo { get; set; } = true;
 
+    // Datos del establecimiento, obligatorios para timbrado preimpreso.
+    public string DireccionEstablecimiento { get; set; } = string.Empty;
+    public string ActividadEconomica { get; set; } = string.Empty;
+
+    // Datos de la imprenta que confecciono los formularios preimpresos (opcional).
+    public string? ImprentaNumeroHabilitacion { get; set; }
+    public string? ImprentaRuc { get; set; }
+    public string? ImprentaRazonSocial { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();

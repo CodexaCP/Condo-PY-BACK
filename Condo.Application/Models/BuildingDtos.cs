@@ -18,6 +18,9 @@ public class BuildingUpsertRequest
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
+    // Solo lo configura el SuperAdmin; obligatorio para el/en su formulario, se ignora para el resto.
+    public InvoicingMode? InvoicingMode { get; set; }
+
     // Null = no tocar la configuracion de modelos (formularios que no la editan); al crear, null = estandar.
     public bool? UseStandardTemplates { get; set; }
     public string? InvoiceTemplateUrl { get; set; }
@@ -45,6 +48,7 @@ public class BuildingDto
     public decimal? LateFeeRatePercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; }
+    public InvoicingMode InvoicingMode { get; set; }
     public bool UseStandardTemplates { get; set; }
     public string? InvoiceTemplateUrl { get; set; }
     public string? InvoiceTemplateFileName { get; set; }

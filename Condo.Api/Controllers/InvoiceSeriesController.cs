@@ -73,7 +73,12 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
                 VigenciaHasta = x.VigenciaHasta,
                 Activo = x.Activo,
                 ProximoAAgotarse = (x.RangoHasta - x.CorrelativoActual) <= 50,
-                ProximoAVencer = x.VigenciaHasta <= today.AddDays(15)
+                ProximoAVencer = x.VigenciaHasta <= today.AddDays(15),
+                DireccionEstablecimiento = x.DireccionEstablecimiento,
+                ActividadEconomica = x.ActividadEconomica,
+                ImprentaNumeroHabilitacion = x.ImprentaNumeroHabilitacion,
+                ImprentaRuc = x.ImprentaRuc,
+                ImprentaRazonSocial = x.ImprentaRazonSocial
             })
             .ToListAsync(cancellationToken);
 
@@ -138,10 +143,15 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
             NumeroTimbrado = request.NumeroTimbrado.Trim(),
             RangoDesde = request.RangoDesde,
             RangoHasta = request.RangoHasta,
-            CorrelativoActual = request.RangoDesde - 1,
+            CorrelativoActual = request.ProximoNumero - 1,
             VigenciaDesde = request.VigenciaDesde,
             VigenciaHasta = request.VigenciaHasta,
-            Activo = true
+            Activo = true,
+            DireccionEstablecimiento = request.DireccionEstablecimiento.Trim(),
+            ActividadEconomica = request.ActividadEconomica.Trim(),
+            ImprentaNumeroHabilitacion = TrimOrNull(request.ImprentaNumeroHabilitacion),
+            ImprentaRuc = TrimOrNull(request.ImprentaRuc),
+            ImprentaRazonSocial = TrimOrNull(request.ImprentaRazonSocial)
         };
 
         dbContext.InvoiceSeries.Add(entity);
@@ -243,7 +253,12 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
         VigenciaHasta = entity.VigenciaHasta,
         Activo = entity.Activo,
         ProximoAAgotarse = (entity.RangoHasta - entity.CorrelativoActual) <= 50,
-        ProximoAVencer = entity.VigenciaHasta <= today.AddDays(15)
+        ProximoAVencer = entity.VigenciaHasta <= today.AddDays(15),
+        DireccionEstablecimiento = entity.DireccionEstablecimiento,
+        ActividadEconomica = entity.ActividadEconomica,
+        ImprentaNumeroHabilitacion = entity.ImprentaNumeroHabilitacion,
+        ImprentaRuc = entity.ImprentaRuc,
+        ImprentaRazonSocial = entity.ImprentaRazonSocial
     };
 
     private static bool IsValidRequest(CreateInvoiceSeriesRequest request, out string error)
@@ -290,9 +305,27 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
             return false;
         }
 
+        if (request.ProximoNumero < request.RangoDesde || request.ProximoNumero > request.RangoHasta)
+        {
+            error = "El próximo número debe estar dentro del rango del timbrado.";
+            return false;
+        }
+
         if (request.VigenciaDesde > request.VigenciaHasta)
         {
             error = "La vigencia del timbrado es inválida.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DireccionEstablecimiento) || request.DireccionEstablecimiento.Trim().Length > 300)
+        {
+            error = "La dirección del establecimiento es obligatoria y no puede superar los 300 caracteres.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ActividadEconomica) || request.ActividadEconomica.Trim().Length > 200)
+        {
+            error = "La actividad económica es obligatoria y no puede superar los 200 caracteres.";
             return false;
         }
 
@@ -302,4 +335,6 @@ public class InvoiceSeriesController(ICondoDbContext dbContext, IAccessScopeServ
 
     private static bool IsDigits(string value, int expectedLength) =>
         !string.IsNullOrWhiteSpace(value) && value.Trim().Length == expectedLength && value.Trim().All(char.IsDigit);
+
+    private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
