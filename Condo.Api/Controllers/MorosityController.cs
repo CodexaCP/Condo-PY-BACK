@@ -123,7 +123,9 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                 x.IsPrimary,
                 x.StartDate,
                 x.EndDate,
-                ResidentName = x.Resident != null ? x.Resident.FullName : string.Empty
+                ResidentName = x.Resident != null ? x.Resident.FullName : string.Empty,
+                ResidentPhone = x.Resident != null ? x.Resident.PhoneNumber : string.Empty,
+                ResidentEmail = x.Resident != null ? x.Resident.Email : string.Empty
             })
             .ToListAsync(cancellationToken);
 
@@ -135,7 +137,9 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                 x.UnitId,
                 x.IsPrimary,
                 x.StartDate,
-                OwnerName = x.Owner != null ? x.Owner.FullName : string.Empty
+                OwnerName = x.Owner != null ? x.Owner.FullName : string.Empty,
+                OwnerPhone = x.Owner != null ? (x.Owner.PhonePrefix ?? string.Empty) + (x.Owner.Phone ?? string.Empty) : string.Empty,
+                OwnerEmail = x.Owner != null ? x.Owner.Email : string.Empty
             })
             .ToListAsync(cancellationToken);
 
@@ -195,7 +199,11 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                     IsOccupied = assignedResident is not null,
                     ResponsibleType = assignedResident is not null ? "ResidentAssigned" : "OwnerAdministration",
                     ResponsibleName = assignedResident?.ResidentName ?? "Propietario / administracion",
+                    ResponsiblePhone = assignedResident?.ResidentPhone ?? string.Empty,
+                    ResponsibleEmail = assignedResident?.ResidentEmail ?? string.Empty,
                     OwnerName = unitOwner?.OwnerName ?? string.Empty,
+                    OwnerPhone = unitOwner?.OwnerPhone ?? string.Empty,
+                    OwnerEmail = unitOwner?.OwnerEmail ?? string.Empty,
                     AgingBucket = ComputeAgingBucket(today.DayNumber - group.Key.DueDate.DayNumber)
                 };
             })
