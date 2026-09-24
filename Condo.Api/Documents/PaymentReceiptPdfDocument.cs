@@ -137,37 +137,40 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
     {
         var credit = payment.Amount - payment.AllocatedAmount;
 
-        container.Table(table =>
+        container.Column(col =>
         {
-            table.ColumnsDefinition(c =>
+            col.Item().Table(table =>
             {
-                c.RelativeColumn(3);
-                c.RelativeColumn(1.5f);
+                table.ColumnsDefinition(c =>
+                {
+                    c.RelativeColumn(3);
+                    c.RelativeColumn(1.5f);
+                });
+
+                table.Header(header =>
+                {
+                    header.Cell().Background(ColorPrimary).Padding(5).Text("Resumen").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                });
+
+                if (payment.Allocations.Count > 0)
+                    AddSummaryRow(table, "Total imputado a cargos", payment.AllocatedAmount, false);
+
+                if (credit > 0.01m)
+                    AddSummaryRow(table, "Crédito a favor", credit, false, ColorCredit);
+
+                AddSummaryRow(table, "Total cobrado", payment.Amount, true);
             });
 
-            table.Header(header =>
+            if (!string.IsNullOrEmpty(payment.Notes))
             {
-                header.Cell().Background(ColorPrimary).Padding(5).Text("Resumen").FontColor(ColorWhite).Bold();
-                header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
-            });
-
-            if (payment.Allocations.Count > 0)
-                AddSummaryRow(table, "Total imputado a cargos", payment.AllocatedAmount, false);
-
-            if (credit > 0.01m)
-                AddSummaryRow(table, "Crédito a favor", credit, false, ColorCredit);
-
-            AddSummaryRow(table, "Total cobrado", payment.Amount, true);
+                col.Item().PaddingTop(10).Column(c =>
+                {
+                    c.Item().Text("Notas").FontColor(ColorGray).FontSize(8);
+                    c.Item().Text(payment.Notes).FontColor(ColorPrimary).Italic();
+                });
+            }
         });
-
-        if (!string.IsNullOrEmpty(payment.Notes))
-        {
-            container.PaddingTop(10).Column(c =>
-            {
-                c.Item().Text("Notas").FontColor(ColorGray).FontSize(8);
-                c.Item().Text(payment.Notes).FontColor(ColorPrimary).Italic();
-            });
-        }
     }
 
     private static void AddSummaryRow(TableDescriptor table, string label, decimal amount, bool isTotal, string? overrideColor = null)
