@@ -1,3 +1,4 @@
+using System.Net;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
@@ -10,7 +11,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/morosity")]
-public class MorosityController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class MorosityController(ICondoDbContext dbContext, IAccessScopeService accessScope, IEmailSender emailSender) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<MorosityReportDto>> GetReport(
@@ -26,6 +27,108 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
+        var dataset = await BuildOverdueItemsAsync(buildingId, unitId, expensePeriodId, ownerSearch, cancellationToken);
+        if (dataset is null)
+        {
+            return Forbid();
+        }
+
+        var overdueItems = dataset.OverdueItems;
+
+        // Apply aging bucket filter after computing all items (summary always uses full dataset)
+        var filteredItems = (string.IsNullOrWhiteSpace(agingBucket)
+            ? overdueItems
+            : overdueItems.Where(x => x.AgingBucket == agingBucket))
+            .OrderByDescending(x => x.Balance)
+            .ThenByDescending(x => x.DaysOverdue)
+            .ThenBy(x => x.BuildingName)
+            .ThenBy(x => x.UnitCode)
+            .ToList();
+
+        var totalCount = filteredItems.Count;
+        var items = filteredItems
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new MorosityReportDto
+        {
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
+            Summary = BuildSummary(overdueItems, dataset.AllItems),
+            Items = items
+        });
+    }
+
+    [HttpPost("send-reminders")]
+    public async Task<ActionResult<MorosityReminderResultDto>> SendReminders(
+        [FromQuery] Guid? buildingId,
+        [FromQuery] Guid? unitId,
+        [FromQuery] Guid? expensePeriodId,
+        [FromQuery] string? ownerSearch,
+        [FromQuery] string? agingBucket,
+        CancellationToken cancellationToken = default)
+    {
+        var dataset = await BuildOverdueItemsAsync(buildingId, unitId, expensePeriodId, ownerSearch, cancellationToken);
+        if (dataset is null)
+        {
+            return Forbid();
+        }
+
+        var filteredItems = string.IsNullOrWhiteSpace(agingBucket)
+            ? dataset.OverdueItems
+            : dataset.OverdueItems.Where(x => x.AgingBucket == agingBucket).ToList();
+
+        const int maxUnitsPerSend = 500;
+        var result = new MorosityReminderResultDto();
+
+        foreach (var group in filteredItems.GroupBy(x => x.UnitId).Take(maxUnitsPerSend))
+        {
+            var unitItems = group.OrderBy(x => x.DueDate).ToList();
+            var first = unitItems[0];
+            var recipientEmail = first.IsOccupied
+                ? (!string.IsNullOrWhiteSpace(first.ResponsibleEmail) ? first.ResponsibleEmail : first.OwnerEmail)
+                : first.OwnerEmail;
+            var recipientName = first.IsOccupied ? first.ResponsibleName : first.OwnerName;
+
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                result.UnitsSkippedNoEmail++;
+                continue;
+            }
+
+            var totalBalance = unitItems.Sum(x => x.Balance);
+            var maxDaysOverdue = unitItems.Max(x => x.DaysOverdue);
+            var periodsHtml = string.Concat(unitItems.Select(x =>
+                $"<li>{WebUtility.HtmlEncode(x.ExpensePeriodName)} (vencido el {x.DueDate:dd/MM/yyyy}, {x.DaysOverdue} días de atraso) — {FormatGs(x.Balance)}</li>"));
+
+            var html = $"""
+                <p>Hola {WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(recipientName) ? "estimado/a" : recipientName)},</p>
+                <p>La unidad <strong>{WebUtility.HtmlEncode(first.UnitCode)} ({WebUtility.HtmlEncode(first.BuildingName)})</strong> registra saldo pendiente en {unitItems.Count} periodo(s), con hasta {maxDaysOverdue} días de atraso:</p>
+                <ul>{periodsHtml}</ul>
+                <p>Total adeudado: <strong>{FormatGs(totalBalance)}</strong></p>
+                <p>Por favor regularizá el pago a la brevedad. Si ya lo hiciste, podés ignorar este mensaje.</p>
+                """;
+
+            await emailSender.SendAsync(
+                recipientEmail,
+                $"Recordatorio de pago pendiente — {first.BuildingName}, {first.UnitCode}",
+                html,
+                cancellationToken);
+            result.EmailsSent++;
+        }
+
+        return Ok(result);
+    }
+
+    private async Task<MorosityDataset?> BuildOverdueItemsAsync(
+        Guid? buildingId,
+        Guid? unitId,
+        Guid? expensePeriodId,
+        string? ownerSearch,
+        CancellationToken cancellationToken)
+    {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
@@ -63,7 +166,7 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
             var canAccess = await buildingsQuery.AnyAsync(x => x.Id == buildingId.Value, cancellationToken);
             if (!canAccess)
             {
-                return Forbid();
+                return null;
             }
 
             chargesQuery = chargesQuery.Where(x => x.Unit!.BuildingId == buildingId.Value);
@@ -220,56 +323,40 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
                             || x.ResponsibleName.Contains(ownerSearch, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-        // Apply aging bucket filter after computing all items (summary always uses full dataset)
-        var filteredItems = (string.IsNullOrWhiteSpace(agingBucket)
-            ? overdueItems
-            : overdueItems.Where(x => x.AgingBucket == agingBucket))
-            .OrderByDescending(x => x.Balance)
-            .ThenByDescending(x => x.DaysOverdue)
-            .ThenBy(x => x.BuildingName)
-            .ThenBy(x => x.UnitCode)
-            .ToList();
-
-        var totalCount = filteredItems.Count;
-        var items = filteredItems
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
-
-        return Ok(new MorosityReportDto
-        {
-            TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize,
-            Summary = new MorositySummaryDto
-            {
-                TotalUnitsInArrears = overdueItems.Select(x => x.UnitId).Distinct().Count(),
-                // Periodos distintos con deuda vencida (no la cantidad de renglones unidad+periodo,
-                // que puede ser varias veces más grande si hay varias unidades morosas por periodo).
-                TotalOverduePeriods = overdueItems.Select(x => x.ExpensePeriodId).Distinct().Count(),
-                TotalOverdueAmount = overdueItems.Sum(x => x.Balance),
-                OrdinaryOverdueAmount = overdueItems.Sum(x => x.OrdinaryBalance),
-                ReserveFundOverdueAmount = overdueItems.Sum(x => x.ReserveFundBalance),
-                ExtraordinaryOverdueAmount = overdueItems.Sum(x => x.ExtraordinaryBalance),
-                IndividualOverdueAmount = overdueItems.Sum(x => x.IndividualBalance),
-                AdjustmentOverdueAmount = overdueItems.Sum(x => x.AdjustmentBalance),
-                TotalCreditBalanceAmount = allItems.Sum(x => x.CreditBalanceAmount),
-                OccupiedUnitsInArrears = overdueItems.Where(x => x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
-                VacantUnitsInArrears = overdueItems.Where(x => !x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
-                OccupiedOverdueAmount = overdueItems.Where(x => x.IsOccupied).Sum(x => x.Balance),
-                VacantOverdueAmount = overdueItems.Where(x => !x.IsOccupied).Sum(x => x.Balance),
-                Units0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Select(x => x.UnitId).Distinct().Count(),
-                Amount0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Sum(x => x.Balance),
-                Units31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Select(x => x.UnitId).Distinct().Count(),
-                Amount31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Sum(x => x.Balance),
-                Units61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Select(x => x.UnitId).Distinct().Count(),
-                Amount61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Sum(x => x.Balance),
-                UnitsOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Select(x => x.UnitId).Distinct().Count(),
-                AmountOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Sum(x => x.Balance)
-            },
-            Items = items
-        });
+        return new MorosityDataset(allItems, overdueItems);
     }
+
+    private sealed record MorosityDataset(List<MorosityItemDto> AllItems, List<MorosityItemDto> OverdueItems);
+
+    private static MorositySummaryDto BuildSummary(List<MorosityItemDto> overdueItems, List<MorosityItemDto> allItems) => new()
+    {
+        TotalUnitsInArrears = overdueItems.Select(x => x.UnitId).Distinct().Count(),
+        // Periodos distintos con deuda vencida (no la cantidad de renglones unidad+periodo,
+        // que puede ser varias veces más grande si hay varias unidades morosas por periodo).
+        TotalOverduePeriods = overdueItems.Select(x => x.ExpensePeriodId).Distinct().Count(),
+        TotalOverdueAmount = overdueItems.Sum(x => x.Balance),
+        OrdinaryOverdueAmount = overdueItems.Sum(x => x.OrdinaryBalance),
+        ReserveFundOverdueAmount = overdueItems.Sum(x => x.ReserveFundBalance),
+        ExtraordinaryOverdueAmount = overdueItems.Sum(x => x.ExtraordinaryBalance),
+        IndividualOverdueAmount = overdueItems.Sum(x => x.IndividualBalance),
+        AdjustmentOverdueAmount = overdueItems.Sum(x => x.AdjustmentBalance),
+        TotalCreditBalanceAmount = allItems.Sum(x => x.CreditBalanceAmount),
+        OccupiedUnitsInArrears = overdueItems.Where(x => x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
+        VacantUnitsInArrears = overdueItems.Where(x => !x.IsOccupied).Select(x => x.UnitId).Distinct().Count(),
+        OccupiedOverdueAmount = overdueItems.Where(x => x.IsOccupied).Sum(x => x.Balance),
+        VacantOverdueAmount = overdueItems.Where(x => !x.IsOccupied).Sum(x => x.Balance),
+        Units0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Select(x => x.UnitId).Distinct().Count(),
+        Amount0To30 = overdueItems.Where(x => x.AgingBucket == "0-30").Sum(x => x.Balance),
+        Units31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Select(x => x.UnitId).Distinct().Count(),
+        Amount31To60 = overdueItems.Where(x => x.AgingBucket == "31-60").Sum(x => x.Balance),
+        Units61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Select(x => x.UnitId).Distinct().Count(),
+        Amount61To90 = overdueItems.Where(x => x.AgingBucket == "61-90").Sum(x => x.Balance),
+        UnitsOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Select(x => x.UnitId).Distinct().Count(),
+        AmountOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Sum(x => x.Balance)
+    };
+
+    private static string FormatGs(decimal value) =>
+        "₲ " + value.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"));
 
     private static string ComputeAgingBucket(int daysOverdue) => daysOverdue switch
     {

@@ -67,3 +67,9 @@ public class MorosityReportDto
     public int Page { get; set; }
     public int PageSize { get; set; }
 }
+
+public class MorosityReminderResultDto
+{
+    public int EmailsSent { get; set; }
+    public int UnitsSkippedNoEmail { get; set; }
+}
