@@ -145,6 +145,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.Buildings)
             .HasForeignKey(x => x.CondominiumId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Building>()
+            .HasOne(x => x.PresidentUser)
+            .WithMany()
+            .HasForeignKey(x => x.PresidentUserId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // ── ExpensePeriod ──────────────────────────────────────────────────────
         // Filtrado por IsDeleted = 0: sin esto, un periodo borrado (soft-delete) deja su combinacion
@@ -283,6 +289,19 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.RejectedByUser)
             .WithMany()
             .HasForeignKey(x => x.RejectedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseSettlement>().Property(x => x.PresidentRejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<ExpenseSettlement>()
+            .HasOne(x => x.PresidentApprovedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.PresidentApprovedByUserId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseSettlement>()
+            .HasOne(x => x.PresidentRejectedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.PresidentRejectedByUserId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         // ── ExpenseCharge ──────────────────────────────────────────────────────

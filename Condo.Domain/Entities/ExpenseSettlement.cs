@@ -23,6 +23,14 @@ public class ExpenseSettlement : CompanyScopedEntity
     public Guid? RejectedByUserId { get; set; }
     public ExpenseSettlementStatus Status { get; set; } = ExpenseSettlementStatus.Draft;
 
+    // Revision del presidente del consorcio, entre la aprobacion del BuildingManager y la
+    // publicacion del CompanyAdmin. Solo uno de los dos (aprobado/rechazado) puede estar seteado.
+    public DateTime? PresidentApprovedAtUtc { get; set; }
+    public Guid? PresidentApprovedByUserId { get; set; }
+    public string PresidentRejectionReason { get; set; } = string.Empty;
+    public DateTime? PresidentRejectedAtUtc { get; set; }
+    public Guid? PresidentRejectedByUserId { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
@@ -30,5 +38,7 @@ public class ExpenseSettlement : CompanyScopedEntity
     public ApplicationUser? ApprovedByUser { get; set; }
     public ApplicationUser? PublishedByUser { get; set; }
     public ApplicationUser? RejectedByUser { get; set; }
+    public ApplicationUser? PresidentApprovedByUser { get; set; }
+    public ApplicationUser? PresidentRejectedByUser { get; set; }
     public ICollection<ExpenseCharge> ExpenseCharges { get; set; } = new List<ExpenseCharge>();
 }

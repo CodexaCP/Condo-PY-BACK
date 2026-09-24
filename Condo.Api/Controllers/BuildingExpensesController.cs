@@ -457,7 +457,8 @@ public class BuildingExpensesController(
             return NotFound();
         }
 
-        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken)
+            && !await IsPresidentReviewingSettlementAsync(entity.BuildingId, entity.ExpensePeriodId, cancellationToken))
         {
             return Forbid();
         }
@@ -517,6 +518,23 @@ public class BuildingExpensesController(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
+    }
+
+    private async Task<bool> IsPresidentReviewingSettlementAsync(Guid buildingId, Guid expensePeriodId, CancellationToken cancellationToken)
+    {
+        var isPresident = await dbContext.Buildings
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == buildingId && x.PresidentUserId == tenantContext.UserId, cancellationToken);
+
+        if (!isPresident) return false;
+
+        return await dbContext.ExpenseSettlements
+            .AsNoTracking()
+            .AnyAsync(
+                x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId
+                     && x.Status == ExpenseSettlementStatus.Approved
+                     && x.PresidentApprovedByUserId == null && x.PresidentRejectedByUserId == null,
+                cancellationToken);
     }
 
     private static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit) =>

@@ -15,6 +15,7 @@ public class OwnerUpsertRequest
     public string? Address { get; set; }
     public bool IsResident { get; set; } = false;
     public bool IsActive { get; set; } = true;
+    public string? SignatureUrl { get; set; }
 }
 
 public class OwnerDto
@@ -33,4 +34,25 @@ public class OwnerDto
     public string? Address { get; set; }
     public bool IsResident { get; set; }
     public bool IsActive { get; set; }
+    public string? SignatureUrl { get; set; }
+    public List<OwnerPresidentBuildingDto> PresidentOfBuildings { get; set; } = new();
+}
+
+public class OwnerPresidentBuildingDto
+{
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+}
+
+public class OwnerEligibleBuildingDto
+{
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public bool HasOtherPresident { get; set; }
+    public string? OtherPresidentName { get; set; }
+}
+
+public class SetOwnerPresidentBuildingRequest
+{
+    public Guid? BuildingId { get; set; }
 }

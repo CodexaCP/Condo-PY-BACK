@@ -28,6 +28,15 @@ public class ExpenseSettlementSummaryDto
     public DateTime? RejectedAtUtc { get; set; }
     public Guid? RejectedByUserId { get; set; }
     public string RejectedByUserName { get; set; } = string.Empty;
+    public Guid? PresidentUserId { get; set; }
+    public string PresidentUserName { get; set; } = string.Empty;
+    public DateTime? PresidentApprovedAtUtc { get; set; }
+    public Guid? PresidentApprovedByUserId { get; set; }
+    public string PresidentApprovedByUserName { get; set; } = string.Empty;
+    public string PresidentRejectionReason { get; set; } = string.Empty;
+    public DateTime? PresidentRejectedAtUtc { get; set; }
+    public Guid? PresidentRejectedByUserId { get; set; }
+    public string PresidentRejectedByUserName { get; set; } = string.Empty;
     public ExpenseSettlementStatus? Status { get; set; }
     public ExpensePeriodStatus PeriodStatus { get; set; }
     public int GeneratedChargeCount { get; set; }
@@ -83,6 +92,24 @@ public class VoidSettlementResultDto
 public class RejectSettlementRequest
 {
     public string RejectionReason { get; set; } = string.Empty;
+}
+
+public class PresidentSettlementReviewDto
+{
+    public ExpenseSettlementSummaryDto Settlement { get; set; } = new();
+    public List<PresidentSettlementExpenseItemDto> Expenses { get; set; } = new();
+}
+
+public class PresidentSettlementExpenseItemDto
+{
+    public Guid Id { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateOnly ExpenseDate { get; set; }
+    public decimal Amount { get; set; }
+    public bool HasReceipt { get; set; }
+    public string? ReceiptFileName { get; set; }
 }
 
 public class ApplyLateFeesRequest

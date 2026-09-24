@@ -46,7 +46,8 @@ public class OwnersController(
         }
 
         var owners = await query.OrderBy(x => x.FullName).ToListAsync(cancellationToken);
-        return Ok(owners.Select(ToDto).ToList());
+        var presidencies = await LoadPresidenciesAsync(owners.Select(x => x.Id).ToList(), cancellationToken);
+        return Ok(owners.Select(o => ToDto(o, presidencies)).ToList());
     }
 
     // ─── GET BY ID ──────────────────────────────────────────────────────────
@@ -65,7 +66,8 @@ public class OwnersController(
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
 
-        return Ok(ToDto(owner));
+        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        return Ok(ToDto(owner, presidencies));
     }
 
     // ─── CREATE ─────────────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ public class OwnersController(
 
         await residencySync.SyncAsync(owner, companyId, cancellationToken);
 
-        return Ok(ToDto(owner));
+        return Ok(ToDto(owner, new Dictionary<Guid, List<OwnerPresidentBuildingDto>>()));
     }
 
     // ─── UPDATE ─────────────────────────────────────────────────────────────
@@ -182,6 +184,23 @@ public class OwnersController(
             owner.MustChangePassword = true;
         }
 
+        if (!string.IsNullOrWhiteSpace(request.SignatureUrl))
+        {
+            if (request.SignatureUrl.Length > 500)
+                return BadRequest("La URL de la firma no puede superar los 500 caracteres.");
+
+            var isPresident = await dbContext.Buildings
+                .AnyAsync(x => !x.IsDeleted && x.PresidentUserId == owner.Id, cancellationToken);
+            if (!isPresident)
+                return BadRequest("Solo un propietario marcado como presidente de consorcio puede tener una firma.");
+
+            owner.SignatureUrl = request.SignatureUrl.Trim();
+        }
+        else
+        {
+            owner.SignatureUrl = null;
+        }
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -193,7 +212,129 @@ public class OwnersController(
 
         await residencySync.SyncAsync(owner, companyId, cancellationToken);
 
-        return Ok(ToDto(owner));
+        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        return Ok(ToDto(owner, presidencies));
+    }
+
+    // ─── PRESIDENTE DE CONSORCIO ────────────────────────────────────────────
+
+    [HttpGet("{id:guid}/eligible-president-buildings")]
+    public async Task<ActionResult<IReadOnlyList<OwnerEligibleBuildingDto>>> GetEligiblePresidentBuildings(
+        Guid id, CancellationToken cancellationToken)
+    {
+        if (!CanManageOwners()) return Forbid();
+
+        var owner = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.Role == UserRole.Owner, cancellationToken);
+
+        if (owner is null) return NotFound();
+
+        if (!accessScope.IsSuperAdmin &&
+            (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
+            return Forbid();
+
+        var buildingIds = await dbContext.UnitOwners
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == id && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => x.Unit!.BuildingId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var buildings = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && buildingIds.Contains(x.Id))
+            .ToListAsync(cancellationToken);
+
+        var presidentIds = buildings.Where(x => x.PresidentUserId.HasValue && x.PresidentUserId != id)
+            .Select(x => x.PresidentUserId!.Value).Distinct().ToList();
+        var presidentNames = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => presidentIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.FullName, cancellationToken);
+
+        var result = buildings
+            .OrderBy(x => x.Name)
+            .Select(x => new OwnerEligibleBuildingDto
+            {
+                BuildingId = x.Id,
+                BuildingName = x.Name,
+                HasOtherPresident = x.PresidentUserId.HasValue && x.PresidentUserId != id,
+                OtherPresidentName = x.PresidentUserId.HasValue && x.PresidentUserId != id
+                    ? presidentNames.GetValueOrDefault(x.PresidentUserId.Value)
+                    : null
+            })
+            .ToList();
+
+        return Ok(result);
+    }
+
+    [HttpPut("{id:guid}/president-building")]
+    public async Task<ActionResult<OwnerDto>> SetPresidentBuilding(
+        Guid id, [FromBody] SetOwnerPresidentBuildingRequest request, CancellationToken cancellationToken)
+    {
+        if (!CanManageOwners()) return Forbid();
+
+        var owner = await dbContext.ApplicationUsers
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.Role == UserRole.Owner, cancellationToken);
+
+        if (owner is null) return NotFound();
+
+        if (!accessScope.IsSuperAdmin &&
+            (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
+            return Forbid();
+
+        // Sacamos al owner de cualquier edificio donde ya figure como presidente (solo puede serlo de uno).
+        var currentPresidencies = await dbContext.Buildings
+            .Where(x => !x.IsDeleted && x.PresidentUserId == id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var b in currentPresidencies)
+        {
+            b.PresidentUserId = null;
+            b.PresidentAssignedAtUtc = null;
+            b.PresidentAssignedByUserId = null;
+        }
+
+        if (request.BuildingId.HasValue)
+        {
+            var building = await dbContext.Buildings
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingId.Value, cancellationToken);
+
+            if (building is null) return BadRequest("El edificio indicado no existe.");
+
+            if (!accessScope.IsSuperAdmin &&
+                (!accessScope.CompanyId.HasValue || building.CompanyId != accessScope.CompanyId.Value))
+                return Forbid();
+
+            var hasUnitInBuilding = await dbContext.UnitOwners
+                .AnyAsync(x => !x.IsDeleted && x.OwnerId == id && x.Unit != null && x.Unit.BuildingId == building.Id, cancellationToken);
+            if (!hasUnitInBuilding)
+                return BadRequest("El propietario no tiene ninguna unidad vinculada en ese edificio.");
+
+            if (building.PresidentUserId.HasValue && building.PresidentUserId != id)
+            {
+                var currentName = await dbContext.ApplicationUsers
+                    .Where(x => x.Id == building.PresidentUserId.Value)
+                    .Select(x => x.FullName)
+                    .FirstOrDefaultAsync(cancellationToken);
+                return Conflict($"Este edificio ya tiene un presidente de consorcio asignado ({currentName}). No puede haber más de un presidente por edificio.");
+            }
+
+            building.PresidentUserId = id;
+            building.PresidentAssignedAtUtc = DateTime.UtcNow;
+            building.PresidentAssignedByUserId = tenantContext.UserId;
+        }
+        else
+        {
+            // Sin edificio asignado: si no le queda ninguna presidencia, no puede conservar firma.
+            owner.SignatureUrl = null;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        return Ok(ToDto(owner, presidencies));
     }
 
     // ─── DELETE ─────────────────────────────────────────────────────────────
@@ -279,7 +420,23 @@ public class OwnersController(
     private static string? NormalizeDocumentType(string? raw) =>
         raw?.Trim() is { Length: > 0 } t ? t : null;
 
-    private static OwnerDto ToDto(ApplicationUser u) => new()
+    private async Task<Dictionary<Guid, List<OwnerPresidentBuildingDto>>> LoadPresidenciesAsync(
+        List<Guid> ownerIds, CancellationToken ct)
+    {
+        var buildings = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.PresidentUserId.HasValue && ownerIds.Contains(x.PresidentUserId.Value))
+            .Select(x => new { x.Id, x.Name, PresidentUserId = x.PresidentUserId!.Value })
+            .ToListAsync(ct);
+
+        return buildings
+            .GroupBy(x => x.PresidentUserId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => new OwnerPresidentBuildingDto { BuildingId = x.Id, BuildingName = x.Name }).ToList());
+    }
+
+    private static OwnerDto ToDto(ApplicationUser u, Dictionary<Guid, List<OwnerPresidentBuildingDto>> presidencies) => new()
     {
         Id             = u.Id,
         CompanyId      = u.CompanyId,
@@ -294,6 +451,8 @@ public class OwnersController(
         Phone          = u.Phone,
         Address        = u.Address,
         IsResident     = u.IsResident,
-        IsActive       = u.IsActive
+        IsActive       = u.IsActive,
+        SignatureUrl   = u.SignatureUrl,
+        PresidentOfBuildings = presidencies.GetValueOrDefault(u.Id, new List<OwnerPresidentBuildingDto>())
     };
 }

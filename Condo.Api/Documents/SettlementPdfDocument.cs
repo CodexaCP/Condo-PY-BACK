@@ -13,6 +13,7 @@ public sealed class SettlementPdfDocument(
     string periodEndDate,
     string periodDueDate,
     SettlementSignature? approver = null,
+    SettlementSignature? president = null,
     SettlementSignature? publisher = null) : IDocument
 {
     private const string ColorPrimary = "#1385B6";
@@ -28,7 +29,7 @@ public sealed class SettlementPdfDocument(
         Author = "CONDOPY"
     };
 
-    private bool hasSignatures => approver is not null || publisher is not null;
+    private bool hasSignatures => approver is not null || president is not null || publisher is not null;
 
     public void Compose(IDocumentContainer container)
     {
@@ -242,7 +243,9 @@ public sealed class SettlementPdfDocument(
         container.Row(row =>
         {
             row.RelativeItem().Element(c => ComposeSignatureBlock(c, approver));
-            row.ConstantItem(40);
+            row.ConstantItem(24);
+            row.RelativeItem().Element(c => ComposeSignatureBlock(c, president));
+            row.ConstantItem(24);
             row.RelativeItem().Element(c => ComposeSignatureBlock(c, publisher));
         });
     }

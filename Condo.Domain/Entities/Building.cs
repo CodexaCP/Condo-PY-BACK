@@ -19,6 +19,12 @@ public class Building : BaseEntity
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
+    // Propietario marcado como presidente del consorcio. Unico por edificio; firma la liquidacion
+    // de expensas antes de que el CompanyAdmin la publique.
+    public Guid? PresidentUserId { get; set; }
+    public DateTime? PresidentAssignedAtUtc { get; set; }
+    public Guid? PresidentAssignedByUserId { get; set; }
+
     // Modo de facturacion del edificio. Solo lo configura el superadmin (creacion/edicion del edificio).
     public InvoicingMode InvoicingMode { get; set; } = InvoicingMode.Preimpresa;
 
@@ -35,6 +41,7 @@ public class Building : BaseEntity
 
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
+    public ApplicationUser? PresidentUser { get; set; }
     public ICollection<Unit> Units { get; set; } = new List<Unit>();
     public ICollection<BuildingExpense> BuildingExpenses { get; set; } = new List<BuildingExpense>();
     public ICollection<BuildingIncome> BuildingIncomes { get; set; } = new List<BuildingIncome>();

@@ -540,6 +540,11 @@ public class ExpensePeriodsController(
             return BadRequest("Este periodo ya tiene cargos emitidos desde una liquidacion previa. No se puede aprobar nuevamente.");
         }
 
+        if (period.Building?.PresidentUserId is null)
+        {
+            return BadRequest("Este edificio no tiene un presidente de consorcio asignado. Asigná uno desde la ficha del propietario correspondiente antes de aprobar la liquidación.");
+        }
+
         ExpenseSettlementChargePreviewDto preview;
         try
         {
@@ -576,7 +581,201 @@ public class ExpensePeriodsController(
         settlement.RejectionReason = string.Empty;
         settlement.RejectedAtUtc = null;
         settlement.RejectedByUserId = null;
+        settlement.PresidentApprovedAtUtc = null;
+        settlement.PresidentApprovedByUserId = null;
+        settlement.PresidentRejectionReason = string.Empty;
+        settlement.PresidentRejectedAtUtc = null;
+        settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Closed;
+
+        dbContext.Notifications.Add(new Notification
+        {
+            CompanyId = period.CompanyId,
+            RecipientId = period.Building.PresidentUserId.Value,
+            Type = NotificationType.SettlementPendingPresidentReview,
+            Title = "Liquidación pendiente de tu revisión",
+            Body = $"Se emitió un nuevo período de expensas ({period.Name}) para {period.Building.Name} y se encuentra pendiente de tu revisión como presidente del consorcio.",
+            EntityType = "ExpensePeriod",
+            EntityId = period.Id
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
+    }
+
+    [HttpGet("{id:guid}/president-review")]
+    public async Task<ActionResult<PresidentSettlementReviewDto>> GetPresidentReview(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (period.Building?.PresidentUserId != tenantContext.UserId)
+        {
+            return Forbid();
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null || settlement.Status != ExpenseSettlementStatus.Approved
+            || settlement.PresidentApprovedByUserId.HasValue || settlement.PresidentRejectedByUserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var expenses = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+            .OrderBy(x => x.Category).ThenBy(x => x.ExpenseDate)
+            .Select(x => new PresidentSettlementExpenseItemDto
+            {
+                Id = x.Id,
+                Category = x.Category.ToString(),
+                SupplierName = x.SupplierName,
+                Description = x.Description,
+                ExpenseDate = x.ExpenseDate,
+                Amount = x.Amount,
+                HasReceipt = x.ReceiptStoredName != null,
+                ReceiptFileName = x.ReceiptFileName
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new PresidentSettlementReviewDto
+        {
+            Settlement = await BuildSettlementSummaryAsync(period, cancellationToken),
+            Expenses = expenses
+        });
+    }
+
+    [HttpPost("{id:guid}/president-approve-settlement")]
+    public async Task<ActionResult<ExpenseSettlementSummaryDto>> PresidentApproveSettlement(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (period.Building?.PresidentUserId != tenantContext.UserId)
+        {
+            return Forbid();
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null || settlement.Status != ExpenseSettlementStatus.Approved
+            || settlement.PresidentApprovedByUserId.HasValue || settlement.PresidentRejectedByUserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        settlement.PresidentApprovedAtUtc = DateTime.UtcNow;
+        settlement.PresidentApprovedByUserId = tenantContext.UserId;
+
+        var companyAdminIds = await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.IsActive && x.CompanyId == period.CompanyId && x.Role == UserRole.CompanyAdmin)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var adminId in companyAdminIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = period.CompanyId,
+                RecipientId = adminId,
+                Type = NotificationType.SettlementApprovedByPresident,
+                Title = "Liquidación aprobada por el presidente",
+                Body = $"El presidente del consorcio aprobó la liquidación del período {period.Name} de {period.Building.Name}. Ya se puede publicar.",
+                EntityType = "ExpensePeriod",
+                EntityId = period.Id
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/president-reject-settlement")]
+    public async Task<ActionResult<ExpenseSettlementSummaryDto>> PresidentRejectSettlement(
+        Guid id, [FromBody] RejectSettlementRequest request, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (period.Building?.PresidentUserId != tenantContext.UserId)
+        {
+            return Forbid();
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null || settlement.Status != ExpenseSettlementStatus.Approved
+            || settlement.PresidentApprovedByUserId.HasValue || settlement.PresidentRejectedByUserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var reason = request.RejectionReason?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest("El motivo de rechazo es obligatorio.");
+        }
+
+        if (reason.Length > 500)
+        {
+            return BadRequest("El motivo no puede superar los 500 caracteres.");
+        }
+
+        var approvedByUserId = settlement.ApprovedByUserId;
+
+        var settlementCharges = await dbContext.ExpenseCharges
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId != null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var charge in settlementCharges)
+        {
+            charge.IsDeleted = true;
+        }
+
+        settlement.Status = ExpenseSettlementStatus.Rejected;
+        settlement.PresidentRejectionReason = reason;
+        settlement.PresidentRejectedAtUtc = DateTime.UtcNow;
+        settlement.PresidentRejectedByUserId = tenantContext.UserId;
+        settlement.ApprovedAtUtc = null;
+        settlement.ApprovedByUserId = null;
+        period.Status = ExpensePeriodStatus.Draft;
+
+        if (approvedByUserId.HasValue)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = period.CompanyId,
+                RecipientId = approvedByUserId.Value,
+                Type = NotificationType.SettlementRejectedByPresident,
+                Title = "El presidente rechazó la liquidación",
+                Body = $"La liquidación del periodo {period.Name} de {period.Building.Name} fue rechazada por el presidente del consorcio. Motivo: {reason}.",
+                EntityType = "ExpensePeriod",
+                EntityId = period.Id
+            });
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
@@ -586,7 +785,7 @@ public class ExpensePeriodsController(
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> Publish(Guid id, CancellationToken cancellationToken)
     {
         if (!CanPublishSettlement())
-            return Prohibited("Solo el Administrador de empresa (presidente de la comunidad) puede publicar la liquidación.");
+            return Prohibited("Solo el Administrador de empresa puede publicar la liquidación.");
 
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
@@ -628,6 +827,11 @@ public class ExpensePeriodsController(
                               "Cuando él la apruebe, el Administrador de empresa podrá publicarla.");
         }
 
+        if (!settlement.PresidentApprovedByUserId.HasValue)
+        {
+            return Prohibited("No se puede publicar: la liquidación todavía no fue aprobada por el presidente del consorcio.");
+        }
+
         if (settlement.Status is not ExpenseSettlementStatus.Approved and not ExpenseSettlementStatus.Applied)
         {
             return BadRequest("Solo se pueden publicar liquidaciones aprobadas con cargos emitidos.");
@@ -656,7 +860,7 @@ public class ExpensePeriodsController(
         Guid id, [FromBody] RejectSettlementRequest request, CancellationToken cancellationToken)
     {
         if (!CanPublishSettlement())
-            return Prohibited("Solo el Administrador de empresa (presidente de la comunidad) puede rechazar la liquidación.");
+            return Prohibited("Solo el Administrador de empresa puede rechazar la liquidación.");
 
         var period = await dbContext.ExpensePeriods
             .Include(x => x.Building)
@@ -718,6 +922,11 @@ public class ExpensePeriodsController(
         settlement.RejectedByUserId = tenantContext.UserId;
         settlement.ApprovedAtUtc = null;
         settlement.ApprovedByUserId = null;
+        settlement.PresidentApprovedAtUtc = null;
+        settlement.PresidentApprovedByUserId = null;
+        settlement.PresidentRejectionReason = string.Empty;
+        settlement.PresidentRejectedAtUtc = null;
+        settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Draft;
 
         if (approvedByUserId.HasValue)
@@ -905,6 +1114,11 @@ public class ExpensePeriodsController(
         settlement.Status = ExpenseSettlementStatus.Calculated;
         settlement.ApprovedAtUtc = null;
         settlement.ApprovedByUserId = null;
+        settlement.PresidentApprovedAtUtc = null;
+        settlement.PresidentApprovedByUserId = null;
+        settlement.PresidentRejectionReason = string.Empty;
+        settlement.PresidentRejectedAtUtc = null;
+        settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Draft;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -918,17 +1132,18 @@ public class ExpensePeriodsController(
 
     // Firma al pie: izquierda quien aprobo la liquidacion, derecha quien la publico (presidente).
     // Se usa la firma precargada del usuario; si publica el mismo que aprobo, se muestra una sola vez.
-    private async Task<(SettlementSignature? Approver, SettlementSignature? Publisher)> LoadSettlementSignaturesAsync(
+    private async Task<(SettlementSignature? Approver, SettlementSignature? President, SettlementSignature? Publisher)> LoadSettlementSignaturesAsync(
         Guid periodId, CancellationToken cancellationToken)
     {
         var settlement = await dbContext.ExpenseSettlements
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == periodId, cancellationToken);
 
-        if (settlement is null) return (null, null);
+        if (settlement is null) return (null, null, null);
 
         var userIds = new List<Guid>();
         if (settlement.ApprovedByUserId.HasValue) userIds.Add(settlement.ApprovedByUserId.Value);
+        if (settlement.PresidentApprovedByUserId.HasValue) userIds.Add(settlement.PresidentApprovedByUserId.Value);
         if (settlement.PublishedByUserId.HasValue) userIds.Add(settlement.PublishedByUserId.Value);
 
         var users = await dbContext.ApplicationUsers
@@ -936,16 +1151,16 @@ public class ExpensePeriodsController(
             .Where(x => userIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
 
-        SettlementSignature? Build(Guid? userId)
+        SettlementSignature? Build(Guid? userId, string? titleOverride = null)
         {
             if (!userId.HasValue || !users.TryGetValue(userId.Value, out var user)) return null;
 
             var name = string.IsNullOrWhiteSpace(user.FullName)
                 ? $"{user.FirstName} {user.LastName}".Trim()
                 : user.FullName;
-            var title = user.Role switch
+            var title = titleOverride ?? user.Role switch
             {
-                UserRole.CompanyAdmin => "Presidente de la comunidad",
+                UserRole.CompanyAdmin => "Administrador de la empresa",
                 UserRole.BuildingManager => "Encargado de edificio",
                 UserRole.CompanyOperator => "Operador de empresa",
                 _ => "Administrador"
@@ -955,8 +1170,9 @@ public class ExpensePeriodsController(
         }
 
         var approver = Build(settlement.ApprovedByUserId);
+        var president = Build(settlement.PresidentApprovedByUserId, "Presidente del consorcio");
         var publisher = settlement.PublishedByUserId == settlement.ApprovedByUserId ? null : Build(settlement.PublishedByUserId);
-        return (approver, publisher);
+        return (approver, president, publisher);
     }
 
     private byte[]? ReadSignatureImage(string? signatureUrl)
@@ -1009,7 +1225,7 @@ public class ExpensePeriodsController(
             return BadRequest("El período todavía no tiene una liquidación calculada para exportar.");
         }
 
-        var (approverSignature, publisherSignature) = await LoadSettlementSignaturesAsync(id, cancellationToken);
+        var (approverSignature, presidentSignature, publisherSignature) = await LoadSettlementSignaturesAsync(id, cancellationToken);
 
         var document = new SettlementPdfDocument(
             summary,
@@ -1017,6 +1233,7 @@ public class ExpensePeriodsController(
             period.EndDate.ToString("dd/MM/yyyy"),
             period.DueDate.ToString("dd/MM/yyyy"),
             approverSignature,
+            presidentSignature,
             publisherSignature);
 
         var pdfBytes = document.GeneratePdf();
@@ -1261,7 +1478,11 @@ public class ExpensePeriodsController(
             return await BuildLiveSettlementSummaryAsync(period, cancellationToken);
         }
 
-        var userIds = new[] { settlement.GeneratedByUserId, settlement.ApprovedByUserId, settlement.PublishedByUserId, settlement.RejectedByUserId }
+        var userIds = new[]
+            {
+                settlement.GeneratedByUserId, settlement.ApprovedByUserId, settlement.PublishedByUserId, settlement.RejectedByUserId,
+                settlement.PresidentApprovedByUserId, settlement.PresidentRejectedByUserId, period.Building?.PresidentUserId
+            }
             .Where(x => x.HasValue)
             .Select(x => x!.Value)
             .Distinct()
@@ -1313,6 +1534,21 @@ public class ExpensePeriodsController(
             RejectedByUserId = settlement.RejectedByUserId,
             RejectedByUserName = settlement.RejectedByUserId.HasValue
                 ? userNames.GetValueOrDefault(settlement.RejectedByUserId.Value, string.Empty)
+                : string.Empty,
+            PresidentUserId = period.Building?.PresidentUserId,
+            PresidentUserName = period.Building?.PresidentUserId.HasValue == true
+                ? userNames.GetValueOrDefault(period.Building.PresidentUserId!.Value, string.Empty)
+                : string.Empty,
+            PresidentApprovedAtUtc = settlement.PresidentApprovedAtUtc,
+            PresidentApprovedByUserId = settlement.PresidentApprovedByUserId,
+            PresidentApprovedByUserName = settlement.PresidentApprovedByUserId.HasValue
+                ? userNames.GetValueOrDefault(settlement.PresidentApprovedByUserId.Value, string.Empty)
+                : string.Empty,
+            PresidentRejectionReason = settlement.PresidentRejectionReason,
+            PresidentRejectedAtUtc = settlement.PresidentRejectedAtUtc,
+            PresidentRejectedByUserId = settlement.PresidentRejectedByUserId,
+            PresidentRejectedByUserName = settlement.PresidentRejectedByUserId.HasValue
+                ? userNames.GetValueOrDefault(settlement.PresidentRejectedByUserId.Value, string.Empty)
                 : string.Empty,
             Status = settlement.Status,
             PeriodStatus = period.Status,
