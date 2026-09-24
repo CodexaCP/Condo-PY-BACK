@@ -855,6 +855,114 @@ public class ExpensePeriodsController(
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
+    // Deshacer una publicacion hecha por error. Solo SuperAdmin, y solo si todavia no hay ningun
+    // pago real (staff o propietario) ni recargo por mora aplicado contra los cargos del periodo —
+    // en ese caso se bloquea, para no tener que revertir plata ya movida. Si pasa, vuelve todo el
+    // ciclo de aprobacion al principio (Calculada), como si nunca se hubiera aprobado ni publicado.
+    [HttpPost("{id:guid}/unpublish-settlement")]
+    public async Task<ActionResult<ExpenseSettlementSummaryDto>> UnpublishSettlement(
+        Guid id, [FromBody] RejectSettlementRequest request, CancellationToken cancellationToken)
+    {
+        if (!tenantContext.IsSuperAdmin)
+            return Prohibited("Solo el superadministrador puede deshacer la publicación de un período.");
+
+        var period = await dbContext.ExpensePeriods
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null)
+        {
+            return NotFound();
+        }
+
+        if (period.Status != ExpensePeriodStatus.Published)
+        {
+            return BadRequest("Este período no está publicado.");
+        }
+
+        var settlement = await dbContext.ExpenseSettlements
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        if (settlement is null)
+        {
+            return BadRequest("El período no tiene una liquidación para deshacer.");
+        }
+
+        var reason = request.RejectionReason?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest("El motivo es obligatorio.");
+        }
+
+        if (reason.Length > 500)
+        {
+            return BadRequest("El motivo no puede superar los 500 caracteres.");
+        }
+
+        var charges = await dbContext.ExpenseCharges
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+            .ToListAsync(cancellationToken);
+
+        if (charges.Any(x => x.IsLateFee))
+        {
+            return BadRequest("No se puede deshacer: ya se aplicaron recargos por mora sobre este período.");
+        }
+
+        var chargeIds = charges.Select(x => x.Id).ToHashSet();
+        var hasRealPayments = await dbContext.PaymentAllocations
+            .AsNoTracking()
+            .AnyAsync(
+                x => !x.IsDeleted && chargeIds.Contains(x.ExpenseChargeId)
+                     && x.Payment != null && !x.Payment.IsReversed,
+                cancellationToken);
+
+        if (hasRealPayments)
+        {
+            return BadRequest("No se puede deshacer: ya hay pagos reales aplicados a los cargos de este período. Revertí esos pagos primero si corresponde.");
+        }
+
+        foreach (var charge in charges)
+        {
+            charge.IsDeleted = true;
+        }
+
+        period.Status = ExpensePeriodStatus.Draft;
+        settlement.Status = ExpenseSettlementStatus.Calculated;
+        settlement.ApprovedAtUtc = null;
+        settlement.ApprovedByUserId = null;
+        settlement.PresidentApprovedAtUtc = null;
+        settlement.PresidentApprovedByUserId = null;
+        settlement.PresidentRejectionReason = string.Empty;
+        settlement.PresidentRejectedAtUtc = null;
+        settlement.PresidentRejectedByUserId = null;
+        settlement.PublishedAtUtc = null;
+        settlement.PublishedByUserId = null;
+        settlement.RejectionReason = string.Empty;
+        settlement.RejectedAtUtc = null;
+        settlement.RejectedByUserId = null;
+        settlement.UnpublishReason = reason;
+        settlement.UnpublishedAtUtc = DateTime.UtcNow;
+        settlement.UnpublishedByUserId = tenantContext.UserId;
+
+        var recipientIds = await GetBuildingUserIdsAsync(period.BuildingId, cancellationToken);
+        foreach (var rid in recipientIds)
+        {
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = period.CompanyId,
+                RecipientId = rid,
+                Type = NotificationType.ExpensePeriodUnpublished,
+                Title = "Se retiró la publicación de un período de expensas",
+                Body = $"El período {period.Name} de {period.Building!.Name} fue retirado por un error administrativo y vuelve a estar en preparación. Motivo: {reason}.",
+                EntityType = "ExpensePeriod",
+                EntityId = period.Id
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
+    }
+
     [HttpPost("{id:guid}/reject-settlement")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> RejectSettlement(
         Guid id, [FromBody] RejectSettlementRequest request, CancellationToken cancellationToken)

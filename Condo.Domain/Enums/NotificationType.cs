@@ -22,5 +22,6 @@ public enum NotificationType
     CreditNoteApproved = 18,
     SettlementPendingPresidentReview = 19,
     SettlementRejectedByPresident = 20,
-    SettlementApprovedByPresident = 21
+    SettlementApprovedByPresident = 21,
+    ExpensePeriodUnpublished = 22
 }

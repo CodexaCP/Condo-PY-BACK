@@ -31,6 +31,11 @@ public class ExpenseSettlement : CompanyScopedEntity
     public DateTime? PresidentRejectedAtUtc { get; set; }
     public Guid? PresidentRejectedByUserId { get; set; }
 
+    // Deshacer una publicacion por error (solo SuperAdmin, solo si no hay pagos/moras reales todavia).
+    public string UnpublishReason { get; set; } = string.Empty;
+    public DateTime? UnpublishedAtUtc { get; set; }
+    public Guid? UnpublishedByUserId { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
@@ -40,5 +45,6 @@ public class ExpenseSettlement : CompanyScopedEntity
     public ApplicationUser? RejectedByUser { get; set; }
     public ApplicationUser? PresidentApprovedByUser { get; set; }
     public ApplicationUser? PresidentRejectedByUser { get; set; }
+    public ApplicationUser? UnpublishedByUser { get; set; }
     public ICollection<ExpenseCharge> ExpenseCharges { get; set; } = new List<ExpenseCharge>();
 }

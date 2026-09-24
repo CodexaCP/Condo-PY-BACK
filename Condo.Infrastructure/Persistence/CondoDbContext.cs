@@ -303,6 +303,13 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.PresidentRejectedByUserId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ExpenseSettlement>().Property(x => x.UnpublishReason).HasMaxLength(500);
+        modelBuilder.Entity<ExpenseSettlement>()
+            .HasOne(x => x.UnpublishedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.UnpublishedByUserId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // ── ExpenseCharge ──────────────────────────────────────────────────────
         modelBuilder.Entity<ExpenseCharge>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
