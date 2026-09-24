@@ -12,6 +12,7 @@ public interface ICondoDbContext
     DbSet<Company> Companies { get; }
     DbSet<Condominium> Condominiums { get; }
     DbSet<ApplicationUser> ApplicationUsers { get; }
+    DbSet<PasswordResetToken> PasswordResetTokens { get; }
     DbSet<UserBuildingAccess> UserBuildingAccesses { get; }
     DbSet<Building> Buildings { get; }
     DbSet<BuildingExpense> BuildingExpenses { get; }

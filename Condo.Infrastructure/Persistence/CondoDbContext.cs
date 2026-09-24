@@ -11,6 +11,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Condominium> Condominiums => Set<Condominium>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<UserBuildingAccess> UserBuildingAccesses => Set<UserBuildingAccess>();
     public DbSet<Building> Buildings => Set<Building>();
     public DbSet<BuildingExpense> BuildingExpenses => Set<BuildingExpense>();
@@ -99,6 +100,17 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.CondominiumId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ── PasswordResetToken ────────────────────────────────────────────────
+        modelBuilder.Entity<PasswordResetToken>().Property(x => x.TokenHash).HasMaxLength(128);
+        modelBuilder.Entity<PasswordResetToken>().Property(x => x.RequestedFromIp).HasMaxLength(64);
+        modelBuilder.Entity<PasswordResetToken>().HasIndex(x => x.TokenHash);
+        modelBuilder.Entity<PasswordResetToken>().HasIndex(x => new { x.ApplicationUserId, x.CreatedAtUtc });
+        modelBuilder.Entity<PasswordResetToken>()
+            .HasOne(x => x.ApplicationUser)
+            .WithMany()
+            .HasForeignKey(x => x.ApplicationUserId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // ── Condominium ────────────────────────────────────────────────────────
         modelBuilder.Entity<Condominium>().HasIndex(x => new { x.CompanyId, x.Code }).IsUnique().HasFilter("[CompanyId] IS NOT NULL AND [IsDeleted] = 0");

@@ -1,16 +1,26 @@
+using System.Net;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Application.Services;
+using Condo.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace Condo.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtTokenService, ITenantContext tenantContext, IPasswordHasher passwordHasher) : ControllerBase
+public class AuthController(
+    ICondoDbContext dbContext,
+    IJwtTokenService jwtTokenService,
+    ITenantContext tenantContext,
+    IPasswordHasher passwordHasher,
+    IEmailSender emailSender,
+    IConfiguration configuration) : ControllerBase
 {
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
@@ -112,6 +122,112 @@ public class AuthController(ICondoDbContext dbContext, IJwtTokenService jwtToken
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
+
+    // Pedido de recuperacion de contraseña. Respuesta siempre generica (200, sin cuerpo) para no
+    // revelar si un correo/usuario existe. Si hay coincidencias (puede haber mas de una: el mismo
+    // correo puede pertenecer a cuentas de distintas empresas), se manda un correo por cada una,
+    // cada uno con su propio link — asi el dueño real de la bandeja ve a que empresa/usuario
+    // corresponde cada link, sin que el sistema tenga que adivinar cual eligio.
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var identifier = request.Identifier?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return Ok();
+        }
+
+        var normalizedIdentifier = identifier.ToLowerInvariant();
+        var isEmail = identifier.Contains('@');
+
+        var users = await dbContext.ApplicationUsers
+            .Include(x => x.Company)
+            .Where(x => !x.IsDeleted && x.IsActive &&
+                        (isEmail ? x.Email == normalizedIdentifier : x.Username == normalizedIdentifier))
+            .ToListAsync(cancellationToken);
+
+        var frontendBaseUrl = (configuration["Frontend:BaseUrl"] ?? "https://tramiya.com.py").TrimEnd('/');
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        foreach (var user in users)
+        {
+            // Limite simple para que esto no se pueda usar para spamear de correos a alguien.
+            var recentCount = await dbContext.PasswordResetTokens.CountAsync(
+                x => x.ApplicationUserId == user.Id && x.CreatedAtUtc > DateTime.UtcNow.AddHours(-1), cancellationToken);
+            if (recentCount >= 3)
+            {
+                continue;
+            }
+
+            var rawToken = GenerateToken();
+
+            dbContext.PasswordResetTokens.Add(new PasswordResetToken
+            {
+                ApplicationUserId = user.Id,
+                TokenHash = HashToken(rawToken),
+                ExpiresAtUtc = DateTime.UtcNow.AddMinutes(45),
+                RequestedFromIp = clientIp
+            });
+
+            var resetUrl = $"{frontendBaseUrl}/reset-password?token={rawToken}";
+            var scopeLabel = user.Role == Domain.Enums.UserRole.SuperAdmin ? "Superadministrador" : user.Company?.Name;
+            var scopeHtml = string.IsNullOrWhiteSpace(scopeLabel) ? "" : $" en <strong>{WebUtility.HtmlEncode(scopeLabel)}</strong>";
+
+            var html = $"""
+                <p>Hola {WebUtility.HtmlEncode(user.FirstName)},</p>
+                <p>Recibimos un pedido para restablecer tu contraseña{scopeHtml} (usuario: {WebUtility.HtmlEncode(user.Username)}).</p>
+                <p><a href="{resetUrl}">Restablecer contraseña</a></p>
+                <p>Este link vence en 45 minutos y sirve una sola vez. Si no lo pediste vos, podés ignorar este correo.</p>
+                """;
+
+            await emailSender.SendAsync(user.Email, "Restablecer tu contraseña — CONDOPY", html, cancellationToken);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok();
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var rawToken = request.Token?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return BadRequest("El link no es válido.");
+        }
+
+        if (!IsValidPassword(request.NewPassword))
+        {
+            return BadRequest("La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula y un carácter especial.");
+        }
+
+        var tokenHash = HashToken(rawToken);
+        var resetToken = await dbContext.PasswordResetTokens
+            .Include(x => x.ApplicationUser)
+            .FirstOrDefaultAsync(x => x.TokenHash == tokenHash, cancellationToken);
+
+        if (resetToken?.ApplicationUser is null
+            || resetToken.UsedAtUtc.HasValue
+            || resetToken.ExpiresAtUtc < DateTime.UtcNow
+            || resetToken.ApplicationUser.IsDeleted
+            || !resetToken.ApplicationUser.IsActive)
+        {
+            return BadRequest("El link venció o ya fue usado. Pedí uno nuevo.");
+        }
+
+        resetToken.ApplicationUser.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        resetToken.ApplicationUser.MustChangePassword = false;
+        resetToken.UsedAtUtc = DateTime.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok();
+    }
+
+    private static string GenerateToken() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+    private static string HashToken(string rawToken) =>
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken)));
 
     private bool VerifyPassword(string password, string storedHash) =>
         storedHash.StartsWith("$2")

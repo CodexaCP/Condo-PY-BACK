@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<IAccessScopeService, AccessScopeService>();
         services.AddScoped<IExpenseSettlementDistributionService, ExpenseSettlementDistributionService>();
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
+        services.AddHttpClient<IEmailSender, ResendEmailSender>();
 
         return services;
     }
