@@ -15,7 +15,8 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/invoices")]
-public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
+public class InvoicesController(
+    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> GetAll(
@@ -63,7 +64,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
                 x.Unit != null ? x.Unit.Coefficient : 0m,
                 x.Series != null ? x.Series.FieldPositionsJson : null,
-                x.Series != null && x.Series.HideFrame))
+                x.Series != null && x.Series.HideFrame,
+                null))
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
@@ -473,7 +475,10 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
         }
 
-        var document = new InvoicePdfDocument(dto, standardTemplate);
+        var backgroundImage = TryReadReferenceScan(row.SeriesReferenceScanUrl);
+        // Con papel propio (imagen de fondo calibrada en el timbrado) el texto va en negro simple, sin los
+        // colores de marca de CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema.
+        var document = new InvoicePdfDocument(dto, standardTemplate: backgroundImage is null && standardTemplate, backgroundImage);
         var pdfBytes = document.GeneratePdf();
 
         await LogAsync(dto.Id, dto.CompanyId, InvoiceAuditAction.Printed, before: null,
@@ -775,7 +780,8 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
                 x.Payment != null && x.Payment.ExpensePeriod != null ? x.Payment.ExpensePeriod.Month : (int?)null,
                 x.Unit != null ? x.Unit.Coefficient : 0m,
                 x.Series != null ? x.Series.FieldPositionsJson : null,
-                x.Series != null && x.Series.HideFrame))
+                x.Series != null && x.Series.HideFrame,
+                x.Series != null ? x.Series.ReferenceScanUrl : null))
             .FirstOrDefaultAsync(cancellationToken);
 
     private static InvoiceDto ToDto(InvoiceRow row) => new()
@@ -825,5 +831,20 @@ public class InvoicesController(ICondoDbContext dbContext, IAccessScopeService a
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
         DateOnly? PeriodDueDate, Guid? PeriodId, int? PeriodYear, int? PeriodMonth, decimal UnitCoefficient,
-        string? FieldPositionsJson, bool HideFrame);
+        string? FieldPositionsJson, bool HideFrame, string? SeriesReferenceScanUrl);
+
+    // Mismo mecanismo que la calibracion del timbrado (InvoiceSeriesController.TryReadReferenceScan): si el
+    // timbrado tiene un escaneo de referencia calibrado, la factura real tambien se imprime sobre ese papel.
+    private byte[]? TryReadReferenceScan(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        var fileName = Path.GetFileName(Uri.TryCreate(url, UriKind.Absolute, out var abs) ? abs.AbsolutePath : url);
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".gif")) return null;
+
+        var path = Path.Combine(env.WebRootPath, "uploads", fileName);
+        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
+    }
 }
