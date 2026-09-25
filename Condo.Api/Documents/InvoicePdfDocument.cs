@@ -18,7 +18,7 @@ namespace Condo.Api.Documents;
 /// </summary>
 public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate = false, byte[]? backgroundImage = null) : IDocument
 {
-    private sealed record FieldOffset(float Dx, float Dy);
+    private sealed record FieldOffset(float Dx, float Dy, float? FontSize = null);
 
     private readonly Dictionary<string, FieldOffset> offsets = ParseOffsets(invoice.FieldPositionsJson);
 
@@ -42,6 +42,11 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         if (key is not null && offsets.TryGetValue(key, out var o)) return (x + o.Dx, y + o.Dy);
         return (x, y);
     }
+
+    // Tamano de letra calibrado por campo (independiente de la posicion); si no se calibro, se usa el
+    // tamano por defecto del formulario.
+    private float FontSizeFor(string? key, float defaultSize) =>
+        key is not null && offsets.TryGetValue(key, out var o) && o.FontSize.HasValue ? o.FontSize.Value : defaultSize;
 
     private sealed record Palette(
         string Stroke, string Title, string? Label, string BuildingName, string Correlative,
@@ -142,22 +147,25 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // Caja izquierda: el edificio a la izquierda; razon social, direccion y telefono a la derecha.
         Text(l, 48, 793, 7.5f, "Edificio", color: p.Label ?? Colors.Grey.Darken1);
         var (edificioX, edificioY) = Offset("headerEdificio", 48, 758f);
+        var edificioSize = FontSizeFor("headerEdificio", 15f);
         l.Layer().TranslateX(edificioX).TranslateY(PageHeight - edificioY).Width(126f).Column(col =>
         {
-            col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(15).Bold().FontColor(p.BuildingName);
+            col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(edificioSize).Bold().FontColor(p.BuildingName);
         });
 
         var (emisorX, emisorY) = Offset("headerEmisor", 182, 784f);
+        // Un solo tamano calibrado se aplica a las 3 lineas (razon social, direccion, telefono) por igual.
+        var emisorSize = FontSizeFor("headerEmisor", 10f);
         l.Layer().TranslateX(emisorX).TranslateY(PageHeight - emisorY).Width(164f).Column(col =>
         {
             if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
-                col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(10).Bold();
+                col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(emisorSize).Bold();
 
             if (!string.IsNullOrWhiteSpace(invoice.BuildingAddress))
-                col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(8).Bold();
+                col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(emisorSize * 0.8f).Bold();
 
             if (!string.IsNullOrWhiteSpace(invoice.BuildingPhone))
-                col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(8).Bold();
+                col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(emisorSize * 0.8f).Bold();
         });
 
         // Caja derecha: timbrado, vigencia, RUC, tipo de documento y numero.
@@ -178,14 +186,15 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // Numero grande: "Nº 001-001-" y el correlativo destacado.
         var (prefix, correlative) = SplitNumber(invoice.NumeroFormateado);
         var (numX, numY) = Offset("headerNumero", boxX, 712f);
+        var numeroSize = FontSizeFor("headerNumero", 14f);
         var numberBox = l.Layer().TranslateX(numX).TranslateY(PageHeight - numY).Width(boxW).AlignCenter();
         numberBox.Text(t =>
         {
             if (issued)
             {
-                t.Span("Nº ").FontSize(14).Bold().FontColor(p.Title);
-                t.Span(prefix).FontSize(14).Bold().FontColor(p.Title);
-                t.Span(correlative).FontSize(17).Bold().FontColor(p.Correlative);
+                t.Span("Nº ").FontSize(numeroSize).Bold().FontColor(p.Title);
+                t.Span(prefix).FontSize(numeroSize).Bold().FontColor(p.Title);
+                t.Span(correlative).FontSize(numeroSize + 3).Bold().FontColor(p.Correlative);
             }
             else
             {
@@ -251,12 +260,12 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // Los conceptos se listan de arriba hacia abajo, sin lineas de fila, como en el formulario impreso.
         // La primera linea (expensas) lleva una segunda linea mas chica debajo con el coeficiente.
         const float firstBaseline = 510f;
-        const float fontSize = 8.5f;
         const float spacing = 13f;
         const float subNoteSpacing = 10f;
 
         // Un solo offset calibrado mueve todo el bloque (filas + montos) junto, en vez de fila por fila.
         var (blockX, baseline) = Offset("conceptosBloque", 76, firstBaseline);
+        var fontSize = FontSizeFor("conceptosBloque", 8.5f);
         var blockDx = blockX - 76;
         foreach (var (concepto, subNota, monto) in lines)
         {
@@ -414,6 +423,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         if (string.IsNullOrEmpty(text)) return;
 
         (x, baselineY) = Offset(key, x, baselineY);
+        size = FontSizeFor(key, size);
 
         var box = l.Layer().TranslateX(x).TranslateY(PageHeight - baselineY - (size * 0.95f)).Width(width ?? (PageWidth - x - 20f));
         var aligned = align switch
