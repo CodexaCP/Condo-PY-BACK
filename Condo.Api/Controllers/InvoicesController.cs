@@ -76,7 +76,8 @@ public class InvoicesController(
     // mano), borradores sin emitir, y emitidas — para el edificio/alcance del usuario.
     [HttpGet("funnel")]
     public async Task<ActionResult<InvoiceFunnelDto>> GetFunnel(
-        [FromQuery] Guid? buildingId, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken cancellationToken = default)
+        [FromQuery] Guid? buildingId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? search,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken cancellationToken = default)
     {
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 5000 ? 25 : pageSize;
@@ -108,8 +109,17 @@ public class InvoicesController(
         var draftsNotEmitted = await invoiceQuery.CountAsync(x => x.Status == InvoiceStatus.Draft, cancellationToken);
         var issued = await invoiceQuery.CountAsync(x => x.Status == InvoiceStatus.Issued, cancellationToken);
 
-        var paymentsWithoutInvoice = await paymentQuery
-            .Where(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id))
+        // Filtros propios de la lista de pagos sin facturar (no afectan los conteos de arriba).
+        var unbilledQuery = paymentQuery.Where(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id));
+        if (from.HasValue) unbilledQuery = unbilledQuery.Where(p => p.PaymentDate >= from.Value);
+        if (to.HasValue) unbilledQuery = unbilledQuery.Where(p => p.PaymentDate <= to.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            unbilledQuery = unbilledQuery.Where(p => p.Reference.Contains(term) || (p.Unit != null && p.Unit.Code.Contains(term)));
+        }
+
+        var paymentsWithoutInvoice = await unbilledQuery
             .OrderByDescending(p => p.PaymentDate)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -125,8 +135,7 @@ public class InvoicesController(
             })
             .ToListAsync(cancellationToken);
 
-        var paymentsWithoutInvoiceTotal = await paymentQuery
-            .CountAsync(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id), cancellationToken);
+        var paymentsWithoutInvoiceTotal = await unbilledQuery.CountAsync(cancellationToken);
 
         return Ok(new InvoiceFunnelDto
         {
