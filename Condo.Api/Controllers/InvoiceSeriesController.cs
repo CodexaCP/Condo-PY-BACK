@@ -285,12 +285,9 @@ public class InvoiceSeriesController(
             CreatedAtUtc = DateTime.UtcNow
         };
 
-        Console.WriteLine($"[calib-debug] entity.Id={entity.Id} entity.ReferenceScanUrl='{entity.ReferenceScanUrl}' entity.HideFrame={entity.HideFrame}");
         var backgroundImage = TryReadReferenceScan(entity.ReferenceScanUrl);
-        Console.WriteLine($"[calib-debug] backgroundImage={(backgroundImage is null ? "null" : backgroundImage.Length + " bytes")}");
         var document = new InvoicePdfDocument(sample, standardTemplate: true, backgroundImage);
         var pdfBytes = document.GeneratePdf();
-        Console.WriteLine($"[calib-debug] pdfBytes.Length={pdfBytes.Length}");
         return File(pdfBytes, "application/pdf", $"calibracion_{entity.NumeroTimbrado}.pdf");
     }
 
@@ -453,40 +450,14 @@ public class InvoiceSeriesController(
     // se ignora silenciosamente (el editor igual lo muestra en pantalla via iframe).
     private byte[]? TryReadReferenceScan(string? url)
     {
-        Console.WriteLine($"[calib-debug] TryReadReferenceScan url='{url}'");
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            Console.WriteLine("[calib-debug] url vacia -> null");
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(url)) return null;
 
         var fileName = Path.GetFileName(Uri.TryCreate(url, UriKind.Absolute, out var abs) ? abs.AbsolutePath : url);
-        Console.WriteLine($"[calib-debug] fileName='{fileName}'");
 
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        Console.WriteLine($"[calib-debug] ext='{ext}'");
-        if (ext is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".gif"))
-        {
-            Console.WriteLine("[calib-debug] extension no permitida -> null");
-            return null;
-        }
+        if (ext is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".gif")) return null;
 
         var path = Path.Combine(env.WebRootPath, "uploads", fileName);
-        var exists = System.IO.File.Exists(path);
-        Console.WriteLine($"[calib-debug] WebRootPath='{env.WebRootPath}' path='{path}' exists={exists}");
-
-        if (!exists) return null;
-
-        try
-        {
-            var bytes = System.IO.File.ReadAllBytes(path);
-            Console.WriteLine($"[calib-debug] leidos {bytes.Length} bytes de '{path}'");
-            return bytes;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[calib-debug] EXCEPCION leyendo '{path}': {ex}");
-            return null;
-        }
+        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
     }
 }

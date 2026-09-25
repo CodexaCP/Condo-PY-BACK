@@ -82,8 +82,11 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
                 layers.PrimaryLayer().Text(string.Empty);
                 // Solo en el "PDF de prueba" de calibracion: el escaneo del papel real de fondo, para
                 // poder comparar en pantalla sin tener que imprimir. Las facturas reales nunca llevan esto.
+                // IMPORTANTE: sin Width()/Height() explicitos antes de Image() — el Layer ya ocupa toda la
+                // pagina por si solo, y agregarlos genera un conflicto de restricciones que QuestPDF resuelve
+                // descartando el elemento en silencio (sin excepcion), dejando el fondo invisible.
                 if (backgroundImage is not null)
-                    layers.Layer().Width(PageWidth).Height(PageHeight).Image(backgroundImage).FitArea();
+                    layers.Layer().Image(backgroundImage).FitArea();
                 // Si el cliente ya tiene su propio marco/casillas impresas en el papel, no dibujamos el
                 // nuestro encima (pisaria el diseno real de su imprenta).
                 if (!invoice.HideFrame)
