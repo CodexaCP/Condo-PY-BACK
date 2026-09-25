@@ -67,7 +67,7 @@ public class LibroMovimientosService(ICondoDbContext dbContext) : ILibroMovimien
             {
                 Date = i.Date,
                 Type = LibroMovimientoType.IngresoEdificio,
-                Description = string.IsNullOrWhiteSpace(i.Description) ? IncomeCategoryLabel(i.Category) : i.Description,
+                Description = string.IsNullOrWhiteSpace(i.Description) ? CategoryLabels.IncomeLabel(i.Category) : i.Description,
                 Credit = i.Amount,
                 Debit = 0m
             });
@@ -77,7 +77,7 @@ public class LibroMovimientosService(ICondoDbContext dbContext) : ILibroMovimien
         {
             var description = string.IsNullOrWhiteSpace(e.Description) ? e.SupplierName : e.Description;
             if (string.IsNullOrWhiteSpace(description))
-                description = ExpenseCategoryLabel(e.Category);
+                description = CategoryLabels.ExpenseLabel(e.Category);
 
             movements.Add(new LibroMovimientoItemDto
             {
@@ -119,32 +119,4 @@ public class LibroMovimientosService(ICondoDbContext dbContext) : ILibroMovimien
         };
     }
 
-    private static string ExpenseCategoryLabel(BuildingExpenseCategory category) => category switch
-    {
-        BuildingExpenseCategory.Utilities => "Servicios",
-        BuildingExpenseCategory.Cleaning => "Limpieza",
-        BuildingExpenseCategory.Security => "Seguridad",
-        BuildingExpenseCategory.Maintenance => "Mantenimiento",
-        BuildingExpenseCategory.Elevator => "Ascensor",
-        BuildingExpenseCategory.Insurance => "Seguro",
-        BuildingExpenseCategory.Payroll => "Salarios",
-        BuildingExpenseCategory.Taxes => "Impuestos",
-        BuildingExpenseCategory.Administration => "Administracion",
-        BuildingExpenseCategory.ReserveFund => "Fondo de reserva",
-        BuildingExpenseCategory.Extraordinary => "Extraordinario",
-        BuildingExpenseCategory.Supplies => "Insumos",
-        BuildingExpenseCategory.Ande => "ANDE",
-        BuildingExpenseCategory.Essap => "ESSAP",
-        BuildingExpenseCategory.InternetPhone => "Internet y telefonia",
-        _ => "Otro"
-    };
-
-    private static string IncomeCategoryLabel(BuildingIncomeCategory category) => category switch
-    {
-        BuildingIncomeCategory.CommonAreaRental => "Alquiler area comun",
-        BuildingIncomeCategory.Interest => "Interes",
-        BuildingIncomeCategory.OperationalFund => "Fondo operativo",
-        BuildingIncomeCategory.CreditAdjustment => "Ajuste a favor",
-        _ => "Otro"
-    };
 }
