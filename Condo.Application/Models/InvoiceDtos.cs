@@ -239,6 +239,8 @@ public class InvoiceFunnelDto
     public int PaymentsWithoutInvoice { get; set; }
     public int DraftsNotEmitted { get; set; }
     public int Issued { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
     public List<InvoiceFunnelPaymentItemDto> PaymentsWithoutInvoiceItems { get; set; } = new();
 }
 

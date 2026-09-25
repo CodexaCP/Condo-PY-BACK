@@ -75,8 +75,11 @@ public class InvoicesController(
     // Embudo de facturacion: pagos sin ninguna factura (huecos que hoy nadie ve salvo buscando a
     // mano), borradores sin emitir, y emitidas — para el edificio/alcance del usuario.
     [HttpGet("funnel")]
-    public async Task<ActionResult<InvoiceFunnelDto>> GetFunnel([FromQuery] Guid? buildingId, CancellationToken cancellationToken)
+    public async Task<ActionResult<InvoiceFunnelDto>> GetFunnel(
+        [FromQuery] Guid? buildingId, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken cancellationToken = default)
     {
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is < 1 or > 5000 ? 25 : pageSize;
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
         var invoiceQuery = dbContext.Invoices.AsNoTracking().Where(x => !x.IsDeleted);
@@ -108,7 +111,8 @@ public class InvoicesController(
         var paymentsWithoutInvoice = await paymentQuery
             .Where(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id))
             .OrderByDescending(p => p.PaymentDate)
-            .Take(50)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(p => new InvoiceFunnelPaymentItemDto
             {
                 PaymentId = p.Id,
@@ -129,6 +133,8 @@ public class InvoicesController(
             PaymentsWithoutInvoice = paymentsWithoutInvoiceTotal,
             DraftsNotEmitted = draftsNotEmitted,
             Issued = issued,
+            Page = page,
+            PageSize = pageSize,
             PaymentsWithoutInvoiceItems = paymentsWithoutInvoice
         });
     }
