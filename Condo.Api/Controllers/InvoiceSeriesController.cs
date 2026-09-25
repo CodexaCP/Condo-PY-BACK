@@ -229,6 +229,10 @@ public class InvoiceSeriesController(
     [HttpGet("{id:guid}/sample-pdf")]
     public async Task<IActionResult> DownloadSamplePdf(Guid id, CancellationToken cancellationToken)
     {
+        // La URL es siempre la misma para el mismo timbrado; sin esto el navegador puede servir una version
+        // cacheada vieja (con la calibracion desactualizada) en vez de pedir una nueva.
+        Response.Headers.CacheControl = "no-store";
+
         if (!CanManageInvoices())
         {
             return Forbid();

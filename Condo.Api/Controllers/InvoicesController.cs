@@ -450,6 +450,10 @@ public class InvoicesController(
     [HttpGet("{id:guid}/pdf")]
     public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken cancellationToken)
     {
+        // La URL es siempre la misma para la misma factura; sin esto el navegador puede servir una version
+        // cacheada vieja (p.ej. con posiciones de calibracion desactualizadas) en vez de pedir una nueva.
+        Response.Headers.CacheControl = "no-store";
+
         var row = await LoadRowAsync(id, cancellationToken);
         if (row is null) return NotFound();
 
