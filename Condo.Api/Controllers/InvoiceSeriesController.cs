@@ -285,7 +285,11 @@ public class InvoiceSeriesController(
             CreatedAtUtc = DateTime.UtcNow
         };
 
-        var backgroundImage = TryReadReferenceScan(entity.ReferenceScanUrl);
+        // Misma prioridad que la factura real (InvoicesController.DownloadPdf): la plantilla propia del
+        // edificio manda sobre el escaneo de calibracion, para que el PDF de prueba muestre lo mismo que
+        // se va a usar de verdad.
+        var backgroundImage = TryReadReferenceScan(entity.Building?.InvoiceTemplateUrl)
+            ?? TryReadReferenceScan(entity.ReferenceScanUrl);
         // Con papel propio (imagen de fondo) el texto va en negro simple, sin los colores de marca de
         // CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema, no sobre el papel real.
         var document = new InvoicePdfDocument(sample, standardTemplate: backgroundImage is null, backgroundImage);

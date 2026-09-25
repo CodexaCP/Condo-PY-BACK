@@ -460,10 +460,11 @@ public class InvoicesController(
 
         var dto = ToDto(row);
         (dto.ClienteNombre, dto.ClienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
-        var standardTemplate = await dbContext.Buildings.AsNoTracking()
+        var buildingTemplate = await dbContext.Buildings.AsNoTracking()
             .Where(x => x.Id == dto.BuildingId)
-            .Select(x => (bool?)x.UseStandardTemplates)
-            .FirstOrDefaultAsync(cancellationToken) ?? true;
+            .Select(x => new { x.UseStandardTemplates, x.InvoiceTemplateUrl })
+            .FirstOrDefaultAsync(cancellationToken);
+        var standardTemplate = buildingTemplate?.UseStandardTemplates ?? true;
 
         if (row.PeriodId.HasValue)
         {
@@ -475,9 +476,12 @@ public class InvoicesController(
                 .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
         }
 
-        var backgroundImage = TryReadReferenceScan(row.SeriesReferenceScanUrl);
-        // Con papel propio (imagen de fondo calibrada en el timbrado) el texto va en negro simple, sin los
-        // colores de marca de CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema.
+        // La plantilla propia del edificio (cargada por el superadmin) manda sobre el escaneo de
+        // calibracion del timbrado — este ultimo queda solo como respaldo si el edificio no tiene una.
+        var backgroundImage = TryReadReferenceScan(buildingTemplate?.InvoiceTemplateUrl)
+            ?? TryReadReferenceScan(row.SeriesReferenceScanUrl);
+        // Con papel propio (imagen de fondo) el texto va en negro simple, sin los colores de marca de
+        // CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema.
         var document = new InvoicePdfDocument(dto, standardTemplate: backgroundImage is null && standardTemplate, backgroundImage);
         var pdfBytes = document.GeneratePdf();
 
