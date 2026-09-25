@@ -286,7 +286,9 @@ public class InvoiceSeriesController(
         };
 
         var backgroundImage = TryReadReferenceScan(entity.ReferenceScanUrl);
-        var document = new InvoicePdfDocument(sample, standardTemplate: true, backgroundImage);
+        // Con papel propio (imagen de fondo) el texto va en negro simple, sin los colores de marca de
+        // CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema, no sobre el papel real.
+        var document = new InvoicePdfDocument(sample, standardTemplate: backgroundImage is null, backgroundImage);
         var pdfBytes = document.GeneratePdf();
         return File(pdfBytes, "application/pdf", $"calibracion_{entity.NumeroTimbrado}.pdf");
     }
