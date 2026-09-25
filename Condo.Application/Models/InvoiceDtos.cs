@@ -231,3 +231,24 @@ public class VoidInvoiceRequest
 {
     public string Motivo { get; set; } = string.Empty;
 }
+
+// Embudo de facturacion: pagos aprobados sin factura, borradores sin emitir, y emitidas — para
+// detectar visualmente pagos que se quedaron sin facturar en vez de depender de que alguien lo note.
+public class InvoiceFunnelDto
+{
+    public int PaymentsWithoutInvoice { get; set; }
+    public int DraftsNotEmitted { get; set; }
+    public int Issued { get; set; }
+    public List<InvoiceFunnelPaymentItemDto> PaymentsWithoutInvoiceItems { get; set; } = new();
+}
+
+public class InvoiceFunnelPaymentItemDto
+{
+    public Guid PaymentId { get; set; }
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public string UnitCode { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public DateOnly PaymentDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+}

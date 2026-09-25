@@ -18,7 +18,8 @@ public class OwnerPaymentsController(
     ICondoDbContext dbContext,
     ITenantContext tenantContext,
     OwnerCreditService credits,
-    ComprobanteService comprobantes) : ControllerBase
+    ComprobanteService comprobantes,
+    InvoiceDraftService invoiceDrafts) : ControllerBase
 {
     // ─── GET MY DEBT (Owner only) ────────────────────────────────────────────
     [HttpGet("my-debt")]
@@ -447,6 +448,12 @@ public class OwnerPaymentsController(
         });
 
         await dbContext.SaveChangesAsync(ct);
+
+        // Genera de una vez los borradores de factura de este pago (uno por comprobante) — la emision
+        // (elegir timbrado y numerar) sigue siendo un paso manual aparte, porque ahi se consume un
+        // numero real sobre el papel preimpreso.
+        await invoiceDrafts.CreateDraftsFromOwnerPaymentAsync(payment, tenantContext.UserId, ct);
+
         return Ok(ToDto(payment));
     }
 

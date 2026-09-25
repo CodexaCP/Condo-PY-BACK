@@ -16,7 +16,8 @@ namespace Condo.Api.Controllers;
 [Authorize]
 [Route("api/invoices")]
 public class InvoicesController(
-    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env) : ControllerBase
+    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env,
+    Condo.Api.Services.InvoiceDraftService draftService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> GetAll(
@@ -69,6 +70,67 @@ public class InvoicesController(
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
+    }
+
+    // Embudo de facturacion: pagos sin ninguna factura (huecos que hoy nadie ve salvo buscando a
+    // mano), borradores sin emitir, y emitidas — para el edificio/alcance del usuario.
+    [HttpGet("funnel")]
+    public async Task<ActionResult<InvoiceFunnelDto>> GetFunnel([FromQuery] Guid? buildingId, CancellationToken cancellationToken)
+    {
+        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+
+        var invoiceQuery = dbContext.Invoices.AsNoTracking().Where(x => !x.IsDeleted);
+        var paymentQuery = dbContext.Payments.AsNoTracking().Where(x => !x.IsDeleted && !x.IsReversed);
+
+        if (!accessScope.IsSuperAdmin)
+        {
+            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
+            {
+                invoiceQuery = invoiceQuery.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+                paymentQuery = paymentQuery.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+            }
+            else
+            {
+                invoiceQuery = invoiceQuery.Where(x => accessibleBuildingIds.Contains(x.BuildingId));
+                paymentQuery = paymentQuery.Where(x => x.Unit != null && accessibleBuildingIds.Contains(x.Unit.BuildingId));
+            }
+        }
+
+        if (buildingId.HasValue)
+        {
+            invoiceQuery = invoiceQuery.Where(x => x.BuildingId == buildingId.Value);
+            paymentQuery = paymentQuery.Where(x => x.Unit != null && x.Unit.BuildingId == buildingId.Value);
+        }
+
+        var draftsNotEmitted = await invoiceQuery.CountAsync(x => x.Status == InvoiceStatus.Draft, cancellationToken);
+        var issued = await invoiceQuery.CountAsync(x => x.Status == InvoiceStatus.Issued, cancellationToken);
+
+        var paymentsWithoutInvoice = await paymentQuery
+            .Where(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id))
+            .OrderByDescending(p => p.PaymentDate)
+            .Take(50)
+            .Select(p => new InvoiceFunnelPaymentItemDto
+            {
+                PaymentId = p.Id,
+                BuildingId = p.Unit!.BuildingId,
+                BuildingName = p.Unit.Building != null ? p.Unit.Building.Name : string.Empty,
+                UnitCode = p.Unit.Code,
+                Amount = p.Amount,
+                PaymentDate = p.PaymentDate,
+                Reference = p.Reference
+            })
+            .ToListAsync(cancellationToken);
+
+        var paymentsWithoutInvoiceTotal = await paymentQuery
+            .CountAsync(p => !dbContext.Invoices.Any(inv => !inv.IsDeleted && inv.PaymentId == p.Id), cancellationToken);
+
+        return Ok(new InvoiceFunnelDto
+        {
+            PaymentsWithoutInvoice = paymentsWithoutInvoiceTotal,
+            DraftsNotEmitted = draftsNotEmitted,
+            Issued = issued,
+            PaymentsWithoutInvoiceItems = paymentsWithoutInvoice
+        });
     }
 
     // Consulta profesional de facturas: filtros, orden, paginacion y trazabilidad completa
@@ -360,82 +422,10 @@ public class InvoicesController(
         if (ownerPayment.Status != OwnerPaymentStatus.Approved)
             return BadRequest("Solo se pueden facturar pagos aprobados.");
 
-        var payments = await dbContext.Payments
-            .AsNoTracking()
-            .Include(x => x.Unit)
-            .Where(x => !x.IsDeleted && !x.IsReversed && x.CompanyId == ownerPayment.CompanyId
-                        && x.Reference == ownerPayment.Reference && x.Unit != null)
-            .OrderBy(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
-
-        if (payments.Count == 0)
-            return BadRequest("El pago aprobado no se aplicó a ningún cargo, no hay nada para facturar.");
-
-        var created = new List<Guid>();
-        var skipped = 0;
-
-        // Una factura por comprobante (unidad + periodo). Los pagos aprobados con la regla anterior tenían un
-        // registro por línea; agrupar por comprobante evita generar una factura por cada línea.
-        foreach (var unitGroup in payments.GroupBy(x => (x.UnitId, x.ExpensePeriodId)))
-        {
-            var unit = unitGroup.First().Unit!;
-            if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) continue;
-
-            var paymentIds = unitGroup.Select(x => x.Id).ToList();
-            var alreadyInvoiced = await dbContext.Invoices.AnyAsync(x =>
-                !x.IsDeleted && x.Status != InvoiceStatus.Voided && paymentIds.Contains(x.PaymentId), cancellationToken);
-            if (alreadyInvoiced)
-            {
-                skipped++;
-                continue;
-            }
-
-            var allocations = await dbContext.PaymentAllocations
-                .AsNoTracking()
-                .Where(a => !a.IsDeleted && paymentIds.Contains(a.PaymentId))
-                .OrderBy(a => a.Charge!.ExpensePeriod!.Year).ThenBy(a => a.Charge!.ExpensePeriod!.Month).ThenBy(a => a.Charge!.Concept)
-                .Select(a => new InvoiceLineDto
-                {
-                    Concepto = a.Charge != null ? a.Charge.Concept : "Cargo",
-                    ChargeType = a.Charge != null ? a.Charge.ChargeType : (ExpenseChargeType?)null,
-                    Monto = a.AllocatedAmount
-                })
-                .ToListAsync(cancellationToken);
-
-            var total = unitGroup.Sum(x => x.Amount);
-            var remainder = total - allocations.Sum(a => a.Monto);
-            if (remainder > 0.01m)
-                allocations.Add(new InvoiceLineDto { Concepto = "Saldo a cuenta / crédito", Monto = remainder });
-
-            var entity = new Invoice
-            {
-                CompanyId = ownerPayment.CompanyId,
-                BuildingId = unit.BuildingId,
-                UnitId = unit.Id,
-                PaymentId = unitGroup.First().Id,
-                OwnerPaymentId = ownerPayment.Id,
-                Status = InvoiceStatus.Draft,
-                MontoTotal = total,
-                DetalleSnapshotJson = JsonSerializer.Serialize(allocations),
-                CreatedByUserId = tenantContext.UserId
-            };
-
-            dbContext.Invoices.Add(entity);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            await LogAsync(entity.Id, entity.CompanyId, InvoiceAuditAction.DraftCreated, before: null,
-                after: new { entity.Id, entity.OwnerPaymentId, entity.UnitId, entity.MontoTotal, entity.Status },
-                detalle: $"Borrador creado a partir del pago aprobado {ownerPayment.Reference} (comprobante de la unidad {unit.Code}).", cancellationToken);
-
-            created.Add(entity.Id);
-        }
+        var created = await draftService.CreateDraftsFromOwnerPaymentAsync(ownerPayment, tenantContext.UserId, cancellationToken);
 
         if (created.Count == 0)
-        {
-            return skipped > 0
-                ? Conflict("Este pago ya tiene sus facturas generadas (borrador o emitidas).")
-                : Forbid();
-        }
+            return Conflict("Este pago no tiene comprobantes pendientes de facturar (ya se generaron antes, o no se aplicó a ningún cargo).");
 
         var result = new List<InvoiceDto>();
         foreach (var id in created)
