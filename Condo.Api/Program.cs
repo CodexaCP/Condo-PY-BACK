@@ -24,6 +24,7 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCondoInfrastructure(builder.Configuration);
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IUnitOverdueService, UnitOverdueService>();
 builder.Services.AddScoped<ILibroMovimientosService, LibroMovimientosService>();
@@ -53,6 +54,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
         options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
         {
+            // Revalida contra la base (cache 1 min) que la cuenta siga activa y con los mismos permisos del token.
+            OnTokenValidated = SessionRevalidation.OnTokenValidatedAsync,
             OnMessageReceived = context =>
             {
                 if (context.Request.Query.TryGetValue("access_token", out var token) && !string.IsNullOrEmpty(token))
