@@ -32,46 +32,56 @@ public class AuthController(
         var normalizedIdentifier = identifier.ToLowerInvariant();
         bool isEmail = identifier.Contains('@');
 
-        var baseQuery = dbContext.ApplicationUsers
-            .Include(x => x.Company)
-            .Include(x => x.Condominium);
+        var password = request.Password ?? string.Empty;
 
-        Domain.Entities.ApplicationUser? user;
-        if (isEmail)
-        {
-            // El email es único solo dentro de cada empresa (no globalmente) — si dos empresas
-            // distintas dieron de alta el mismo correo, no se puede autenticar silenciosamente
-            // contra el primero que devuelva la consulta, porque eso mezclaría cuentas de
-            // empresas distintas. Se aplica la misma detección de ambigüedad que ya existe
-            // para el nombre de usuario.
-            var emailMatches = await baseQuery
-                .Where(x => !x.IsDeleted && x.IsActive && x.Email == normalizedIdentifier)
-                .ToListAsync(cancellationToken);
-
-            if (emailMatches.Count > 1)
-                return Unauthorized(new { error = "duplicate_email", message = "Hay más de un usuario con ese correo. Por favor ingresá con tu nombre de usuario, o contactá a tu administrador." });
-
-            user = emailMatches.SingleOrDefault();
-        }
-        else
-        {
-            var matches = await baseQuery
-                .Where(x => !x.IsDeleted && x.IsActive && x.Username == normalizedIdentifier)
-                .ToListAsync(cancellationToken);
-
-            if (matches.Count > 1)
-                return Unauthorized(new { error = "duplicate_username", message = "Hay más de un usuario con ese nombre de usuario. Por favor ingresá con tu correo electrónico." });
-
-            user = matches.SingleOrDefault();
-        }
-
-        if (user is null || !VerifyPassword(request.Password, user.PasswordHash))
+        if (string.IsNullOrEmpty(password))
             return Unauthorized();
+
+        // Usuario y correo son únicos solo dentro de cada empresa, así que puede haber varias cuentas candidatas.
+        // Solo cuentan las activas y con la empresa activa (el SuperAdmin no tiene empresa). Un usuario que quedó
+        // sin empresa (empresa eliminada) tampoco entra.
+        var candidates = await dbContext.ApplicationUsers
+            .Include(x => x.Company)
+            .Include(x => x.Condominium)
+            .Where(x => !x.IsDeleted && x.IsActive
+                        && (isEmail ? x.Email == normalizedIdentifier : x.Username == normalizedIdentifier)
+                        && (x.Role == Condo.Domain.Enums.UserRole.SuperAdmin
+                            || (x.Company != null && x.Company.IsActive && !x.Company.IsDeleted)))
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+        {
+            // Mismo costo que un intento real: el tiempo de respuesta no delata si el usuario existe.
+            VerifyPassword(password, GetDummyHash());
+            return Unauthorized();
+        }
+
+        // Se decide por la contraseña, no por el nombre: antes, con dos cuentas homónimas de empresas distintas
+        // el login se rechazaba para AMBAS (otra empresa podía bloquear a un usuario creando un duplicado, y el
+        // mensaje delataba que el correo existía en otra empresa). Ahora entra la única cuenta cuya contraseña
+        // coincide; si coinciden varias, recién ahí se pide otro dato (quien lo ve ya conoce esa contraseña).
+        var matching = candidates.Where(c => VerifyPassword(password, c.PasswordHash)).ToList();
+
+        if (matching.Count == 0)
+            return Unauthorized();
+
+        if (matching.Count > 1)
+        {
+            return Unauthorized(new
+            {
+                error = "duplicate_username",
+                message = isEmail
+                    ? "Tu correo y contraseña coinciden con más de una cuenta. Ingresá con tu nombre de usuario, o pedile a tu administrador que cambie tu contraseña."
+                    : "Tu usuario y contraseña coinciden con más de una cuenta. Ingresá con tu correo electrónico, o pedile a tu administrador que cambie tu contraseña."
+            });
+        }
+
+        var user = matching[0];
 
         // Auto-rehash plain-text passwords on first login after migration
         if (!user.PasswordHash.StartsWith("$2"))
         {
-            user.PasswordHash = passwordHasher.Hash(request.Password);
+            user.PasswordHash = passwordHasher.Hash(password);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
@@ -229,10 +239,24 @@ public class AuthController(
     private static string HashToken(string rawToken) =>
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken)));
 
-    private bool VerifyPassword(string password, string storedHash) =>
-        storedHash.StartsWith("$2")
-            ? passwordHasher.Verify(password, storedHash)
-            : password == storedHash;
+    private bool VerifyPassword(string password, string storedHash)
+    {
+        // Una contraseña vacía nunca es válida (evita que un hash vacío deje entrar sin contraseña).
+        if (string.IsNullOrEmpty(password) || string.IsNullOrEmpty(storedHash))
+            return false;
+
+        if (storedHash.StartsWith("$2"))
+            return passwordHasher.Verify(password, storedHash);
+
+        // Contraseña heredada en texto plano: comparación de tiempo constante.
+        var provided = System.Text.Encoding.UTF8.GetBytes(password);
+        var stored = System.Text.Encoding.UTF8.GetBytes(storedHash);
+        return provided.Length == stored.Length && CryptographicOperations.FixedTimeEquals(provided, stored);
+    }
+
+    // Hash bcrypt "de relleno" para igualar el tiempo de respuesta cuando el usuario no existe.
+    private static string? dummyHash;
+    private string GetDummyHash() => dummyHash ??= passwordHasher.Hash("relleno-para-igualar-tiempos");
 
     private static bool IsValidPassword(string password) =>
         !string.IsNullOrWhiteSpace(password) &&
