@@ -62,9 +62,7 @@ public sealed class SettlementPdfDocument(
         ["totGastosLabel"] = new(50, 598, 8, 200),
         ["totGastosReserva"] = new(405, 598, 8, 70, 'R'),
         ["totGastosComunes"] = new(475, 598, 8, 70, 'R'),
-        ["subTotalLabel"] = new(300, 611, 8, 170),
         ["subTotalValor"] = new(475, 611, 8, 70, 'R'),
-        ["totalLabel"] = new(300, 624, 8, 170),
         ["totalValor"] = new(475, 624, 8, 70, 'R'),
 
         // Fechas: el papel ya trae "Fecha de emision"; vigencia y vencimiento con su etiqueta aparte.
@@ -76,21 +74,13 @@ public sealed class SettlementPdfDocument(
         ["vencimiento"] = new(120, 757, 8),
 
         // Firmas: por cada una, la imagen, el nombre y el cargo por separado.
-        // Autorizado = presidente del consorcio; Verificacion = encargado de edificio (building manager);
-        // Admin = administrador de la empresa (company admin).
+        // Autorizado = presidente del consorcio (imagen, nombre y cargo); Verificacion = encargado de edificio
+        // (building manager), solo la imagen.
         ["firmaAutorizado"] = new(250, 655, 8, 110),
         ["firmaAutorizadoNombre"] = new(215, 700, 8, 175, 'C'),
         ["firmaAutorizadoCargo"] = new(215, 711, 8, 175, 'C'),
         ["firmaVerificacion"] = new(420, 655, 8, 110),
-        ["firmaVerificacionNombre"] = new(400, 700, 8, 145, 'C'),
-        ["firmaVerificacionCargo"] = new(400, 711, 8, 145, 'C'),
-        ["firmaAdmin"] = new(250, 730, 8, 110),
-        ["firmaAdminNombre"] = new(215, 775, 8, 175, 'C'),
-        ["firmaAdminCargo"] = new(215, 786, 8, 175, 'C'),
 
-        // Pie
-        ["pieGenerado"] = new(50, 815, 7, 300),
-        ["piePagina"] = new(500, 815, 7, 45, 'R')
     };
 
     // "filas" no es un bloque: guarda el alto de fila comun de las cuatro columnas.
@@ -199,12 +189,10 @@ public sealed class SettlementPdfDocument(
     private static readonly string[] BottomKeys =
     [
         "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosReserva", "totGastosComunes",
-        "subTotalLabel", "subTotalValor", "totalLabel", "totalValor",
+        "subTotalValor", "totalValor",
         "fechaEmision", "vigenciaLabel", "vigenciaDesde", "vigenciaHasta", "vencimientoLabel", "vencimiento",
         "firmaAutorizado", "firmaAutorizadoNombre", "firmaAutorizadoCargo",
-        "firmaVerificacion", "firmaVerificacionNombre", "firmaVerificacionCargo",
-        "firmaAdmin", "firmaAdminNombre", "firmaAdminCargo",
-        "pieGenerado", "piePagina"
+        "firmaVerificacion"
     ];
 
     private IReadOnlyList<BodyRow> BuildBodyRows()
@@ -356,9 +344,7 @@ public sealed class SettlementPdfDocument(
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
             PaperText(fg, "totGastosReserva", reserveTotal > 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
             PaperText(fg, "totGastosComunes", FormatNumber(commonTotal), bold: true);
-            PaperText(fg, "subTotalLabel", "SUB TOTAL GENERAL GS.", bold: true);
             PaperText(fg, "subTotalValor", FormatNumber(reserveTotal + commonTotal), bold: true);
-            PaperText(fg, "totalLabel", "TOTAL GENERAL GS. (MONTO NETO A DISTRIBUIR)", bold: true);
             PaperText(fg, "totalValor", FormatNumber(summary.NetCommonAmount), bold: true);
         }
 
@@ -371,30 +357,10 @@ public sealed class SettlementPdfDocument(
         PaperText(fg, "vencimientoLabel", "VENCIMIENTO");
         PaperText(fg, "vencimiento", periodDueDate);
 
-        // Firmas: en cada una la imagen, el nombre y el cargo van por separado. Autorizado = presidente,
-        // Verificacion = encargado de edificio, y la administracion de la empresa aparte. Si todavia no firmo
-        // nadie en ese lugar, queda vacio.
-        PaperSignature(fg, "firmaAutorizado", president);
-        PaperSignature(fg, "firmaVerificacion", approver);
-        PaperSignature(fg, "firmaAdmin", publisher);
-
-        // Pie
-        var generated = summary.GeneratedAtUtc.HasValue
-            ? $"Generado el {summary.GeneratedAtUtc.Value.ToLocalTime():dd/MM/yyyy HH:mm}"
-            : "Generado por CONDOPY";
-        PaperText(fg, "pieGenerado", generated);
-        if (!IsHidden("piePagina"))
-        {
-            var pagina = Place("piePagina");
-            fg.Layer().TranslateX(pagina.X).TranslateY(pagina.Top).Width(Math.Max(10f, pagina.Width))
-                .Text(t =>
-                {
-                    t.AlignRight();
-                    t.CurrentPageNumber().FontSize(pagina.Size);
-                    t.Span(" / ").FontSize(pagina.Size);
-                    t.TotalPages().FontSize(pagina.Size);
-                });
-        }
+        // Firmas: Autorizado = presidente (imagen, nombre y cargo por separado) y Verificacion = encargado de
+        // edificio (solo la imagen). Si todavia no firmo nadie en ese lugar, queda vacio.
+        PaperSignature(fg, "firmaAutorizado", president, withNameAndTitle: true);
+        PaperSignature(fg, "firmaVerificacion", approver, withNameAndTitle: false);
     }
 
     // Un dato suelto en su posicion. Los que tienen ancho se alinean segun su Align (montos a la derecha,
@@ -417,7 +383,7 @@ public sealed class SettlementPdfDocument(
     }
 
     // Firma de un cajetin: imagen, nombre y cargo son tres bloques independientes.
-    private void PaperSignature(LayersDescriptor fg, string key, SettlementSignature? signature)
+    private void PaperSignature(LayersDescriptor fg, string key, SettlementSignature? signature, bool withNameAndTitle)
     {
         if (signature is null) return;
 
@@ -429,6 +395,7 @@ public sealed class SettlementPdfDocument(
                 .Element(img => img.Image(signature.Image).FitArea());
         }
 
+        if (!withNameAndTitle) return;
         PaperText(fg, key + "Nombre", signature.Name, bold: true);
         PaperText(fg, key + "Cargo", signature.Title);
     }
