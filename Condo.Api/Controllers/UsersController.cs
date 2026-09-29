@@ -291,7 +291,9 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         {
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            if (!isExistingSuperAdmin && request.BuildingIds.Count > 0)
+            // Se sincroniza siempre, tambien con lista vacia: antes, si se quitaban TODOS los edificios (o se pasaba
+            // a un rol sin acceso a edificios), los accesos viejos quedaban activos.
+            if (!isExistingSuperAdmin)
             {
                 var syncError = await SyncBuildingAccessesAsync(user, request.BuildingIds, cancellationToken);
                 if (syncError is not null) return syncError;
@@ -386,6 +388,13 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
             if (parsedRole != UserRole.BuildingManager && parsedRole != UserRole.CompanyAdmin)
                 return BadRequest("Solo los encargados de edificio y administradores de empresa pueden tener una firma.");
         }
+
+        request.BuildingIds ??= Array.Empty<Guid>();
+
+        // Propietarios, residentes y porteria no operan edificios: asignarles acceso a un edificio los dejaria
+        // pasar los controles de "personal del edificio" de la mayoria de los endpoints.
+        if ((parsedRole is UserRole.Owner or UserRole.Resident or UserRole.Porter) && request.BuildingIds.Count > 0)
+            return BadRequest("Los propietarios, residentes y porteros no pueden tener edificios de gestión asignados.");
 
         // SuperAdmin users don't have company/building scope
         if (companyId.HasValue)
