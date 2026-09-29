@@ -688,9 +688,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             new DateOnly(today.Year, today.Month, 1).ToString("dd/MM/yyyy"),
             new DateOnly(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)).ToString("dd/MM/yyyy"),
             today.AddDays(15).ToString("dd/MM/yyyy"),
-            new SettlementSignature("Nombre Apellido", "Administrador de la empresa", null),
+            // Verificacion = encargado de edificio, Autorizado = presidente, tercera = administracion de la empresa.
+            new SettlementSignature("Nombre Apellido", "Encargado de edificio", null),
             new SettlementSignature("Nombre Apellido", "Presidente del consorcio", null),
-            null,
+            new SettlementSignature("Nombre Apellido", "Administrador de la empresa", null),
             standardTemplate: false,
             backgroundImage: template,
             fieldPositionsJson: building.SettlementFieldPositionsJson,

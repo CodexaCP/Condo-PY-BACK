@@ -45,8 +45,13 @@ public sealed class SettlementPdfDocument(
         ["colDescripcion"] = new(185, 145, 8, 220),
         ["colReserva"] = new(405, 145, 8, 70),
         ["colMonto"] = new(475, 145, 8, 70),
-        ["control"] = new(60, 668, 8, 260),
-        ["firmas"] = new(50, 725, 9, 495),
+        // El papel ya trae las etiquetas ("Fecha de emision", "Autorizado por"...): solo se imprime el valor.
+        ["fechaEmision"] = new(165, 705, 8),
+        ["vigencia"] = new(52, 745, 8),
+        ["vencimiento"] = new(52, 757, 8),
+        ["firmaAutorizado"] = new(215, 660, 8, 175),   // presidente del consorcio
+        ["firmaVerificacion"] = new(400, 660, 8, 145), // encargado de edificio (building manager)
+        ["firmaAdmin"] = new(215, 735, 8, 175),        // administrador de la empresa (company admin)
         ["pie"] = new(50, 815, 7, 495)
     };
 
@@ -190,11 +195,10 @@ public sealed class SettlementPdfDocument(
         var rows = BuildBodyRows();
         var rowHeight = RowHeight;
 
-        // Hasta donde llegan las filas: donde empieza lo primero que hay abajo (control, firmas o pie).
+        // Hasta donde llegan las filas: donde empieza lo primero que hay abajo (fecha, firmas o pie).
         var lowest = PageHeight - 20f;
-        if (!IsHidden("control")) lowest = Math.Min(lowest, Place("control").Top);
-        if (hasSignatures && !IsHidden("firmas")) lowest = Math.Min(lowest, Place("firmas").Top);
-        if (!IsHidden("pie")) lowest = Math.Min(lowest, Place("pie").Top);
+        foreach (var key in new[] { "fechaEmision", "vigencia", "vencimiento", "firmaAutorizado", "firmaVerificacion", "firmaAdmin", "pie" })
+            if (!IsHidden(key)) lowest = Math.Min(lowest, Place(key).Top);
 
         var firstTop = Place("colConcepto").Top;
         var capacity = Math.Max(1, (int)Math.Floor((lowest - 6f - firstTop) / rowHeight));
@@ -287,23 +291,17 @@ public sealed class SettlementPdfDocument(
                 .Text($"MES: {summary.ExpensePeriodName.ToUpperInvariant()}").FontSize(periodo.Size).Bold();
         }
 
-        if (!IsHidden("control"))
-        {
-            var control = Place("control");
-            fg.Layer().TranslateX(control.X).TranslateY(control.Top)
-                .Width(BlockWidthAt(control.X, control.Width))
-                .DefaultTextStyle(x => x.FontSize(control.Size))
-                .Element(ComposePaperControl);
-        }
+        // Fecha de emision: solo el valor (el papel ya trae la etiqueta). Vigencia y vencimiento van aparte.
+        var emitted = (summary.GeneratedAtUtc ?? DateTime.UtcNow).ToLocalTime();
+        PaperText(fg, "fechaEmision", emitted.ToString("dd/MM/yyyy"));
+        PaperText(fg, "vigencia", $"Vigencia: {periodStartDate} al {periodEndDate}");
+        PaperText(fg, "vencimiento", $"Vencimiento: {periodDueDate}");
 
-        if (hasSignatures && !IsHidden("firmas"))
-        {
-            var firmas = Place("firmas");
-            fg.Layer().TranslateX(firmas.X).TranslateY(firmas.Top)
-                .Width(BlockWidthAt(firmas.X, firmas.Width))
-                .DefaultTextStyle(x => x.FontSize(firmas.Size))
-                .Element(ComposeSignatures);
-        }
+        // Cada firma en su cajetin: Autorizado = presidente, Verificacion = encargado de edificio y la
+        // administracion de la empresa aparte. Si todavia no firmo nadie en ese lugar, queda vacio.
+        PaperSignature(fg, "firmaAutorizado", president);
+        PaperSignature(fg, "firmaVerificacion", approver);
+        PaperSignature(fg, "firmaAdmin", publisher);
 
         if (!IsHidden("pie"))
         {
@@ -327,14 +325,36 @@ public sealed class SettlementPdfDocument(
                 IsReserveFund = c.Category == "ReserveFund"
             })).ToList();
 
-    private void ComposePaperControl(IContainer container)
+    private void PaperText(LayersDescriptor fg, string key, string text)
     {
-        var emitted = (summary.GeneratedAtUtc ?? DateTime.UtcNow).ToLocalTime();
-        container.Column(col =>
+        if (IsHidden(key)) return;
+        var place = Place(key);
+        fg.Layer().TranslateX(place.X).TranslateY(place.Top).Text(text).FontSize(place.Size);
+    }
+
+    private void PaperSignature(LayersDescriptor fg, string key, SettlementSignature? signature)
+    {
+        if (signature is null || IsHidden(key)) return;
+        var place = Place(key);
+        fg.Layer().TranslateX(place.X).TranslateY(place.Top)
+            .Width(BlockWidthAt(place.X, place.Width))
+            .DefaultTextStyle(x => x.FontSize(place.Size))
+            .Element(c => ComposePaperSignature(c, signature));
+    }
+
+    // Firma sobre el cajetin del papel: imagen, nombre y cargo centrados; la linea solo si el sistema dibuja marco.
+    private void ComposePaperSignature(IContainer container, SettlementSignature signature)
+    {
+        container.AlignCenter().Column(col =>
         {
-            col.Item().Text($"Fecha de emisión: {emitted:dd/MM/yyyy}");
-            col.Item().Text($"Vigencia: {periodStartDate} al {periodEndDate}");
-            col.Item().Text($"Vencimiento: {periodDueDate}");
+            col.Item().Height(36).AlignCenter().AlignBottom().Element(img =>
+            {
+                if (signature.Image is { Length: > 0 }) img.Image(signature.Image).FitArea();
+            });
+            if (!hideFrame)
+                col.Item().PaddingTop(2).LineHorizontal(0.75f).LineColor(p.Gray);
+            col.Item().PaddingTop(2).AlignCenter().Text(signature.Name).Bold();
+            col.Item().AlignCenter().Text(signature.Title);
         });
     }
 
@@ -527,6 +547,12 @@ public sealed class SettlementPdfDocument(
         });
     }
 
+    // En el diseno estandar no se repite a la misma persona si aprobo y publico.
+    private SettlementSignature? StandardPublisher =>
+        publisher is not null && approver is not null && publisher.Name == approver.Name && publisher.Title == approver.Title
+            ? null
+            : publisher;
+
     private void ComposeSignatures(IContainer container)
     {
         container.Row(row =>
@@ -535,7 +561,7 @@ public sealed class SettlementPdfDocument(
             row.ConstantItem(24);
             row.RelativeItem().Element(c => ComposeSignatureBlock(c, president));
             row.ConstantItem(24);
-            row.RelativeItem().Element(c => ComposeSignatureBlock(c, publisher));
+            row.RelativeItem().Element(c => ComposeSignatureBlock(c, StandardPublisher));
         });
     }
 

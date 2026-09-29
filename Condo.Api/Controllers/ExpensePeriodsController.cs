@@ -1302,24 +1302,14 @@ public class ExpensePeriodsController(
 
         var approver = Build(settlement.ApprovedByUserId);
         var president = Build(settlement.PresidentApprovedByUserId, "Presidente del consorcio");
-        var publisher = settlement.PublishedByUserId == settlement.ApprovedByUserId ? null : Build(settlement.PublishedByUserId);
+        var publisher = Build(settlement.PublishedByUserId);
         return (approver, president, publisher);
     }
 
     private byte[]? ReadSignatureImage(string? signatureUrl)
     {
-        if (string.IsNullOrWhiteSpace(signatureUrl) || !Uri.TryCreate(signatureUrl, UriKind.Absolute, out var uri))
-            return null;
-
-        var fileName = Path.GetFileName(uri.AbsolutePath);
-        if (string.IsNullOrEmpty(fileName) || !uri.AbsolutePath.Contains("/uploads/", StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        if (extension is not (".png" or ".jpg" or ".jpeg")) return null;
-
-        var path = Path.Combine(env.WebRootPath, "uploads", fileName);
-        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
+        // Las firmas se suben a /uploads (URL relativa o absoluta): se lee de la carpeta local, png/jpg/webp.
+        return TemplateImageReader.Read(env.WebRootPath, signatureUrl);
     }
 
     [HttpGet("{id:guid}/settlement-pdf")]
