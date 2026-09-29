@@ -27,8 +27,8 @@ public class BuildingUpsertRequest
     public string? InvoiceTemplateFileName { get; set; }
     public string? CreditNoteTemplateUrl { get; set; }
     public string? CreditNoteTemplateFileName { get; set; }
-    public string? ReceiptTemplateUrl { get; set; }
-    public string? ReceiptTemplateFileName { get; set; }
+    public string? SettlementTemplateUrl { get; set; }
+    public string? SettlementTemplateFileName { get; set; }
 }
 
 public class BuildingDto
@@ -54,6 +54,6 @@ public class BuildingDto
     public string? InvoiceTemplateFileName { get; set; }
     public string? CreditNoteTemplateUrl { get; set; }
     public string? CreditNoteTemplateFileName { get; set; }
-    public string? ReceiptTemplateUrl { get; set; }
-    public string? ReceiptTemplateFileName { get; set; }
+    public string? SettlementTemplateUrl { get; set; }
+    public string? SettlementTemplateFileName { get; set; }
 }

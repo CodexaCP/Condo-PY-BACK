@@ -71,8 +71,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 InvoiceTemplateFileName = x.InvoiceTemplateFileName,
                 CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
                 CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
-                ReceiptTemplateUrl = x.ReceiptTemplateUrl,
-                ReceiptTemplateFileName = x.ReceiptTemplateFileName
+                SettlementTemplateUrl = x.SettlementTemplateUrl,
+                SettlementTemplateFileName = x.SettlementTemplateFileName
             })
             .ToListAsync(cancellationToken);
 
@@ -113,8 +113,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 InvoiceTemplateFileName = x.InvoiceTemplateFileName,
                 CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
                 CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
-                ReceiptTemplateUrl = x.ReceiptTemplateUrl,
-                ReceiptTemplateFileName = x.ReceiptTemplateFileName
+                SettlementTemplateUrl = x.SettlementTemplateUrl,
+                SettlementTemplateFileName = x.SettlementTemplateFileName
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -551,9 +551,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         if (request.UseStandardTemplates == false &&
             (string.IsNullOrWhiteSpace(request.InvoiceTemplateUrl) ||
              string.IsNullOrWhiteSpace(request.CreditNoteTemplateUrl) ||
-             string.IsNullOrWhiteSpace(request.ReceiptTemplateUrl)))
+             string.IsNullOrWhiteSpace(request.SettlementTemplateUrl)))
         {
-            return "Adjuntá los 3 modelos (factura, nota de crédito y comprobante) o marcá \"Usar modelos estándar de CONDOPY\".";
+            return "Adjuntá los 3 modelos (factura, nota de crédito y liquidación) o marcá \"Usar modelos estándar de CONDOPY\".";
         }
 
         return null;
@@ -568,8 +568,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.InvoiceTemplateFileName = standard ? null : TrimOrNull(request.InvoiceTemplateFileName);
         entity.CreditNoteTemplateUrl = standard ? null : TrimOrNull(request.CreditNoteTemplateUrl);
         entity.CreditNoteTemplateFileName = standard ? null : TrimOrNull(request.CreditNoteTemplateFileName);
-        entity.ReceiptTemplateUrl = standard ? null : TrimOrNull(request.ReceiptTemplateUrl);
-        entity.ReceiptTemplateFileName = standard ? null : TrimOrNull(request.ReceiptTemplateFileName);
+        entity.SettlementTemplateUrl = standard ? null : TrimOrNull(request.SettlementTemplateUrl);
+        entity.SettlementTemplateFileName = standard ? null : TrimOrNull(request.SettlementTemplateFileName);
     }
 
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -617,7 +617,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             InvoiceTemplateFileName = entity.InvoiceTemplateFileName,
             CreditNoteTemplateUrl = entity.CreditNoteTemplateUrl,
             CreditNoteTemplateFileName = entity.CreditNoteTemplateFileName,
-            ReceiptTemplateUrl = entity.ReceiptTemplateUrl,
-            ReceiptTemplateFileName = entity.ReceiptTemplateFileName
+            SettlementTemplateUrl = entity.SettlementTemplateUrl,
+            SettlementTemplateFileName = entity.SettlementTemplateFileName
         };
 }

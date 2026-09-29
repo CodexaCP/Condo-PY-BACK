@@ -145,8 +145,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateUrl).HasMaxLength(500);
         modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateFileName).HasMaxLength(200);
-        modelBuilder.Entity<Building>().Property(x => x.ReceiptTemplateUrl).HasMaxLength(500);
-        modelBuilder.Entity<Building>().Property(x => x.ReceiptTemplateFileName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.SettlementTemplateUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.SettlementTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Buildings)

@@ -28,7 +28,7 @@ public class Building : BaseEntity
     // Modo de facturacion del edificio. Solo lo configura el superadmin (creacion/edicion del edificio).
     public InvoicingMode InvoicingMode { get; set; } = InvoicingMode.Preimpresa;
 
-    // Modelos de documentos (factura, nota de credito y comprobante). Con UseStandardTemplates los PDF
+    // Modelos de documentos (factura, nota de credito y liquidacion). Con UseStandardTemplates los PDF
     // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
     // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.
     public bool UseStandardTemplates { get; set; } = true;
@@ -36,8 +36,8 @@ public class Building : BaseEntity
     public string? InvoiceTemplateFileName { get; set; }
     public string? CreditNoteTemplateUrl { get; set; }
     public string? CreditNoteTemplateFileName { get; set; }
-    public string? ReceiptTemplateUrl { get; set; }
-    public string? ReceiptTemplateFileName { get; set; }
+    public string? SettlementTemplateUrl { get; set; }
+    public string? SettlementTemplateFileName { get; set; }
 
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
