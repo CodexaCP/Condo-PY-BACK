@@ -227,12 +227,31 @@ public sealed class SettlementPdfDocument(
         var rows = BuildBodyRows();
         var rowHeight = RowHeight;
 
+        // Las filas terminan antes del primer bloque que este DEBAJO de ellas y sobre su misma franja horizontal.
+        // Un bloque arrastrado por encima del inicio de las filas, o a un costado (el papel trae ahi su propia
+        // caja), no las limita: si no, quedaria casi sin espacio y saldria una fila por hoja.
+        var firstTop = Place("colConcepto").Top;
+        var bodyLeft = float.MaxValue;
+        var bodyRight = 0f;
+        foreach (var key in new[] { "colConcepto", "colDescripcion", "colReserva", "colMonto" })
+        {
+            if (IsHidden(key)) continue;
+            var col = Place(key);
+            bodyLeft = Math.Min(bodyLeft, col.X);
+            bodyRight = Math.Max(bodyRight, col.X + col.Width);
+        }
+
         var lowest = PageHeight - 20f;
         foreach (var key in BottomKeys)
-            if (!IsHidden(key)) lowest = Math.Min(lowest, Place(key).Top);
+        {
+            if (IsHidden(key)) continue;
+            var block = Place(key);
+            var blockRight = block.X + (block.Width > 0 ? block.Width : 60f);
+            var overlapsBody = block.X < bodyRight && blockRight > bodyLeft;
+            if (block.Top > firstTop + rowHeight && overlapsBody) lowest = Math.Min(lowest, block.Top);
+        }
 
-        var firstTop = Place("colConcepto").Top;
-        var capacity = Math.Max(1, (int)Math.Floor((lowest - 6f - firstTop) / rowHeight));
+        var capacity = Math.Max(3, (int)Math.Floor((lowest - 6f - firstTop) / rowHeight));
 
         var chunks = rows.Count == 0 ? new List<BodyRow[]> { Array.Empty<BodyRow>() } : rows.Chunk(capacity).ToList();
         for (var pageIndex = 0; pageIndex < chunks.Count; pageIndex++)
@@ -268,6 +287,16 @@ public sealed class SettlementPdfDocument(
         var descripcion = Place("colDescripcion");
         var reserva = Place("colReserva");
         var monto = Place("colMonto");
+
+        // Papel liso (sin marco impreso): una linea fina al pie de cada fila, del primer al ultimo renglon.
+        if (!hideFrame)
+        {
+            var left = Math.Min(concepto.X, Math.Min(descripcion.X, Math.Min(reserva.X, monto.X)));
+            var right = Math.Max(concepto.X + concepto.Width, Math.Max(descripcion.X + descripcion.Width, Math.Max(reserva.X + reserva.Width, monto.X + monto.Width)));
+            for (var i = 0; i < pageRows.Length; i++)
+                layers.Layer().TranslateX(left).TranslateY(concepto.Top + (i + 1) * rowHeight - 1f)
+                    .Width(Math.Max(10f, right - left)).Height(0.5f).Background("#000000");
+        }
 
         for (var i = 0; i < pageRows.Length; i++)
         {
