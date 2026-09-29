@@ -1731,8 +1731,13 @@ public class ExpensePeriodsController(
             .Where(x => x.Category == BuildingIncomeCategory.AccumulatedBalance)
             .Sum(x => x.Amount);
 
+        summary.OperationalFund = incomes
+            .Where(x => x.Category == BuildingIncomeCategory.OperationalFund)
+            .Sum(x => x.Amount);
+
         summary.IncomeLines = incomes
-            .Where(x => x.Category != BuildingIncomeCategory.AccumulatedBalance)
+            .Where(x => x.Category != BuildingIncomeCategory.AccumulatedBalance
+                     && x.Category != BuildingIncomeCategory.OperationalFund)
             .OrderBy(x => x.Category)
             .ThenBy(x => x.IncomeDate)
             .Select(x => new SettlementIncomeLineDto

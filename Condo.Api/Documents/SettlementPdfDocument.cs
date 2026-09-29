@@ -50,6 +50,10 @@ public sealed class SettlementPdfDocument(
         ["saldoLabel"] = new(50, 130, 8, 200),
         ["saldoValor"] = new(475, 130, 8, 70, 'R'),
 
+        // Fondo operativo: igual que el saldo acumulado, titulo y valor aparte (solo en la primera hoja).
+        ["fondoOperativoLabel"] = new(50, 118, 8, 200),
+        ["fondoOperativoValor"] = new(475, 118, 8, 70, 'R'),
+
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
         ["colConcepto"] = new(50, 145, 8, 135),
         ["colDescripcion"] = new(185, 145, 8, 220),
@@ -325,11 +329,13 @@ public sealed class SettlementPdfDocument(
         PaperText(fg, "mes", MonthText(), bold: true);
         PaperText(fg, "anio", summary.PeriodYear > 0 ? summary.PeriodYear.ToString() : string.Empty, bold: true);
 
-        // Saldo acumulado: aparte de los conceptos, solo en la primera hoja.
+        // Saldo acumulado y fondo operativo: aparte de los conceptos, solo en la primera hoja.
         if (isFirstPage)
         {
             PaperText(fg, "saldoLabel", "SALDO ACUMULADO", bold: true);
             PaperText(fg, "saldoValor", FormatNumber(summary.AccumulatedBalance), bold: true);
+            PaperText(fg, "fondoOperativoLabel", "FONDO OPERATIVO", bold: true);
+            PaperText(fg, "fondoOperativoValor", FormatNumber(summary.OperationalFund), bold: true);
         }
 
         // Totales: solo en la ultima hoja, cada titulo y cada valor por separado.

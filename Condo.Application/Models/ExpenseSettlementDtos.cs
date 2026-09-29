@@ -44,6 +44,8 @@ public class ExpenseSettlementSummaryDto
     public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
     // Suma de los ingresos de categoria "Saldo acumulado" (va aparte de los demas ingresos en la planilla).
     public decimal AccumulatedBalance { get; set; }
+    // Suma de los ingresos de categoria "Fondo operativo" (tambien va aparte, con titulo y valor propios).
+    public decimal OperationalFund { get; set; }
     public int PeriodYear { get; set; }
     public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();

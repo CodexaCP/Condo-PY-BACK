@@ -656,12 +656,13 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             PeriodYear = today.Year,
             PeriodMonth = today.Month,
             TotalBuildingExpenses = 43_590_000m,
-            TotalBuildingIncomes = 3_400_000m,
-            NetCommonAmount = 40_190_000m,
+            TotalBuildingIncomes = 4_600_000m,
+            NetCommonAmount = 38_990_000m,
             ReserveFundAmount = 2_640_000m,
             GeneratedAtUtc = today,
             IsCalculated = true,
             AccumulatedBalance = 2_500_000m,
+            OperationalFund = 1_200_000m,
             IncomeLines =
             [
                 new() { Label = "Alquiler area comun", Description = "Alquiler / uso de salon", Amount = 900_000m }
