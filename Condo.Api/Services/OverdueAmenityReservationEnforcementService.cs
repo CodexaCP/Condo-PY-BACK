@@ -43,6 +43,7 @@ public sealed class OverdueAmenityReservationEnforcementService(
         using var scope = scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
         var overdueService = scope.ServiceProvider.GetRequiredService<IUnitOverdueService>();
+        var pushDispatcher = scope.ServiceProvider.GetRequiredService<PushDispatcher>();
 
         var buildingIds = await dbContext.Buildings
             .AsNoTracking()
@@ -68,6 +69,7 @@ public sealed class OverdueAmenityReservationEnforcementService(
             dbContext, pendingReservations.Select(x => x.ReservedByUserId).Distinct(), ct);
 
         var cancelled = 0;
+        var pushTargets = new List<(Guid RecipientId, string Title, string Body, Guid EntityId)>();
         foreach (var reservation in pendingReservations)
         {
             var userUnitIds = reservedUnitIds.GetValueOrDefault(reservation.ReservedByUserId, []);
@@ -76,17 +78,21 @@ public sealed class OverdueAmenityReservationEnforcementService(
             reservation.Status = AmenityReservationStatus.Cancelled;
             reservation.RejectionReason = "Cancelada automáticamente: la unidad tiene pagos atrasados.";
 
+            const string title = "Reserva cancelada por mora";
+            var body = $"Tu reserva de {reservation.Amenity?.Name} fue cancelada automáticamente por tener pagos atrasados. " +
+                       "Regularizá tu situación para volver a reservar.";
+
             dbContext.Notifications.Add(new Notification
             {
                 CompanyId = reservation.CompanyId,
                 RecipientId = reservation.ReservedByUserId,
                 Type = NotificationType.AmenityReservationUpdated,
-                Title = "Reserva cancelada por mora",
-                Body = $"Tu reserva de {reservation.Amenity?.Name} fue cancelada automáticamente por tener pagos atrasados. " +
-                       "Regularizá tu situación para volver a reservar.",
+                Title = title,
+                Body = body,
                 EntityType = "AmenityReservation",
                 EntityId = reservation.Id
             });
+            pushTargets.Add((reservation.ReservedByUserId, title, body, reservation.Id));
 
             cancelled++;
         }
@@ -95,6 +101,9 @@ public sealed class OverdueAmenityReservationEnforcementService(
         {
             await dbContext.SaveChangesAsync(ct);
             logger.LogInformation("Mora: {Count} reservas de amenities canceladas automáticamente.", cancelled);
+
+            foreach (var target in pushTargets)
+                await pushDispatcher.NotifyUserAsync(target.RecipientId, target.Title, target.Body, "AmenityReservation", target.EntityId, ct);
         }
     }
 

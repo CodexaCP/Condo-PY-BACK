@@ -19,7 +19,8 @@ public class OwnerPaymentsController(
     ITenantContext tenantContext,
     OwnerCreditService credits,
     ComprobanteService comprobantes,
-    InvoiceDraftService invoiceDrafts) : ControllerBase
+    InvoiceDraftService invoiceDrafts,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     // ─── GET MY DEBT (Owner only) ────────────────────────────────────────────
     [HttpGet("my-debt")]
@@ -325,6 +326,9 @@ public class OwnerPaymentsController(
             .Select(x => x.Id)
             .ToListAsync(ct);
 
+        var submittedTitle = "Nuevo pago enviado";
+        var submittedBody = $"Un propietario envió un pago por {request.DeclaredAmount:N0}. Ref: {reference}. Toca para ver más detalles.";
+
         foreach (var managerId in managerIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -332,14 +336,15 @@ public class OwnerPaymentsController(
                 CompanyId = companyId.Value,
                 RecipientId = managerId,
                 Type = NotificationType.OwnerPaymentSubmitted,
-                Title = "Nuevo pago enviado",
-                Body = $"Un propietario envió un pago por {request.DeclaredAmount:N0}. Ref: {reference}. Toca para ver más detalles.",
+                Title = submittedTitle,
+                Body = submittedBody,
                 EntityType = "OwnerPayment",
                 EntityId = ownerPayment.Id
             });
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUsersAsync(managerIds, submittedTitle, submittedBody, "OwnerPayment", ownerPayment.Id, ct);
 
         var saved = await dbContext.OwnerPayments
             .AsNoTracking()
@@ -387,18 +392,22 @@ public class OwnerPaymentsController(
         payment.ReviewedByUserId = tenantContext.UserId;
         payment.ReviewedAt = DateTime.UtcNow;
 
+        var reviewTitle = "Tu pago está en revisión";
+        var reviewBody = $"Tu pago {payment.Reference} está siendo revisado. Toca para ver más detalles.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = companyId.Value,
             RecipientId = payment.OwnerId,
             Type = NotificationType.PaymentUnderReview,
-            Title = "Tu pago está en revisión",
-            Body = $"Tu pago {payment.Reference} está siendo revisado. Toca para ver más detalles.",
+            Title = reviewTitle,
+            Body = reviewBody,
             EntityType = "OwnerPayment",
             EntityId = payment.Id
         });
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(payment.OwnerId, reviewTitle, reviewBody, "OwnerPayment", payment.Id, ct);
         return Ok(ToDto(payment));
     }
 
@@ -436,18 +445,22 @@ public class OwnerPaymentsController(
         payment.Status = OwnerPaymentStatus.Approved;
         payment.ResolvedAt = DateTime.UtcNow;
 
+        var approvedTitle = "Tu pago fue aprobado";
+        var approvedBody = $"Tu pago {payment.Reference} fue aprobado exitosamente. Toca para ver más detalles.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = companyId.Value,
             RecipientId = payment.OwnerId,
             Type = NotificationType.PaymentApproved,
-            Title = "Tu pago fue aprobado",
-            Body = $"Tu pago {payment.Reference} fue aprobado exitosamente. Toca para ver más detalles.",
+            Title = approvedTitle,
+            Body = approvedBody,
             EntityType = "OwnerPayment",
             EntityId = payment.Id
         });
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(payment.OwnerId, approvedTitle, approvedBody, "OwnerPayment", payment.Id, ct);
 
         // Genera de una vez los borradores de factura de este pago (uno por comprobante) — la emision
         // (elegir timbrado y numerar) sigue siendo un paso manual aparte, porque ahi se consume un
@@ -488,18 +501,22 @@ public class OwnerPaymentsController(
         payment.RejectionReason = reason;
         payment.ResolvedAt = DateTime.UtcNow;
 
+        var rejectedTitle = "Tu pago fue rechazado";
+        var rejectedBody = $"Tu pago {payment.Reference} fue rechazado. Motivo: {reason}. Toca para ver más detalles.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = companyId.Value,
             RecipientId = payment.OwnerId,
             Type = NotificationType.PaymentRejected,
-            Title = "Tu pago fue rechazado",
-            Body = $"Tu pago {payment.Reference} fue rechazado. Motivo: {reason}. Toca para ver más detalles.",
+            Title = rejectedTitle,
+            Body = rejectedBody,
             EntityType = "OwnerPayment",
             EntityId = payment.Id
         });
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(payment.OwnerId, rejectedTitle, rejectedBody, "OwnerPayment", payment.Id, ct);
         return Ok(ToDto(payment));
     }
 

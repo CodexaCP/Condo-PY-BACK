@@ -45,6 +45,7 @@ public sealed class PlanExpiryService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
+        var pushDispatcher = scope.ServiceProvider.GetRequiredService<PushDispatcher>();
 
         var today = DateTime.UtcNow.Date;
 
@@ -171,6 +172,9 @@ public sealed class PlanExpiryService(
             logger.LogInformation(
                 "PlanExpiryService: {Notif} notificaciones enviadas, {Plans} planes actualizados.",
                 notifications.Count, plans.Count(x => x.AlertLevel.HasValue));
+
+            foreach (var notification in notifications)
+                await pushDispatcher.NotifyUserAsync(notification.RecipientId, notification.Title, notification.Body, notification.EntityType, notification.EntityId, ct);
         }
     }
 

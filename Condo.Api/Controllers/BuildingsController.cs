@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -13,7 +14,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/buildings")]
-public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext) : ControllerBase
+public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingDto>>> GetAll(CancellationToken cancellationToken)
@@ -427,6 +428,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         var changedAt = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
         var body = $"{actorName} cambió el interés por mora del edificio {building.Name} de «{previousLabel}» a «{newLabel}» el {changedAt}.";
 
+        const string title = "Cambio en interés por mora";
+
         foreach (var recipientId in recipientIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -434,12 +437,14 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 CompanyId = companyId,
                 RecipientId = recipientId,
                 Type = NotificationType.LateFeeConfigChanged,
-                Title = "Cambio en interés por mora",
+                Title = title,
                 Body = body,
                 EntityType = "Building",
                 EntityId = building.Id
             });
         }
+
+        await pushDispatcher.NotifyUsersAsync(recipientIds, title, body, "Building", building.Id, cancellationToken);
     }
 
     [HttpDelete("{id:guid}")]

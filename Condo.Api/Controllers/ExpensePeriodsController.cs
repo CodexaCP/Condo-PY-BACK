@@ -21,6 +21,7 @@ public class ExpensePeriodsController(
     IExpenseSettlementDistributionService distributionService,
     IWebHostEnvironment env,
     OwnerCreditService ownerCredits,
+    PushDispatcher pushDispatcher,
     ILogger<ExpensePeriodsController> logger) : ControllerBase
 {
     private const decimal CoefficientDistributionExpectedTotal = 1.00m;
@@ -588,18 +589,22 @@ public class ExpensePeriodsController(
         settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Closed;
 
+        var pendingReviewTitle = "Liquidación pendiente de tu revisión";
+        var pendingReviewBody = $"Se emitió un nuevo período de expensas ({period.Name}) para {period.Building.Name} y se encuentra pendiente de tu revisión como presidente del consorcio.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = period.CompanyId,
             RecipientId = period.Building.PresidentUserId.Value,
             Type = NotificationType.SettlementPendingPresidentReview,
-            Title = "Liquidación pendiente de tu revisión",
-            Body = $"Se emitió un nuevo período de expensas ({period.Name}) para {period.Building.Name} y se encuentra pendiente de tu revisión como presidente del consorcio.",
+            Title = pendingReviewTitle,
+            Body = pendingReviewBody,
             EntityType = "ExpensePeriod",
             EntityId = period.Id
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushDispatcher.NotifyUserAsync(period.Building.PresidentUserId.Value, pendingReviewTitle, pendingReviewBody, "ExpensePeriod", period.Id, cancellationToken, nameof(NotificationType.SettlementPendingPresidentReview));
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -688,6 +693,9 @@ public class ExpensePeriodsController(
             .Select(x => x.Id)
             .ToListAsync(cancellationToken);
 
+        var presidentApprovedTitle = "Liquidación aprobada por el presidente";
+        var presidentApprovedBody = $"El presidente del consorcio aprobó la liquidación del período {period.Name} de {period.Building.Name}. Ya se puede publicar.";
+
         foreach (var adminId in companyAdminIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -695,14 +703,15 @@ public class ExpensePeriodsController(
                 CompanyId = period.CompanyId,
                 RecipientId = adminId,
                 Type = NotificationType.SettlementApprovedByPresident,
-                Title = "Liquidación aprobada por el presidente",
-                Body = $"El presidente del consorcio aprobó la liquidación del período {period.Name} de {period.Building.Name}. Ya se puede publicar.",
+                Title = presidentApprovedTitle,
+                Body = presidentApprovedBody,
                 EntityType = "ExpensePeriod",
                 EntityId = period.Id
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushDispatcher.NotifyUsersAsync(companyAdminIds, presidentApprovedTitle, presidentApprovedBody, "ExpensePeriod", period.Id, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -763,6 +772,9 @@ public class ExpensePeriodsController(
         settlement.ApprovedByUserId = null;
         period.Status = ExpensePeriodStatus.Draft;
 
+        var rejectedByPresidentTitle = "El presidente rechazó la liquidación";
+        var rejectedByPresidentBody = $"La liquidación del periodo {period.Name} de {period.Building.Name} fue rechazada por el presidente del consorcio. Motivo: {reason}.";
+
         if (approvedByUserId.HasValue)
         {
             dbContext.Notifications.Add(new Notification
@@ -770,14 +782,16 @@ public class ExpensePeriodsController(
                 CompanyId = period.CompanyId,
                 RecipientId = approvedByUserId.Value,
                 Type = NotificationType.SettlementRejectedByPresident,
-                Title = "El presidente rechazó la liquidación",
-                Body = $"La liquidación del periodo {period.Name} de {period.Building.Name} fue rechazada por el presidente del consorcio. Motivo: {reason}.",
+                Title = rejectedByPresidentTitle,
+                Body = rejectedByPresidentBody,
                 EntityType = "ExpensePeriod",
                 EntityId = period.Id
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (approvedByUserId.HasValue)
+            await pushDispatcher.NotifyUserAsync(approvedByUserId.Value, rejectedByPresidentTitle, rejectedByPresidentBody, "ExpensePeriod", period.Id, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -945,6 +959,9 @@ public class ExpensePeriodsController(
         settlement.UnpublishedByUserId = tenantContext.UserId;
 
         var recipientIds = await GetBuildingUserIdsAsync(period.BuildingId, cancellationToken);
+        var unpublishedTitle = "Se retiró la publicación de un período de expensas";
+        var unpublishedBody = $"El período {period.Name} de {period.Building!.Name} fue retirado por un error administrativo y vuelve a estar en preparación. Motivo: {reason}.";
+
         foreach (var rid in recipientIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -952,14 +969,15 @@ public class ExpensePeriodsController(
                 CompanyId = period.CompanyId,
                 RecipientId = rid,
                 Type = NotificationType.ExpensePeriodUnpublished,
-                Title = "Se retiró la publicación de un período de expensas",
-                Body = $"El período {period.Name} de {period.Building!.Name} fue retirado por un error administrativo y vuelve a estar en preparación. Motivo: {reason}.",
+                Title = unpublishedTitle,
+                Body = unpublishedBody,
                 EntityType = "ExpensePeriod",
                 EntityId = period.Id
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushDispatcher.NotifyUsersAsync(recipientIds, unpublishedTitle, unpublishedBody, "ExpensePeriod", period.Id, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -1037,6 +1055,9 @@ public class ExpensePeriodsController(
         settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Draft;
 
+        var settlementRejectedTitle = "La liquidación fue rechazada";
+        var settlementRejectedBody = $"La liquidación del periodo {period.Name} fue rechazada por el Administrador de empresa. Motivo: {reason}.";
+
         if (approvedByUserId.HasValue)
         {
             dbContext.Notifications.Add(new Notification
@@ -1044,14 +1065,16 @@ public class ExpensePeriodsController(
                 CompanyId = period.CompanyId,
                 RecipientId = approvedByUserId.Value,
                 Type = NotificationType.SettlementRejected,
-                Title = "La liquidación fue rechazada",
-                Body = $"La liquidación del periodo {period.Name} fue rechazada por el Administrador de empresa. Motivo: {reason}.",
+                Title = settlementRejectedTitle,
+                Body = settlementRejectedBody,
                 EntityType = "ExpensePeriod",
                 EntityId = period.Id
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (approvedByUserId.HasValue)
+            await pushDispatcher.NotifyUserAsync(approvedByUserId.Value, settlementRejectedTitle, settlementRejectedBody, "ExpensePeriod", period.Id, cancellationToken);
         return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
     }
 
@@ -2131,6 +2154,9 @@ public class ExpensePeriodsController(
         var recipientIds = await GetBuildingUserIdsAsync(period.BuildingId, ct);
         if (recipientIds.Count == 0) return;
 
+        const string publishedTitle = "Nuevo periodo de expensas publicado";
+        var publishedBody = period.Name;
+
         foreach (var rid in recipientIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -2138,14 +2164,15 @@ public class ExpensePeriodsController(
                 CompanyId = period.CompanyId,
                 RecipientId = rid,
                 Type = NotificationType.ExpensePeriodPublished,
-                Title = "Nuevo periodo de expensas publicado",
-                Body = period.Name,
+                Title = publishedTitle,
+                Body = publishedBody,
                 EntityType = "ExpensePeriod",
                 EntityId = period.Id
             });
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUsersAsync(recipientIds, publishedTitle, publishedBody, "ExpensePeriod", period.Id, ct);
     }
 
     private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)

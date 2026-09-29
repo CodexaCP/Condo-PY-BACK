@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -14,7 +15,8 @@ namespace Condo.Api.Controllers;
 public class ClaimsController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
-    ITenantContext tenantContext) : ControllerBase
+    ITenantContext tenantContext,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ClaimDto>>> GetAll(
@@ -87,18 +89,22 @@ public class ClaimsController(
         }
 
         var statusLabel = claim.Status == "EnProceso" ? "En proceso" : claim.Status;
+        const string claimStatusTitle = "Estado de reclamo actualizado";
+        var claimStatusBody = $"Tu reclamo fue marcado como \"{statusLabel}\".";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = claim.CompanyId,
             RecipientId = claim.CreatedByUserId,
             Type = NotificationType.ClaimStatusUpdated,
-            Title = "Estado de reclamo actualizado",
-            Body = $"Tu reclamo fue marcado como \"{statusLabel}\".",
+            Title = claimStatusTitle,
+            Body = claimStatusBody,
             EntityType = "Claim",
             EntityId = claim.Id
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushDispatcher.NotifyUserAsync(claim.CreatedByUserId, claimStatusTitle, claimStatusBody, "Claim", claim.Id, cancellationToken);
 
         var dto = await dbContext.Claims
             .AsNoTracking()

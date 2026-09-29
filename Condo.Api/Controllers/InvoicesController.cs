@@ -17,7 +17,7 @@ namespace Condo.Api.Controllers;
 [Route("api/invoices")]
 public class InvoicesController(
     ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env,
-    Condo.Api.Services.InvoiceDraftService draftService) : ControllerBase
+    Condo.Api.Services.InvoiceDraftService draftService, Condo.Api.Services.PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> GetAll(
@@ -740,16 +740,21 @@ public class InvoicesController(
 
         if (recipientId is null) return;
 
+        const string title = "Tu factura fue emitida";
+        var body = $"Se emitió la factura {invoice.NumeroFormateado} para el comprobante {reference}. Toca para descargarla.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = invoice.CompanyId,
             RecipientId = recipientId.Value,
             Type = NotificationType.InvoiceIssued,
-            Title = "Tu factura fue emitida",
-            Body = $"Se emitió la factura {invoice.NumeroFormateado} para el comprobante {reference}. Toca para descargarla.",
+            Title = title,
+            Body = body,
             EntityType = "OwnerPayment",
             EntityId = ownerPaymentId
         });
+
+        await pushDispatcher.NotifyUserAsync(recipientId.Value, title, body, "OwnerPayment", ownerPaymentId, cancellationToken);
     }
 
     private async Task LogAsync(Guid invoiceId, Guid companyId, InvoiceAuditAction action, object? before, object? after, string detalle, CancellationToken cancellationToken)

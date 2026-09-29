@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -11,7 +12,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/me")]
-public class MeController(ICondoDbContext dbContext, ITenantContext tenantContext) : ControllerBase
+public class MeController(ICondoDbContext dbContext, ITenantContext tenantContext, PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet("units")]
     public async Task<ActionResult<IReadOnlyList<MyUnitDto>>> GetMyUnits(CancellationToken cancellationToken)
@@ -114,6 +115,9 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
             .ToListAsync(cancellationToken);
 
         var shortDesc = description.Length > 80 ? description[..80] + "…" : description;
+        const string newClaimTitle = "Nuevo reclamo";
+        var newClaimBody = $"{user.FullName} — {request.Category}: {shortDesc}";
+
         foreach (var managerId in managerIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -121,14 +125,15 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
                 CompanyId = unitContext.CompanyId,
                 RecipientId = managerId,
                 Type = NotificationType.ClaimCreated,
-                Title = "Nuevo reclamo",
-                Body = $"{user.FullName} — {request.Category}: {shortDesc}",
+                Title = newClaimTitle,
+                Body = newClaimBody,
                 EntityType = "Claim",
                 EntityId = claim.Id
             });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await pushDispatcher.NotifyUsersAsync(managerIds, newClaimTitle, newClaimBody, "Claim", claim.Id, cancellationToken);
 
         var dto = await dbContext.Claims
             .AsNoTracking()

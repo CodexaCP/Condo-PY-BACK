@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -14,7 +15,8 @@ namespace Condo.Api.Controllers;
 public class AnnouncementsController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
-    ITenantContext tenant) : ControllerBase
+    ITenantContext tenant,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<AnnouncementDto>>> GetAll(
@@ -252,6 +254,8 @@ public class AnnouncementsController(
         var recipientIds = await GetBuildingUserIdsAsync(buildingId, ct);
         if (recipientIds.Count == 0) return;
 
+        const string pushTitle = "Nuevo comunicado";
+
         foreach (var rid in recipientIds)
         {
             dbContext.Notifications.Add(new Notification
@@ -259,7 +263,7 @@ public class AnnouncementsController(
                 CompanyId = companyId.Value,
                 RecipientId = rid,
                 Type = NotificationType.AnnouncementPublished,
-                Title = "Nuevo comunicado",
+                Title = pushTitle,
                 Body = title,
                 EntityType = "Announcement",
                 EntityId = announcementId
@@ -267,6 +271,7 @@ public class AnnouncementsController(
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUsersAsync(recipientIds, pushTitle, title, "Announcement", announcementId, ct);
     }
 
     private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)

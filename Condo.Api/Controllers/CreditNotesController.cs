@@ -22,7 +22,8 @@ namespace Condo.Api.Controllers;
 [Authorize]
 [Route("api/credit-notes")]
 public class CreditNotesController(
-    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, OwnerCreditService credits) : ControllerBase
+    ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, OwnerCreditService credits,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<CreditNoteDto>>> GetAll(
@@ -749,16 +750,21 @@ public class CreditNotesController(
 
         if (recipientId is null) return;
 
+        const string title = "Se aprobó una nota de crédito";
+        var body = $"Se aprobó un ajuste de Gs. {creditNote.Amount:N0} sobre tu comprobante {invoice.NumeroFormateado ?? string.Empty}. Toca para ver más detalles.";
+
         dbContext.Notifications.Add(new Notification
         {
             CompanyId = creditNote.CompanyId,
             RecipientId = recipientId.Value,
             Type = NotificationType.CreditNoteApproved,
-            Title = "Se aprobó una nota de crédito",
-            Body = $"Se aprobó un ajuste de Gs. {creditNote.Amount:N0} sobre tu comprobante {invoice.NumeroFormateado ?? string.Empty}. Toca para ver más detalles.",
+            Title = title,
+            Body = body,
             EntityType = "OwnerPayment",
             EntityId = ownerPaymentId
         });
+
+        await pushDispatcher.NotifyUserAsync(recipientId.Value, title, body, "OwnerPayment", ownerPaymentId, cancellationToken);
     }
 
     private async Task LogAsync(Guid creditNoteId, Guid companyId, CreditNoteAuditAction action, object? before, object? after, string detalle, CancellationToken cancellationToken)

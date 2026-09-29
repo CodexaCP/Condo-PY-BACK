@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -14,7 +15,8 @@ namespace Condo.Api.Controllers;
 public class VotesController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
-    ITenantContext tenant) : ControllerBase
+    ITenantContext tenant,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<VoteDto>>> GetAll(
@@ -190,6 +192,8 @@ public class VotesController(
         if (companyId.HasValue)
         {
             var recipientIds = await GetBuildingUserIdsAsync(vote.BuildingId, cancellationToken);
+            const string voteOpenedTitle = "Nueva votación abierta";
+
             foreach (var rid in recipientIds)
             {
                 dbContext.Notifications.Add(new Notification
@@ -197,14 +201,17 @@ public class VotesController(
                     CompanyId = companyId.Value,
                     RecipientId = rid,
                     Type = NotificationType.VoteOpened,
-                    Title = "Nueva votación abierta",
+                    Title = voteOpenedTitle,
                     Body = vote.Title,
                     EntityType = "Vote",
                     EntityId = vote.Id
                 });
             }
             if (recipientIds.Count > 0)
+            {
                 await dbContext.SaveChangesAsync(cancellationToken);
+                await pushDispatcher.NotifyUsersAsync(recipientIds, voteOpenedTitle, vote.Title, "Vote", vote.Id, cancellationToken);
+            }
         }
 
         return Ok(await LoadDetailDto(vote.Id, cancellationToken));

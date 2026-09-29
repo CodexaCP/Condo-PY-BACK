@@ -37,6 +37,7 @@ public interface ICondoDbContext
     DbSet<OwnerCredit> OwnerCredits { get; }
     DbSet<OwnerCreditMovement> OwnerCreditMovements { get; }
     DbSet<Notification> Notifications { get; }
+    DbSet<DeviceToken> DeviceTokens { get; }
     DbSet<Amenity> Amenities { get; }
     DbSet<AmenityReservation> AmenityReservations { get; }
     DbSet<Plan> Plans { get; }

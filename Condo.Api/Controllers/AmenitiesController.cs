@@ -17,7 +17,8 @@ public class AmenitiesController(
     CondoDbContext dbContext,
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
-    IUnitOverdueService overdueService) : ControllerBase
+    IUnitOverdueService overdueService,
+    PushDispatcher pushDispatcher) : ControllerBase
 {
     private static readonly TimeZoneInfo _pyt =
         TimeZoneInfo.FindSystemTimeZoneById("America/Asuncion");
@@ -182,6 +183,9 @@ public class AmenitiesController(
         reservation.ReviewedByUserId = tenantContext.UserId;
         reservation.ReviewedAtUtc = DateTime.UtcNow;
 
+        string reservationNotificationTitle;
+        string reservationNotificationBody;
+
         if (request.Approve)
         {
             reservation.Status = AmenityReservationStatus.Confirmed;
@@ -205,13 +209,16 @@ public class AmenitiesController(
                 CreatedByUserId = tenantContext.UserId
             });
 
+            reservationNotificationTitle = "Reserva confirmada";
+            reservationNotificationBody = $"Tu reserva de {reservation.Amenity.Name} {FormatRange(reservation)} fue confirmada.";
+
             dbContext.Notifications.Add(new Notification
             {
                 CompanyId = reservation.CompanyId,
                 RecipientId = reservation.ReservedByUserId,
                 Type = NotificationType.AmenityReservationUpdated,
-                Title = "Reserva confirmada",
-                Body = $"Tu reserva de {reservation.Amenity.Name} {FormatRange(reservation)} fue confirmada.",
+                Title = reservationNotificationTitle,
+                Body = reservationNotificationBody,
                 EntityType = "AmenityReservation",
                 EntityId = reservation.Id
             });
@@ -221,20 +228,24 @@ public class AmenitiesController(
             reservation.Status = AmenityReservationStatus.Rejected;
             reservation.RejectionReason = string.IsNullOrWhiteSpace(request.RejectionReason) ? null : request.RejectionReason.Trim();
 
+            reservationNotificationTitle = "Reserva rechazada";
+            reservationNotificationBody = $"Tu reserva de {reservation.Amenity!.Name} {FormatRange(reservation)} fue rechazada." +
+                       (reservation.RejectionReason is null ? string.Empty : $" Motivo: {reservation.RejectionReason}");
+
             dbContext.Notifications.Add(new Notification
             {
                 CompanyId = reservation.CompanyId,
                 RecipientId = reservation.ReservedByUserId,
                 Type = NotificationType.AmenityReservationUpdated,
-                Title = "Reserva rechazada",
-                Body = $"Tu reserva de {reservation.Amenity!.Name} {FormatRange(reservation)} fue rechazada." +
-                       (reservation.RejectionReason is null ? string.Empty : $" Motivo: {reservation.RejectionReason}"),
+                Title = reservationNotificationTitle,
+                Body = reservationNotificationBody,
                 EntityType = "AmenityReservation",
                 EntityId = reservation.Id
             });
         }
 
         await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(reservation.ReservedByUserId, reservationNotificationTitle, reservationNotificationBody, "AmenityReservation", reservation.Id, ct);
 
         var dto = await dbContext.AmenityReservations.AsNoTracking().Where(x => x.Id == id).Select(ToReservationDto()).FirstAsync(ct);
         return Ok(dto);
@@ -383,6 +394,9 @@ public class AmenitiesController(
                     ? $"el {s:dd/MM/yyyy} ({s:HH:mm}–{e:HH:mm} hs)"
                     : $"del {s:dd/MM/yyyy HH:mm} al {e:dd/MM/yyyy HH:mm} hs";
 
+                const string newReservationTitle = "Nueva solicitud de reserva";
+                var newReservationBody = $"Nueva reserva de {amenity.Name} {rangeText}.";
+
                 foreach (var managerId in managerIds)
                 {
                     dbContext.Notifications.Add(new Notification
@@ -390,14 +404,15 @@ public class AmenitiesController(
                         CompanyId = amenity.CompanyId,
                         RecipientId = managerId,
                         Type = NotificationType.AmenityReservationCreated,
-                        Title = "Nueva solicitud de reserva",
-                        Body = $"Nueva reserva de {amenity.Name} {rangeText}.",
+                        Title = newReservationTitle,
+                        Body = newReservationBody,
                         EntityType = "AmenityReservation",
                         EntityId = createdId.Value
                     });
                 }
 
                 await dbContext.SaveChangesAsync(ct);
+                await pushDispatcher.NotifyUsersAsync(managerIds, newReservationTitle, newReservationBody, "AmenityReservation", createdId.Value, ct);
             }
         }
 

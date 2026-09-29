@@ -36,6 +36,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<OwnerCredit> OwnerCredits => Set<OwnerCredit>();
     public DbSet<OwnerCreditMovement> OwnerCreditMovements => Set<OwnerCreditMovement>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
     public DbSet<Amenity> Amenities => Set<Amenity>();
     public DbSet<AmenityReservation> AmenityReservations => Set<AmenityReservation>();
     public DbSet<Plan> Plans => Set<Plan>();
@@ -628,6 +629,14 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Notification>()
             .HasOne(x => x.Recipient).WithMany()
             .HasForeignKey(x => x.RecipientId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── DeviceToken ────────────────────────────────────────────────────────
+        modelBuilder.Entity<DeviceToken>().Property(x => x.Token).HasMaxLength(300);
+        modelBuilder.Entity<DeviceToken>().Property(x => x.Platform).HasMaxLength(20);
+        modelBuilder.Entity<DeviceToken>().HasIndex(x => x.Token).IsUnique();
+        modelBuilder.Entity<DeviceToken>()
+            .HasOne(x => x.User).WithMany()
+            .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Amenity ────────────────────────────────────────────────────────────
         modelBuilder.Entity<Amenity>().Property(x => x.Name).HasMaxLength(150);

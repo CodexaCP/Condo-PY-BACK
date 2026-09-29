@@ -24,6 +24,7 @@ public static class DependencyInjection
         services.AddScoped<IExpenseSettlementDistributionService, ExpenseSettlementDistributionService>();
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddHttpClient<IEmailSender, ResendEmailSender>();
+        services.AddSingleton<IPushNotificationSender, FirebaseCloudMessagingSender>();
 
         return services;
     }
