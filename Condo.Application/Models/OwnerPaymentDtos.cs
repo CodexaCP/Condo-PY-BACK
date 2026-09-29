@@ -36,6 +36,10 @@ public class OwnerPaymentDto
     public DateTime CreatedAtUtc { get; set; }
     public List<OwnerPaymentUnitDto> Units { get; set; } = [];
     public List<OwnerPaymentApplicationDto> Applications { get; set; } = [];
+
+    // Solo para el personal: false cuando el pago incluye unidades de edificios que el usuario no tiene
+    // asignados (puede verlo por tener una unidad en su edificio, pero no revisarlo/aprobarlo/rechazarlo).
+    public bool CanProcess { get; set; } = true;
 }
 
 public class OwnerPaymentApplicationDto

@@ -27,6 +27,7 @@ public sealed class Comprobante
 {
     public Guid UnitId { get; init; }
     public string UnitCode { get; init; } = string.Empty;
+    public Guid BuildingId { get; init; }
     public string BuildingName { get; init; } = string.Empty;
     public Guid ExpensePeriodId { get; init; }
     public int Year { get; init; }
@@ -65,6 +66,7 @@ public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService cr
                 {
                     UnitId = g.Key.UnitId,
                     UnitCode = first.Unit?.Code ?? string.Empty,
+                    BuildingId = first.Unit?.BuildingId ?? Guid.Empty,
                     BuildingName = first.Unit?.Building?.Name ?? string.Empty,
                     ExpensePeriodId = g.Key.ExpensePeriodId,
                     Year = first.ExpensePeriod!.Year,
@@ -115,6 +117,7 @@ public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService cr
         {
             UnitId = unitId,
             UnitCode = first.Unit?.Code ?? string.Empty,
+            BuildingId = first.Unit?.BuildingId ?? Guid.Empty,
             BuildingName = first.Unit?.Building?.Name ?? string.Empty,
             ExpensePeriodId = expensePeriodId,
             Year = first.ExpensePeriod!.Year,

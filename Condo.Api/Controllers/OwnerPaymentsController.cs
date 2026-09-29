@@ -17,6 +17,7 @@ namespace Condo.Api.Controllers;
 public class OwnerPaymentsController(
     ICondoDbContext dbContext,
     ITenantContext tenantContext,
+    IAccessScopeService accessScope,
     OwnerCreditService credits,
     ComprobanteService comprobantes,
     InvoiceDraftService invoiceDrafts,
@@ -94,6 +95,8 @@ public class OwnerPaymentsController(
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
 
+        if (!await OwnerInScopeAsync(ownerId, companyId.Value, requireAll: false, ct)) return NotFound();
+
         var credit = await dbContext.OwnerCredits
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value, ct);
@@ -111,11 +114,15 @@ public class OwnerPaymentsController(
 
         var payment = await dbContext.OwnerPayments
             .AsNoTracking()
+            .Include(x => x.Units.Where(u => !u.IsDeleted)).ThenInclude(u => u.Unit)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
         if (payment is null) return NotFound();
 
         if (IsOwner() && payment.OwnerId != tenantContext.UserId) return Forbid();
         if (!IsOwner() && !CanManagePayments()) return Forbid();
+
+        if (!IsOwner() && !TouchesScope(payment, await accessScope.GetAccessibleBuildingIdsAsync(ct)))
+            return NotFound();
 
         var invoices = await dbContext.Invoices
             .AsNoTracking()
@@ -154,6 +161,8 @@ public class OwnerPaymentsController(
         if (!CanManagePayments()) return Forbid();
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
+
+        if (!await OwnerInScopeAsync(ownerId, companyId.Value, requireAll: false, ct)) return NotFound();
 
         return Ok(await LoadCreditMovementsAsync(ownerId, companyId.Value, ct));
     }
@@ -194,12 +203,19 @@ public class OwnerPaymentsController(
                 .ThenInclude(u => u.Unit).ThenInclude(u => u!.Building)
             .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value);
 
+        HashSet<Guid>? staffScope = null;
+
         if (IsOwner())
         {
             query = query.Where(x => x.OwnerId == tenantContext.UserId);
         }
         else if (CanManagePayments())
         {
+            // El personal solo ve pagos con al menos una unidad en un edificio de su alcance.
+            var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+            staffScope = scope;
+            query = query.Where(x => x.Units.Any(u => !u.IsDeleted && u.Unit != null && scope.Contains(u.Unit.BuildingId)));
+
             if (ownerId.HasValue)
                 query = query.Where(x => x.OwnerId == ownerId.Value);
 
@@ -213,7 +229,7 @@ public class OwnerPaymentsController(
         }
 
         var payments = await query.OrderByDescending(x => x.CreatedAtUtc).ToListAsync(ct);
-        return Ok(payments.Select(ToDto).ToList());
+        return Ok(payments.Select(p => ToDto(p, staffScope is null || FullyInScope(p, staffScope))).ToList());
     }
 
     // ─── GET BY ID ───────────────────────────────────────────────────────────
@@ -236,7 +252,15 @@ public class OwnerPaymentsController(
         if (IsOwner() && payment.OwnerId != tenantContext.UserId) return Forbid();
         if (!IsOwner() && !CanManagePayments()) return Forbid();
 
-        var dto = ToDto(payment);
+        var canProcess = true;
+        if (!IsOwner())
+        {
+            var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+            if (!TouchesScope(payment, scope)) return NotFound();
+            canProcess = FullyInScope(payment, scope);
+        }
+
+        var dto = ToDto(payment, canProcess);
 
         if (payment.Status == OwnerPaymentStatus.Approved)
         {
@@ -318,11 +342,29 @@ public class OwnerPaymentsController(
 
         dbContext.OwnerPayments.Add(ownerPayment);
 
-        // Notify managers
+        // Notify managers: solo quienes trabajan con los edificios del pago (Encargado/Operador con el edificio
+        // asignado; Administrador de empresa de toda la empresa, o de su condominio si esta acotado a uno).
+        var paymentUnitIds = request.UnitIds.Distinct().ToList();
+        var paymentBuildingIds = await dbContext.Units
+            .AsNoTracking()
+            .Where(u => !u.IsDeleted && paymentUnitIds.Contains(u.Id))
+            .Select(u => u.BuildingId)
+            .Distinct()
+            .ToListAsync(ct);
+        var paymentCondominiumIds = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(b => paymentBuildingIds.Contains(b.Id) && b.CondominiumId != null)
+            .Select(b => b.CondominiumId!.Value)
+            .Distinct()
+            .ToListAsync(ct);
+
         var managerIds = await dbContext.ApplicationUsers
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value && x.IsActive &&
-                (x.Role == UserRole.BuildingManager || x.Role == UserRole.CompanyAdmin || x.Role == UserRole.CompanyOperator))
+                ((x.Role == UserRole.CompanyAdmin &&
+                  (x.CondominiumId == null || paymentCondominiumIds.Contains(x.CondominiumId.Value))) ||
+                 ((x.Role == UserRole.BuildingManager || x.Role == UserRole.CompanyOperator) &&
+                  x.BuildingAccesses.Any(a => !a.IsDeleted && a.IsActive && paymentBuildingIds.Contains(a.BuildingId)))))
             .Select(x => x.Id)
             .ToListAsync(ct);
 
@@ -375,6 +417,11 @@ public class OwnerPaymentsController(
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
 
         if (payment is null) return NotFound();
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        if (!TouchesScope(payment, scope)) return NotFound();
+        if (!FullyInScope(payment, scope)) return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
+
         if (payment.Status != OwnerPaymentStatus.Pending)
             return BadRequest("Solo se pueden revisar pagos en estado PENDIENTE.");
         if (request.ReviewedAmount <= 0)
@@ -386,6 +433,8 @@ public class OwnerPaymentsController(
         if (!reviewCoverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.ReviewedAmount + availableCreditForReview, openForReview)
                               + " Rechace el pago para que el propietario lo envíe nuevamente.");
+        if (!CoverageInScope(reviewCoverage, scope))
+            return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
 
         payment.Status = OwnerPaymentStatus.UnderReview;
         payment.ReviewedAmount = request.ReviewedAmount;
@@ -428,6 +477,11 @@ public class OwnerPaymentsController(
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
 
         if (payment is null) return NotFound();
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        if (!TouchesScope(payment, scope)) return NotFound();
+        if (!FullyInScope(payment, scope)) return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
+
         if (payment.Status != OwnerPaymentStatus.UnderReview)
             return BadRequest("Solo se pueden aprobar pagos en estado EN REVISIÓN.");
         if (!payment.ReviewedAmount.HasValue || payment.ReviewedAmount.Value <= 0)
@@ -435,7 +489,11 @@ public class OwnerPaymentsController(
 
         try
         {
-            await SettlePaymentAsync(payment, companyId.Value, ct);
+            await SettlePaymentAsync(payment, companyId.Value, scope, ct);
+        }
+        catch (OutOfScopeException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, exception.Message);
         }
         catch (InvalidOperationException exception)
         {
@@ -488,6 +546,11 @@ public class OwnerPaymentsController(
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
 
         if (payment is null) return NotFound();
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        if (!TouchesScope(payment, scope)) return NotFound();
+        if (!FullyInScope(payment, scope)) return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
+
         if (payment.Status == OwnerPaymentStatus.Approved || payment.Status == OwnerPaymentStatus.Rejected)
             return BadRequest("No se puede rechazar un pago ya resuelto.");
 
@@ -543,6 +606,9 @@ public class OwnerPaymentsController(
         if (payment is null) return NotFound();
         if (IsOwner() && payment.OwnerId != tenantContext.UserId) return Forbid();
         if (!IsOwner() && !CanManagePayments()) return Forbid();
+
+        if (!IsOwner() && !TouchesScope(payment, await accessScope.GetAccessibleBuildingIdsAsync(ct)))
+            return NotFound();
 
         var settlements = await dbContext.Payments
             .AsNoTracking()
@@ -607,6 +673,10 @@ public class OwnerPaymentsController(
         if (!CanManagePayments()) return Forbid();
         var companyId = tenantContext.CompanyId;
         if (companyId is null) return Forbid();
+
+        // Aplicar saldo a favor recorre todas las unidades del propietario: exige que todas esten en el alcance.
+        if (!await OwnerInScopeAsync(ownerId, companyId.Value, requireAll: true, ct)) return NotFound();
+
         return await RunApplyCredit(ownerId, companyId.Value, CreditApplyMode.ManualManager, ct);
     }
 
@@ -645,7 +715,7 @@ public class OwnerPaymentsController(
     // pagos parciales ni pago por línea. El Payment de cada comprobante siempre vale su monto
     // completo (eso es lo que factura Invoice) — el saldo a favor es un detalle de cómo se
     // financió, se descuenta aparte vía OwnerCreditMovement, nunca reduce el Payment/la factura.
-    private async Task SettlePaymentAsync(OwnerPayment ownerPayment, Guid companyId, CancellationToken ct)
+    private async Task SettlePaymentAsync(OwnerPayment ownerPayment, Guid companyId, HashSet<Guid> scope, CancellationToken ct)
     {
         var open = await LoadOpenComprobantesAsync(ownerPayment, companyId, ct);
         var reviewedAmount = ownerPayment.ReviewedAmount!.Value;
@@ -659,6 +729,10 @@ public class OwnerPaymentsController(
         if (!coverage.Exact)
             throw new InvalidOperationException(ComprobanteService.MismatchMessage(reviewedAmount + availableCredit, open)
                                                 + " Rechace el pago para que el propietario lo envíe nuevamente.");
+
+        // Se valida antes de tocar nada: no se liquida ningun comprobante de un edificio fuera del alcance.
+        if (!CoverageInScope(coverage, scope))
+            throw new OutOfScopeException(OutOfScopeMessage);
 
         var allocatedPerUnit = ownerPayment.Units
             .Where(u => !u.IsDeleted)
@@ -759,6 +833,50 @@ public class OwnerPaymentsController(
         return (withCredit, creditUsed);
     }
 
+    // ─── ALCANCE POR EDIFICIO (personal) ─────────────────────────────────────
+    // Un pago de propietario puede abarcar unidades de varios edificios. El personal (Encargado/Operador)
+    // solo trabaja con los edificios que tiene asignados; el Administrador de empresa, con los de su empresa
+    // (o su condominio, si esta acotado a uno). Regla:
+    //   - ver: el pago tiene al menos una unidad en un edificio de su alcance;
+    //   - revisar / aprobar / rechazar: TODAS las unidades del pago y TODOS los comprobantes que cubre
+    //     estan en su alcance (un pago se liquida completo, del mas antiguo al mas nuevo, no por edificio).
+    private const string OutOfScopeMessage =
+        "Este pago incluye unidades o comprobantes de edificios que no tenés asignados. " +
+        "Debe procesarlo un Administrador de empresa o un encargado con acceso a todos esos edificios.";
+
+    private sealed class OutOfScopeException(string message) : InvalidOperationException(message);
+
+    private static bool TouchesScope(OwnerPayment payment, HashSet<Guid> scope) =>
+        payment.Units.Any(u => !u.IsDeleted && u.Unit is not null && scope.Contains(u.Unit.BuildingId));
+
+    private static bool FullyInScope(OwnerPayment payment, HashSet<Guid> scope)
+    {
+        var units = payment.Units.Where(u => !u.IsDeleted).ToList();
+        return units.Count > 0 && units.All(u => u.Unit is not null && scope.Contains(u.Unit.BuildingId));
+    }
+
+    private static bool CoverageInScope(ComprobanteCoverage coverage, HashSet<Guid> scope) =>
+        coverage.Covered.All(c => scope.Contains(c.BuildingId));
+
+    // Propietario visible para el personal: tiene al menos una unidad vinculada en su alcance
+    // (requireAll: todas, para acciones que lo afectan por completo, como aplicar saldo a favor).
+    private async Task<bool> OwnerInScopeAsync(Guid ownerId, Guid companyId, bool requireAll, CancellationToken ct)
+    {
+        var unitIds = await credits.LoadLinkedUnitIdsAsync(ownerId, companyId, ct);
+        if (unitIds.Count == 0)
+            return accessScope.IsCompanyAdmin && !accessScope.CondominiumId.HasValue;
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        var buildingIds = await dbContext.Units
+            .AsNoTracking()
+            .Where(u => !u.IsDeleted && unitIds.Contains(u.Id))
+            .Select(u => u.BuildingId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        return requireAll ? buildingIds.All(scope.Contains) : buildingIds.Any(scope.Contains);
+    }
+
     // ─── HELPERS ─────────────────────────────────────────────────────────────
 
     private bool IsOwner() =>
@@ -773,8 +891,9 @@ public class OwnerPaymentsController(
             || string.Equals(role, "CompanyOperator", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static OwnerPaymentDto ToDto(OwnerPayment p) => new()
+    private static OwnerPaymentDto ToDto(OwnerPayment p, bool canProcess = true) => new()
     {
+        CanProcess = canProcess,
         Id = p.Id,
         OwnerId = p.OwnerId,
         OwnerFullName = p.Owner?.FullName ?? string.Empty,

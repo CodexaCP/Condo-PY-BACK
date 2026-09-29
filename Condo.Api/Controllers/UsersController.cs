@@ -10,8 +10,10 @@ using System.Text.RegularExpressions;
 
 namespace Condo.Api.Controllers;
 
+// Gestion de usuarios: solo SuperAdmin y CompanyAdmin (es lo unico que muestra el menu del web).
+// Sin esto cualquier propietario/residente autenticado podia listar a todos los usuarios de su empresa.
 [ApiController]
-[Authorize]
+[Authorize(Roles = "SuperAdmin,CompanyAdmin")]
 [Route("api/users")]
 public class UsersController(ICondoDbContext dbContext, IAccessScopeService accessScope, IPasswordHasher passwordHasher) : ControllerBase
 {
