@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -9,11 +10,17 @@ using System.Text.RegularExpressions;
 
 namespace Condo.Api.Controllers;
 
+// Solo personal: propietarios/residentes no consultan este modulo (la app movil no lo usa). Encargado/Operador
+// (y admin acotado a un condominio) solo ven residentes con alguna unidad en sus edificios, o sin unidad todavia.
 [ApiController]
-[Authorize]
+[Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
 [Route("api/residents")]
 public partial class ResidentsController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
 {
+    private const string SharedResidentMessage =
+        "Este residente también figura en edificios que no tenés asignados, así que no podés cambiar su correo ni su " +
+        "estado. Lo debe hacer un Administrador de empresa.";
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ResidentDto>>> GetAll(CancellationToken cancellationToken)
     {
@@ -21,17 +28,13 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
 
         if (!accessScope.IsSuperAdmin)
         {
-            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
-            {
-                query = query.Where(x => x.CompanyId == accessScope.CompanyId.Value);
-            }
-            else
+            if (!accessScope.CompanyId.HasValue) return Forbid();
+            query = query.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+
+            if (!accessScope.HasFullCompanyScope)
             {
                 var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-                query = query.Where(x =>
-                    x.UnitResidents.Any(link =>
-                        !link.IsDeleted &&
-                        accessibleBuildingIds.Contains(link.Unit!.BuildingId)));
+                query = query.VisibleResidents(accessibleBuildingIds);
             }
         }
 
@@ -56,38 +59,32 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ResidentDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var resident = await dbContext.Residents
+        var entity = await dbContext.Residents
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.Id == id)
-            .Select(x => new ResidentDto
-            {
-                Id = x.Id,
-                FullName = x.FullName,
-                DocumentNumber = x.DocumentNumber,
-                Email = x.Email,
-                PhoneNumber = x.PhoneNumber,
-                IsOwner = x.IsOwner,
-                IsActive = x.IsActive,
-                HasLinkedAccount = x.ApplicationUserId != null
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
-        if (resident is null)
+        if (entity is null)
         {
             return NotFound();
         }
 
-        if (accessScope.IsSuperAdmin || (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue))
+        // Antes un Administrador de empresa podia leer un residente de OTRA empresa conociendo su Id.
+        if (!accessScope.IsSuperAdmin && accessScope.CompanyId != entity.CompanyId)
         {
-            return Ok(resident);
+            return NotFound();
         }
 
-        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-        var hasAccess = await dbContext.UnitResidents
-            .AsNoTracking()
-            .AnyAsync(x => !x.IsDeleted && x.ResidentId == id && accessibleBuildingIds.Contains(x.Unit!.BuildingId), cancellationToken);
+        if (!accessScope.HasFullCompanyScope)
+        {
+            var scope = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+            var linked = await PeopleScope.BuildingsOfResidentAsync(dbContext, entity.Id, cancellationToken);
+            if (!PeopleScope.IsVisible(linked, scope))
+            {
+                return NotFound();
+            }
+        }
 
-        return hasAccess ? Ok(resident) : Forbid();
+        return Ok(ToDto(entity));
     }
 
     [HttpPost]
@@ -188,6 +185,19 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return Forbid();
         }
 
+        var fullyInScope = true;
+        if (!accessScope.HasFullCompanyScope)
+        {
+            var scope = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+            var linked = await PeopleScope.BuildingsOfResidentAsync(dbContext, entity.Id, cancellationToken);
+            if (!PeopleScope.IsVisible(linked, scope))
+            {
+                return NotFound();
+            }
+
+            fullyInScope = PeopleScope.IsFullyInScope(linked, scope);
+        }
+
         var validationError = ValidateRequest(request);
         if (validationError is not null)
         {
@@ -205,6 +215,14 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         }
 
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+
+        // El correo vincula al residente con una cuenta de usuario (y con ella, sus unidades): cambiarlo en un
+        // residente que tambien figura en otros edificios afectaria a esos edificios.
+        if (!fullyInScope && (normalizedEmail != entity.Email || request.IsActive != entity.IsActive))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, SharedResidentMessage);
+        }
+
         if (normalizedEmail != entity.Email)
         {
             entity.ApplicationUserId = await FindMatchingUserIdAsync(entity.CompanyId, normalizedEmail, cancellationToken);
@@ -248,6 +266,16 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         if (!accessScope.IsSuperAdmin && accessScope.CompanyId != entity.CompanyId)
         {
             return Forbid();
+        }
+
+        if (!accessScope.HasFullCompanyScope)
+        {
+            var scope = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+            var linked = await PeopleScope.BuildingsOfResidentAsync(dbContext, entity.Id, cancellationToken);
+            if (!PeopleScope.IsVisible(linked, scope))
+            {
+                return NotFound();
+            }
         }
 
         var hasAssignments = await dbContext.UnitResidents

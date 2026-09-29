@@ -45,8 +45,17 @@ public class OwnersController(
             query = query.Where(x => x.CompanyId == accessScope.CompanyId.Value);
         }
 
+        // Encargado/Operador (o admin de un condominio): solo propietarios con alguna unidad en sus edificios,
+        // mas los que todavia no tienen unidad asignada.
+        HashSet<Guid>? scope = null;
+        if (!accessScope.HasFullCompanyScope)
+        {
+            scope = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+            query = query.VisibleUsers(dbContext, scope);
+        }
+
         var owners = await query.OrderBy(x => x.FullName).ToListAsync(cancellationToken);
-        var presidencies = await LoadPresidenciesAsync(owners.Select(x => x.Id).ToList(), cancellationToken);
+        var presidencies = await LoadPresidenciesAsync(owners.Select(x => x.Id).ToList(), scope, cancellationToken);
         return Ok(owners.Select(o => ToDto(o, presidencies)).ToList());
     }
 
@@ -66,7 +75,10 @@ public class OwnersController(
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
 
-        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        var access = await ResolveAccessAsync(owner.Id, cancellationToken);
+        if (!access.Visible) return NotFound();
+
+        var presidencies = await LoadPresidenciesAsync([owner.Id], access.Scope, cancellationToken);
         return Ok(ToDto(owner, presidencies));
     }
 
@@ -146,6 +158,9 @@ public class OwnersController(
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
 
+        var access = await ResolveAccessAsync(owner.Id, cancellationToken);
+        if (!access.Visible) return NotFound();
+
         var companyId = owner.CompanyId ?? accessScope.CompanyId!.Value;
 
         var validationError = ValidateRequest(request);
@@ -153,6 +168,16 @@ public class OwnersController(
 
         var normalizedEmail    = request.Email.Trim().ToLowerInvariant();
         var normalizedUsername = request.Username.Trim().ToLowerInvariant();
+
+        // Si el propietario tambien figura en edificios que el usuario no tiene asignados, no puede tocar lo que da
+        // acceso a la cuenta (contrasena, usuario, correo, estado) ni la residencia: eso afectaria esos otros edificios.
+        if (!access.FullyInScope &&
+            (!string.IsNullOrWhiteSpace(request.Password)
+             || request.IsActive != owner.IsActive
+             || request.IsResident != owner.IsResident
+             || normalizedEmail != owner.Email
+             || normalizedUsername != owner.Username))
+            return StatusCode(StatusCodes.Status403Forbidden, SharedOwnerMessage);
 
         if (await EmailExistsAsync(companyId, normalizedEmail, owner.Id, cancellationToken))
             return Conflict("Ya existe un usuario con ese correo dentro de la empresa.");
@@ -184,21 +209,25 @@ public class OwnersController(
             owner.MustChangePassword = true;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.SignatureUrl))
+        // La firma pertenece al presidente (posiblemente de otro edificio): solo la gestiona quien tiene alcance total.
+        if (access.FullyInScope)
         {
-            if (request.SignatureUrl.Length > 500)
-                return BadRequest("La URL de la firma no puede superar los 500 caracteres.");
+            if (!string.IsNullOrWhiteSpace(request.SignatureUrl))
+            {
+                if (request.SignatureUrl.Length > 500)
+                    return BadRequest("La URL de la firma no puede superar los 500 caracteres.");
 
-            var isPresident = await dbContext.Buildings
-                .AnyAsync(x => !x.IsDeleted && x.PresidentUserId == owner.Id, cancellationToken);
-            if (!isPresident)
-                return BadRequest("Solo un propietario marcado como presidente de consorcio puede tener una firma.");
+                var isPresident = await dbContext.Buildings
+                    .AnyAsync(x => !x.IsDeleted && x.PresidentUserId == owner.Id, cancellationToken);
+                if (!isPresident)
+                    return BadRequest("Solo un propietario marcado como presidente de consorcio puede tener una firma.");
 
-            owner.SignatureUrl = request.SignatureUrl.Trim();
-        }
-        else
-        {
-            owner.SignatureUrl = null;
+                owner.SignatureUrl = request.SignatureUrl.Trim();
+            }
+            else
+            {
+                owner.SignatureUrl = null;
+            }
         }
 
         try
@@ -210,9 +239,11 @@ public class OwnersController(
             return Conflict("Ya existe un propietario con ese correo o nombre de usuario.");
         }
 
-        await residencySync.SyncAsync(owner, companyId, cancellationToken);
+        // La sincronizacion de residencia puede crear vinculos en cualquier unidad del propietario.
+        if (access.FullyInScope)
+            await residencySync.SyncAsync(owner, companyId, cancellationToken);
 
-        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        var presidencies = await LoadPresidenciesAsync([owner.Id], access.Scope, cancellationToken);
         return Ok(ToDto(owner, presidencies));
     }
 
@@ -234,6 +265,9 @@ public class OwnersController(
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
 
+        var access = await ResolveAccessAsync(id, cancellationToken);
+        if (!access.Visible) return NotFound();
+
         var buildingIds = await dbContext.UnitOwners
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.OwnerId == id && x.Unit != null && !x.Unit.IsDeleted)
@@ -245,6 +279,10 @@ public class OwnersController(
             .AsNoTracking()
             .Where(x => !x.IsDeleted && buildingIds.Contains(x.Id))
             .ToListAsync(cancellationToken);
+
+        // Solo los edificios que el usuario tiene asignados.
+        if (access.Scope is not null)
+            buildings = buildings.Where(x => access.Scope.Contains(x.Id)).ToList();
 
         var presidentIds = buildings.Where(x => x.PresidentUserId.HasValue && x.PresidentUserId != id)
             .Select(x => x.PresidentUserId!.Value).Distinct().ToList();
@@ -284,10 +322,19 @@ public class OwnersController(
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
 
+        var access = await ResolveAccessAsync(id, cancellationToken);
+        if (!access.Visible) return NotFound();
+
         // Sacamos al owner de cualquier edificio donde ya figure como presidente (solo puede serlo de uno).
         var currentPresidencies = await dbContext.Buildings
             .Where(x => !x.IsDeleted && x.PresidentUserId == id)
             .ToListAsync(cancellationToken);
+
+        // Quien tiene edificios acotados no puede quitarle la presidencia de un edificio ajeno (al reasignar
+        // o quitar se limpian todas las presidencias del propietario).
+        if (access.Scope is not null && currentPresidencies.Any(x => !access.Scope.Contains(x.Id)))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                "Este propietario ya es presidente de un edificio que no tenés asignado. Lo debe modificar un Administrador de empresa.");
 
         foreach (var b in currentPresidencies)
         {
@@ -305,6 +352,10 @@ public class OwnersController(
 
             if (!accessScope.IsSuperAdmin &&
                 (!accessScope.CompanyId.HasValue || building.CompanyId != accessScope.CompanyId.Value))
+                return Forbid();
+
+            // Solo se puede nombrar presidente en un edificio que el usuario tiene asignado.
+            if (access.Scope is not null && !access.Scope.Contains(building.Id))
                 return Forbid();
 
             var hasUnitInBuilding = await dbContext.UnitOwners
@@ -333,7 +384,7 @@ public class OwnersController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var presidencies = await LoadPresidenciesAsync([owner.Id], cancellationToken);
+        var presidencies = await LoadPresidenciesAsync([owner.Id], access.Scope, cancellationToken);
         return Ok(ToDto(owner, presidencies));
     }
 
@@ -351,6 +402,10 @@ public class OwnersController(
         if (!accessScope.IsSuperAdmin &&
             (!accessScope.CompanyId.HasValue || owner.CompanyId != accessScope.CompanyId.Value))
             return Forbid();
+
+        var access = await ResolveAccessAsync(owner.Id, cancellationToken);
+        if (!access.Visible) return NotFound();
+        if (!access.FullyInScope) return StatusCode(StatusCodes.Status403Forbidden, SharedOwnerMessage);
 
         owner.IsDeleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -420,12 +475,36 @@ public class OwnersController(
     private static string? NormalizeDocumentType(string? raw) =>
         raw?.Trim() is { Length: > 0 } t ? t : null;
 
-    private async Task<Dictionary<Guid, List<OwnerPresidentBuildingDto>>> LoadPresidenciesAsync(
-        List<Guid> ownerIds, CancellationToken ct)
+    // ─── ALCANCE POR EDIFICIO ───────────────────────────────────────────────
+    // Los propietarios son de la empresa, pero Encargado/Operador (o admin de un condominio) solo trabajan con
+    // los que tienen alguna unidad en sus edificios (o ninguna todavia). Ver PeopleScope.
+
+    private const string SharedOwnerMessage =
+        "Este propietario también tiene unidades en edificios que no tenés asignados, así que no podés cambiar su " +
+        "contraseña, usuario, correo, estado o residencia, ni eliminarlo. Lo debe hacer un Administrador de empresa.";
+
+    private readonly record struct OwnerAccess(bool Visible, bool FullyInScope, HashSet<Guid>? Scope);
+
+    private async Task<OwnerAccess> ResolveAccessAsync(Guid ownerId, CancellationToken ct)
     {
-        var buildings = await dbContext.Buildings
+        if (accessScope.HasFullCompanyScope) return new OwnerAccess(true, true, null);
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        var linked = await PeopleScope.BuildingsOfUserAsync(dbContext, ownerId, ct);
+        return new OwnerAccess(PeopleScope.IsVisible(linked, scope), PeopleScope.IsFullyInScope(linked, scope), scope);
+    }
+
+    private async Task<Dictionary<Guid, List<OwnerPresidentBuildingDto>>> LoadPresidenciesAsync(
+        List<Guid> ownerIds, HashSet<Guid>? scope, CancellationToken ct)
+    {
+        var buildingsQuery = dbContext.Buildings
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.PresidentUserId.HasValue && ownerIds.Contains(x.PresidentUserId.Value))
+            .Where(x => !x.IsDeleted && x.PresidentUserId.HasValue && ownerIds.Contains(x.PresidentUserId.Value));
+
+        if (scope is not null)
+            buildingsQuery = buildingsQuery.Where(x => scope.Contains(x.Id));
+
+        var buildings = await buildingsQuery
             .Select(x => new { x.Id, x.Name, PresidentUserId = x.PresidentUserId!.Value })
             .ToListAsync(ct);
 

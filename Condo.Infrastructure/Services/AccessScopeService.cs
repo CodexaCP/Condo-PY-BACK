@@ -10,6 +10,10 @@ public class AccessScopeService(ICondoDbContext dbContext, ITenantContext tenant
     public Guid? CompanyId => tenantContext.CompanyId;
     public Guid? CondominiumId => tenantContext.CondominiumId;
 
+    public bool HasFullCompanyScope =>
+        tenantContext.IsSuperAdmin ||
+        (tenantContext.IsCompanyAdmin && tenantContext.CompanyId.HasValue && !tenantContext.CondominiumId.HasValue);
+
     public async Task<HashSet<Guid>> GetAccessibleBuildingIdsAsync(CancellationToken cancellationToken)
     {
         if (tenantContext.IsSuperAdmin)
