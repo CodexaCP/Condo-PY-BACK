@@ -42,14 +42,13 @@ public class ExpenseSettlementSummaryDto
     public int GeneratedChargeCount { get; set; }
     public bool IsCalculated { get; set; }
     public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
-    // Suma de los ingresos de categoria "Saldo acumulado" (va aparte de los demas ingresos en la planilla).
-    public decimal AccumulatedBalance { get; set; }
-    // Suma de los ingresos de categoria "Fondo operativo" (tambien va aparte, con titulo y valor propios).
-    public decimal OperationalFund { get; set; }
+    // Total de ingresos por categoria (clave = nombre de BuildingIncomeCategory, p. ej. "AccumulatedBalance");
+    // solo estan las categorias que tienen ingresos en el periodo. Cada una se imprime en la planilla con su
+    // propio titulo y valor. Solo se completa al generar el PDF.
+    public Dictionary<string, decimal> IncomeTotals { get; set; } = new();
     public int PeriodYear { get; set; }
     public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();
-    public List<SettlementIncomeLineDto> IncomeLines { get; set; } = new();
 }
 
 public class SettlementCategoryTotalDto
@@ -170,9 +169,3 @@ public class SettlementExpenseLineDto
     public bool IsReserveFund { get; set; }
 }
 
-public class SettlementIncomeLineDto
-{
-    public string Label { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-}

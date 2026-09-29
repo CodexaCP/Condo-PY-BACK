@@ -1,4 +1,5 @@
 using Condo.Application.Models;
+using Condo.Domain.Enums;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -53,6 +54,18 @@ public sealed class SettlementPdfDocument(
         // Fondo operativo: igual que el saldo acumulado, titulo y valor aparte (solo en la primera hoja).
         ["fondoOperativoLabel"] = new(50, 118, 8, 200),
         ["fondoOperativoValor"] = new(475, 118, 8, 70, 'R'),
+
+        // El resto de las categorias de ingreso, cada una con su titulo y su valor.
+        ["alquilerLabel"] = new(370, 106, 8, 105),
+        ["alquilerValor"] = new(475, 106, 8, 70, 'R'),
+        ["interesLabel"] = new(370, 94, 8, 105),
+        ["interesValor"] = new(475, 94, 8, 70, 'R'),
+        ["ajusteLabel"] = new(370, 82, 8, 105),
+        ["ajusteValor"] = new(475, 82, 8, 70, 'R'),
+        ["aporteExtraLabel"] = new(370, 70, 8, 105),
+        ["aporteExtraValor"] = new(475, 70, 8, 70, 'R'),
+        ["otroLabel"] = new(370, 58, 8, 105),
+        ["otroValor"] = new(475, 58, 8, 70, 'R'),
 
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
         ["colConcepto"] = new(50, 145, 8, 135),
@@ -199,15 +212,24 @@ public sealed class SettlementPdfDocument(
         "firmaVerificacion"
     ];
 
+    // Una categoria de ingreso = un titulo y un valor, cada uno su bloque calibrable.
+    private static readonly (BuildingIncomeCategory Category, string LabelKey, string ValueKey, string Text)[] IncomeBlocks =
+    [
+        (BuildingIncomeCategory.AccumulatedBalance, "saldoLabel", "saldoValor", "SALDO ACUMULADO"),
+        (BuildingIncomeCategory.OperationalFund, "fondoOperativoLabel", "fondoOperativoValor", "FONDO OPERATIVO"),
+        (BuildingIncomeCategory.CommonAreaRental, "alquilerLabel", "alquilerValor", "ALQUILER/USO DE SALÓN"),
+        (BuildingIncomeCategory.Interest, "interesLabel", "interesValor", "INTERÉS"),
+        (BuildingIncomeCategory.CreditAdjustment, "ajusteLabel", "ajusteValor", "AJUSTE A FAVOR"),
+        (BuildingIncomeCategory.ExtraordinaryContribution, "aporteExtraLabel", "aporteExtraValor", "APORTE EXTRAORDINARIO"),
+        (BuildingIncomeCategory.Other, "otroLabel", "otroValor", "OTROS INGRESOS")
+    ];
+
     private IReadOnlyList<BodyRow> BuildBodyRows()
     {
         var rows = new List<BodyRow>();
 
-        // Ingresos del periodo (saldo acumulado, alquileres, intereses...) y luego un gasto por linea; el del
-        // fondo de reserva va en su columna.
-        foreach (var income in summary.IncomeLines)
-            rows.Add(new BodyRow(income.Label.ToUpperInvariant(), income.Description, string.Empty, FormatNumber(income.Amount)));
-
+        // Un gasto por linea; el del fondo de reserva va en su columna. Los ingresos no van en el cuerpo: cada
+        // categoria tiene su propio titulo y valor.
         foreach (var expense in ExpenseRows())
             rows.Add(new BodyRow(
                 expense.Supplier.ToUpperInvariant(),
@@ -329,13 +351,16 @@ public sealed class SettlementPdfDocument(
         PaperText(fg, "mes", MonthText(), bold: true);
         PaperText(fg, "anio", summary.PeriodYear > 0 ? summary.PeriodYear.ToString() : string.Empty, bold: true);
 
-        // Saldo acumulado y fondo operativo: aparte de los conceptos, solo en la primera hoja.
+        // Ingresos: cada categoria con su titulo y su valor por separado, solo en la primera hoja y solo las que
+        // tienen ingresos en el periodo.
         if (isFirstPage)
         {
-            PaperText(fg, "saldoLabel", "SALDO ACUMULADO", bold: true);
-            PaperText(fg, "saldoValor", FormatNumber(summary.AccumulatedBalance), bold: true);
-            PaperText(fg, "fondoOperativoLabel", "FONDO OPERATIVO", bold: true);
-            PaperText(fg, "fondoOperativoValor", FormatNumber(summary.OperationalFund), bold: true);
+            foreach (var (category, labelKey, valueKey, text) in IncomeBlocks)
+            {
+                if (!summary.IncomeTotals.TryGetValue(category.ToString(), out var amount)) continue;
+                PaperText(fg, labelKey, text, bold: true);
+                PaperText(fg, valueKey, FormatNumber(amount), bold: true);
+            }
         }
 
         // Totales: solo en la ultima hoja, cada titulo y cada valor por separado.

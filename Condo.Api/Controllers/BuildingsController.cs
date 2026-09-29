@@ -656,17 +656,21 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             PeriodYear = today.Year,
             PeriodMonth = today.Month,
             TotalBuildingExpenses = 43_590_000m,
-            TotalBuildingIncomes = 4_600_000m,
-            NetCommonAmount = 38_990_000m,
+            TotalBuildingIncomes = 5_250_000m,
+            NetCommonAmount = 38_340_000m,
             ReserveFundAmount = 2_640_000m,
             GeneratedAtUtc = today,
             IsCalculated = true,
-            AccumulatedBalance = 2_500_000m,
-            OperationalFund = 1_200_000m,
-            IncomeLines =
-            [
-                new() { Label = "Alquiler area comun", Description = "Alquiler / uso de salon", Amount = 900_000m }
-            ],
+            IncomeTotals = new Dictionary<string, decimal>
+            {
+                ["AccumulatedBalance"] = 2_500_000m,
+                ["OperationalFund"] = 1_200_000m,
+                ["CommonAreaRental"] = 900_000m,
+                ["Interest"] = 150_000m,
+                ["CreditAdjustment"] = 100_000m,
+                ["ExtraordinaryContribution"] = 350_000m,
+                ["Other"] = 50_000m
+            },
             ExpenseLines =
             [
                 new() { Supplier = "ANDE", Description = "Consumo ciclo 03/26", Amount = 3_150_000m },

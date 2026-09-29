@@ -1723,30 +1723,13 @@ public class ExpensePeriodsController(
         var incomes = await dbContext.BuildingIncomes
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId)
-            .Select(x => new { x.Category, x.Description, x.Amount, x.IncomeDate })
+            .Select(x => new { x.Category, x.Amount })
             .ToListAsync(cancellationToken);
 
-        // El saldo acumulado se imprime aparte (titulo y valor propios), no como un concepto mas.
-        summary.AccumulatedBalance = incomes
-            .Where(x => x.Category == BuildingIncomeCategory.AccumulatedBalance)
-            .Sum(x => x.Amount);
-
-        summary.OperationalFund = incomes
-            .Where(x => x.Category == BuildingIncomeCategory.OperationalFund)
-            .Sum(x => x.Amount);
-
-        summary.IncomeLines = incomes
-            .Where(x => x.Category != BuildingIncomeCategory.AccumulatedBalance
-                     && x.Category != BuildingIncomeCategory.OperationalFund)
-            .OrderBy(x => x.Category)
-            .ThenBy(x => x.IncomeDate)
-            .Select(x => new SettlementIncomeLineDto
-            {
-                Label = CategoryLabels.IncomeLabel(x.Category),
-                Description = x.Description,
-                Amount = x.Amount
-            })
-            .ToList();
+        // Cada categoria de ingreso se imprime aparte (titulo y valor propios), no como filas del cuerpo.
+        summary.IncomeTotals = incomes
+            .GroupBy(x => x.Category)
+            .ToDictionary(g => g.Key.ToString(), g => g.Sum(x => x.Amount));
     }
 
     private async Task<List<SettlementCategoryTotalDto>> BuildCategoryTotalsAsync(Guid expensePeriodId, CancellationToken cancellationToken)
