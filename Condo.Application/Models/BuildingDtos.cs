@@ -69,7 +69,8 @@ public class SettlementFieldOffsetDto
     // Ancho del bloque (columnas y bloques de la liquidacion), alto de fila (solo la key "filas") y ocultar.
     public float? Width { get; set; }
     public float? RowHeight { get; set; }
-    public bool Hidden { get; set; }
+    // null = usar el valor por defecto del bloque (algunos, como las columnas del cuerpo, arrancan ocultos)
+    public bool? Hidden { get; set; }
 }
 
 public class UpdateSettlementCalibrationRequest

@@ -683,12 +683,12 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             },
             ExpenseLines =
             [
-                new() { Supplier = "ANDE", Description = "Consumo ciclo 03/26", Amount = 3_150_000m },
-                new() { Supplier = "ESSAP S.A.", Description = "Consumo ciclo 03/26", Amount = 1_090_000m },
-                new() { Supplier = "Todo Brillo S.A.", Description = "Servicio de limpieza", Amount = 11_290_000m },
-                new() { Supplier = "Seguridad S.A.", Description = "Seguridad - valet parking", Amount = 21_650_000m },
-                new() { Supplier = "Administracion", Description = "Administracion consorcio", Amount = 6_410_000m },
-                new() { Supplier = "CGI S.R.L.", Description = "Cambio de barrera en ascensor", Amount = 2_640_000m, IsReserveFund = true }
+                new() { Supplier = "ANDE", Description = "Consumo ciclo 03/26", Amount = 3_150_000m, Category = "Ande" },
+                new() { Supplier = "ESSAP S.A.", Description = "Consumo ciclo 03/26", Amount = 1_090_000m, Category = "Essap" },
+                new() { Supplier = "Todo Brillo S.A.", Description = "Servicio de limpieza", Amount = 11_290_000m, Category = "Cleaning" },
+                new() { Supplier = "Seguridad S.A.", Description = "Seguridad - valet parking", Amount = 21_650_000m, Category = "Security" },
+                new() { Supplier = "Administracion", Description = "Administracion consorcio", Amount = 6_410_000m, Category = "Administration" },
+                new() { Supplier = "CGI S.R.L.", Description = "Cambio de barrera en ascensor", Amount = 2_640_000m, IsReserveFund = true, Category = "ReserveFund" }
             ],
             CategoryTotals =
             [

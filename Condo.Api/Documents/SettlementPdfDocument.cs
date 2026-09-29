@@ -29,17 +29,59 @@ public sealed class SettlementPdfDocument(
     // Width: ancho del bloque; RowHeight: alto de cada fila del cuerpo (solo en la key "filas"); Hidden: no
     // dibujar el bloque (el papel ya lo trae impreso).
     private sealed record FieldOffset(
-        float Dx, float Dy, float? FontSize = null, float? Width = null, float? RowHeight = null, bool Hidden = false);
+        float Dx, float Dy, float? FontSize = null, float? Width = null, float? RowHeight = null, bool? Hidden = null);
 
     // Posicion base de cada bloque sobre el papel propio (puntos PDF, desde la esquina superior izquierda).
     // Las keys, x, top, tamanos y anchos tienen que coincidir con FIELDS de settlement-calibration-page.component.ts:
     // si se agrega un bloque calibrable aca, hay que agregarlo alla tambien para poder arrastrarlo.
     // Align: 'L' izquierda, 'C' centrado, 'R' derecha (dentro del ancho del bloque).
-    private sealed record FieldDefault(float X, float Top, float Size, float Width = 0, char Align = 'L');
+    private sealed record FieldDefault(float X, float Top, float Size, float Width = 0, char Align = 'L', bool HiddenByDefault = false);
 
     // Cada dato es un bloque propio (etiqueta y valor por separado) para que se pueda ubicar, ensanchar u ocultar
     // solo, segun lo que el papel ya traiga impreso. Las columnas del cuerpo van una por bloque.
-    private static readonly IReadOnlyDictionary<string, FieldDefault> FieldDefaults = new Dictionary<string, FieldDefault>
+    // Categorias de gasto: cada una es un titulo, una descripcion y un valor (como las de ingreso). Las filas
+    // por defecto siguen el orden de la planilla, una debajo de la otra.
+    private static readonly (BuildingExpenseCategory Category, string Text)[] ExpenseBlocks =
+    [
+        (BuildingExpenseCategory.Ande, "ANDE"),
+        (BuildingExpenseCategory.Essap, "ESSAP S.A."),
+        (BuildingExpenseCategory.Utilities, "SERVICIOS"),
+        (BuildingExpenseCategory.InternetPhone, "INTERNET Y TELEFONÍA"),
+        (BuildingExpenseCategory.Cleaning, "LIMPIEZA"),
+        (BuildingExpenseCategory.Security, "SEGURIDAD"),
+        (BuildingExpenseCategory.Maintenance, "MANTENIMIENTO"),
+        (BuildingExpenseCategory.Elevator, "ASCENSOR"),
+        (BuildingExpenseCategory.Insurance, "SEGURO"),
+        (BuildingExpenseCategory.Supplies, "INSUMOS"),
+        (BuildingExpenseCategory.Payroll, "SALARIOS"),
+        (BuildingExpenseCategory.Taxes, "IMPUESTOS"),
+        (BuildingExpenseCategory.Administration, "ADMINISTRACIÓN"),
+        (BuildingExpenseCategory.Extraordinary, "EXTRAORDINARIO"),
+        (BuildingExpenseCategory.Other, "OTROS GASTOS"),
+        (BuildingExpenseCategory.ReserveFund, "FONDO DE RESERVA")
+    ];
+
+    private static string ExpensePrefix(BuildingExpenseCategory category) => "gasto" + category;
+
+    // Perezoso: BaseDefaults se declara mas abajo y los campos estaticos se inicializan en orden de aparicion.
+    private static IReadOnlyDictionary<string, FieldDefault>? fieldDefaults;
+    private static IReadOnlyDictionary<string, FieldDefault> FieldDefaults => fieldDefaults ??= BuildFieldDefaults();
+
+    private static Dictionary<string, FieldDefault> BuildFieldDefaults()
+    {
+        var defaults = new Dictionary<string, FieldDefault>(BaseDefaults);
+        for (var i = 0; i < ExpenseBlocks.Length; i++)
+        {
+            var top = 145f + i * 15f;
+            var prefix = ExpensePrefix(ExpenseBlocks[i].Category);
+            defaults[prefix + "Label"] = new(50, top, 8, 135);
+            defaults[prefix + "Descripcion"] = new(185, top, 8, 220);
+            defaults[prefix + "Valor"] = new(475, top, 8, 70, 'R');
+        }
+        return defaults;
+    }
+
+    private static readonly Dictionary<string, FieldDefault> BaseDefaults = new()
     {
         // Encabezado: titulo (etiqueta) y luego cada valor por separado.
         ["titulo"] = new(195, 86, 11),
@@ -75,10 +117,12 @@ public sealed class SettlementPdfDocument(
         ["otroValor"] = new(475, 58, 8, 70, 'R'),
 
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
-        ["colConcepto"] = new(50, 145, 8, 135),
-        ["colDescripcion"] = new(185, 145, 8, 220),
-        ["colReserva"] = new(405, 145, 8, 70, 'R'),
-        ["colMonto"] = new(475, 145, 8, 70, 'R'),
+        // (arrancan ocultos: los gastos se imprimen por categoria, cada una con su titulo, descripcion y valor;
+        // el cuerpo con una fila por gasto sigue disponible destildando "No dibujar")
+        ["colConcepto"] = new(50, 145, 8, 135, HiddenByDefault: true),
+        ["colDescripcion"] = new(185, 145, 8, 220, HiddenByDefault: true),
+        ["colReserva"] = new(405, 145, 8, 70, 'R', true),
+        ["colMonto"] = new(475, 145, 8, 70, 'R', true),
 
         // Totales: cada titulo y cada valor por separado (solo salen en la ultima hoja).
         ["totIngresosLabel"] = new(50, 585, 8, 200),
@@ -145,7 +189,8 @@ public sealed class SettlementPdfDocument(
             o?.Width is > 0 ? o.Width.Value : d.Width);
     }
 
-    private bool IsHidden(string key) => offsets.TryGetValue(key, out var o) && o.Hidden;
+    private bool IsHidden(string key) =>
+        offsets.TryGetValue(key, out var o) && o.Hidden.HasValue ? o.Hidden.Value : FieldDefaults[key].HiddenByDefault;
 
     private float RowHeight =>
         offsets.TryGetValue(RowsKey, out var o) && o.RowHeight is >= 6 and <= 80 ? o.RowHeight.Value : DefaultRowHeight;
@@ -249,7 +294,9 @@ public sealed class SettlementPdfDocument(
 
     private void ComposeOnPaper(IDocumentContainer container)
     {
-        var rows = BuildBodyRows();
+        // Sin columnas del cuerpo a la vista (por defecto), no hay filas: una sola hoja.
+        var bodyVisible = new[] { "colConcepto", "colDescripcion", "colReserva", "colMonto" }.Any(key => !IsHidden(key));
+        var rows = bodyVisible ? BuildBodyRows() : Array.Empty<BodyRow>();
         var rowHeight = RowHeight;
 
         // Las filas terminan antes del primer bloque que este DEBAJO de ellas y sobre su misma franja horizontal.
@@ -369,6 +416,26 @@ public sealed class SettlementPdfDocument(
                 PaperText(fg, prefix + "Label", text, bold: true);
                 PaperText(fg, prefix + "Descripcion", description?.ToUpperInvariant());
                 PaperText(fg, prefix + "Valor", FormatNumber(amount), bold: true);
+            }
+        }
+
+        // Gastos: cada categoria con su titulo, su descripcion y su valor por separado, solo en la primera hoja
+        // y solo las que tienen gastos en el periodo. El valor es el total de la categoria y la descripcion junta
+        // las de sus gastos (o los proveedores si no tienen descripcion).
+        if (isFirstPage)
+        {
+            var byCategory = ExpenseRows().Where(x => x.Category.Length > 0).GroupBy(x => x.Category).ToDictionary(g => g.Key, g => g.ToList());
+            foreach (var (category, text) in ExpenseBlocks)
+            {
+                if (!byCategory.TryGetValue(category.ToString(), out var lines)) continue;
+                var descriptions = lines.Select(x => x.Description.Trim()).Where(x => x.Length > 0).Distinct().ToList();
+                if (descriptions.Count == 0)
+                    descriptions = lines.Select(x => x.Supplier.Trim()).Where(x => x.Length > 0).Distinct().ToList();
+
+                var prefix = ExpensePrefix(category);
+                PaperText(fg, prefix + "Label", text, bold: true);
+                PaperText(fg, prefix + "Descripcion", string.Join(" / ", descriptions).ToUpperInvariant());
+                PaperText(fg, prefix + "Valor", FormatNumber(lines.Sum(x => x.Amount)), bold: true);
             }
         }
 

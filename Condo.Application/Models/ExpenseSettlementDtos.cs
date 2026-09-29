@@ -169,5 +169,7 @@ public class SettlementExpenseLineDto
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public bool IsReserveFund { get; set; }
+    // Nombre de BuildingExpenseCategory (p. ej. "Ande"); cada categoria se imprime con titulo, descripcion y valor.
+    public string Category { get; set; } = string.Empty;
 }
 

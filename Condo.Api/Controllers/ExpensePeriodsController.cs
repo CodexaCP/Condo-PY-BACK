@@ -1716,7 +1716,8 @@ public class ExpensePeriodsController(
                 Supplier = x.SupplierName,
                 Description = x.Description,
                 Amount = x.Amount,
-                IsReserveFund = x.Category == BuildingExpenseCategory.ReserveFund
+                IsReserveFund = x.Category == BuildingExpenseCategory.ReserveFund,
+                Category = x.Category.ToString()
             })
             .ToList();
 
