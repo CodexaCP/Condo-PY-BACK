@@ -7,6 +7,11 @@ namespace Condo.Api.Documents;
 
 public sealed record SettlementSignature(string Name, string Title, byte[]? Image);
 
+/// <summary>
+/// Liquidacion de expensas A4. Con el modelo estandar sale con los colores de CONDOPY; con el modelo propio
+/// del edificio (backgroundImage, cargado por el superadmin) el papel ya trae su diseno, asi que se imprime
+/// sobre el a pagina completa y el texto va en negro/gris, sin marca ni colores de CONDOPY.
+/// </summary>
 public sealed class SettlementPdfDocument(
     ExpenseSettlementSummaryDto summary,
     string periodStartDate,
@@ -14,14 +19,25 @@ public sealed class SettlementPdfDocument(
     string periodDueDate,
     SettlementSignature? approver = null,
     SettlementSignature? president = null,
-    SettlementSignature? publisher = null) : IDocument
+    SettlementSignature? publisher = null,
+    bool standardTemplate = true,
+    byte[]? backgroundImage = null) : IDocument
 {
-    private const string ColorPrimary = "#1385B6";
-    private const string ColorAccent = "#1AB7AF";
-    private const string ColorGray = "#637b88";
-    private const string ColorBorder = "#d7e5ea";
-    private const string ColorRowAlt = "#f4f9fc";
+    private sealed record Palette(
+        string Primary, string Accent, string Gray, string RowAlt, string CatHeader,
+        string HeaderFill, string HeaderText, string TotalFill, string TotalText);
+
+    private static readonly Palette Standard = new(
+        Primary: "#1385B6", Accent: "#1AB7AF", Gray: "#637b88", RowAlt: "#f4f9fc", CatHeader: "#e8f4f8",
+        HeaderFill: "#1385B6", HeaderText: "#ffffff", TotalFill: "#1AB7AF", TotalText: "#ffffff");
+
+    private static readonly Palette OwnPaper = new(
+        Primary: "#000000", Accent: "#404040", Gray: "#404040", RowAlt: "#f5f5f5", CatHeader: "#ededed",
+        HeaderFill: "#e4e4e4", HeaderText: "#000000", TotalFill: "#cfcfcf", TotalText: "#000000");
+
     private const string ColorWhite = "#ffffff";
+
+    private readonly Palette p = standardTemplate ? Standard : OwnPaper;
 
     public DocumentMetadata GetMetadata() => new()
     {
@@ -38,6 +54,11 @@ public sealed class SettlementPdfDocument(
             page.Size(PageSizes.A4);
             page.Margin(32, Unit.Point);
             page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(9));
+
+            // El fondo va fuera del margen: el modelo del edificio cubre toda la hoja y el contenido
+            // se acomoda dentro del margen, pagina por pagina.
+            if (backgroundImage is not null)
+                page.Background().Image(backgroundImage).FitArea();
 
             page.Header().Element(ComposeHeader);
             page.Content().Layers(layers =>
@@ -60,23 +81,30 @@ public sealed class SettlementPdfDocument(
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(ColorPrimary);
-                    c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(ColorAccent);
+                    if (standardTemplate)
+                    {
+                        c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(p.Primary);
+                        c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
+                    }
+                    else
+                    {
+                        c.Item().Text("Liquidacion de Expensas").FontSize(14).Bold().FontColor(p.Primary);
+                    }
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
                 {
-                    c.Item().Text(summary.BuildingName).Bold().FontColor(ColorPrimary);
-                    c.Item().Text(summary.ExpensePeriodName).FontColor(ColorGray);
+                    c.Item().Text(summary.BuildingName).Bold().FontColor(p.Primary);
+                    c.Item().Text(summary.ExpensePeriodName).FontColor(p.Gray);
                 });
             });
 
             col.Item().PaddingTop(6).Row(row =>
             {
-                row.RelativeItem().Text($"Vigencia: {periodStartDate} al {periodEndDate}").FontColor(ColorGray);
-                row.RelativeItem().AlignRight().Text($"Vencimiento: {periodDueDate}").FontColor(ColorGray);
+                row.RelativeItem().Text($"Vigencia: {periodStartDate} al {periodEndDate}").FontColor(p.Gray);
+                row.RelativeItem().AlignRight().Text($"Vencimiento: {periodDueDate}").FontColor(p.Gray);
             });
 
-            col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(ColorPrimary);
+            col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(p.Primary);
         });
     }
 
@@ -97,7 +125,7 @@ public sealed class SettlementPdfDocument(
     {
         container.Column(col =>
         {
-            col.Item().PaddingBottom(6).Text("Resumen de liquidacion").Bold().FontColor(ColorPrimary);
+            col.Item().PaddingBottom(6).Text("Resumen de liquidacion").Bold().FontColor(p.Primary);
 
             col.Item().Table(table =>
             {
@@ -109,10 +137,10 @@ public sealed class SettlementPdfDocument(
 
                 table.Header(header =>
                 {
-                    header.Cell().Background(ColorPrimary).Padding(5)
-                        .Text("Concepto").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(5)
-                        .AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(p.HeaderFill).Padding(5)
+                        .Text("Concepto").FontColor(p.HeaderText).Bold();
+                    header.Cell().Background(p.HeaderFill).Padding(5)
+                        .AlignRight().Text("Monto (Gs.)").FontColor(p.HeaderText).Bold();
                 });
 
                 AddSummaryRow(table, "Total gastos del edificio", summary.TotalBuildingExpenses, false);
@@ -132,10 +160,10 @@ public sealed class SettlementPdfDocument(
         });
     }
 
-    private static void AddSummaryRow(TableDescriptor table, string label, decimal amount, bool isTotal, bool isSubrow = false)
+    private void AddSummaryRow(TableDescriptor table, string label, decimal amount, bool isTotal, bool isSubrow = false)
     {
-        var bg = isTotal ? ColorAccent : (isSubrow ? ColorRowAlt : ColorWhite);
-        var textColor = isTotal ? ColorWhite : ColorPrimary;
+        var bg = isTotal ? p.TotalFill : (isSubrow ? p.RowAlt : ColorWhite);
+        var textColor = isTotal ? p.TotalText : p.Primary;
 
         table.Cell().Background(bg).Padding(5)
             .Text(t =>
@@ -172,8 +200,6 @@ public sealed class SettlementPdfDocument(
         ["Other"] = "Otro"
     };
 
-    private const string ColorCatHeader = "#e8f4f8";
-
     private void ComposeCategoryTable(IContainer container)
     {
         var totals = summary.CategoryTotals;
@@ -182,10 +208,10 @@ public sealed class SettlementPdfDocument(
 
         container.Column(col =>
         {
-            col.Item().PaddingBottom(4).Text("Gastos comunes por categoria").Bold().FontColor(ColorPrimary);
+            col.Item().PaddingBottom(4).Text("Gastos comunes por categoria").Bold().FontColor(p.Primary);
             col.Item().PaddingBottom(8)
                 .Text($"{expenseCount} gastos · {totals.Count} categorias · {FormatCurrency(total)}")
-                .FontColor(ColorGray);
+                .FontColor(p.Gray);
 
             col.Item().Table(table =>
             {
@@ -197,8 +223,8 @@ public sealed class SettlementPdfDocument(
 
                 table.Header(header =>
                 {
-                    header.Cell().Background(ColorPrimary).Padding(4).Text("Concepto").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(4).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(p.HeaderFill).Padding(4).Text("Concepto").FontColor(p.HeaderText).Bold();
+                    header.Cell().Background(p.HeaderFill).Padding(4).AlignRight().Text("Monto (Gs.)").FontColor(p.HeaderText).Bold();
                 });
 
                 var itemAlt = true;
@@ -207,33 +233,33 @@ public sealed class SettlementPdfDocument(
                     var catLabel = CategoryLabels.GetValueOrDefault(cat.Category, cat.Category);
 
                     // Fila cabecera de categoría
-                    table.Cell().Background(ColorCatHeader).Padding(4)
-                        .Text(catLabel).Bold().FontColor(ColorPrimary);
-                    table.Cell().Background(ColorCatHeader).Padding(4).AlignRight()
-                        .Text(FormatCurrency(cat.Amount)).Bold().FontColor(ColorPrimary);
+                    table.Cell().Background(p.CatHeader).Padding(4)
+                        .Text(catLabel).Bold().FontColor(p.Primary);
+                    table.Cell().Background(p.CatHeader).Padding(4).AlignRight()
+                        .Text(FormatCurrency(cat.Amount)).Bold().FontColor(p.Primary);
 
                     // Sub-filas: un gasto por fila
                     foreach (var item in cat.Items)
                     {
-                        var bg = itemAlt ? ColorWhite : ColorRowAlt;
+                        var bg = itemAlt ? ColorWhite : p.RowAlt;
                         itemAlt = !itemAlt;
 
                         table.Cell().Background(bg).PaddingLeft(14).PaddingVertical(3)
                             .Text(t =>
                             {
-                                t.Span("· ").FontColor(ColorAccent);
-                                t.Span(item.Description).FontColor(ColorGray);
+                                t.Span("· ").FontColor(p.Accent);
+                                t.Span(item.Description).FontColor(p.Gray);
                             });
                         table.Cell().Background(bg).PaddingRight(4).PaddingVertical(3).AlignRight()
-                            .Text(FormatCurrency(item.Amount)).FontColor(ColorGray);
+                            .Text(FormatCurrency(item.Amount)).FontColor(p.Gray);
                     }
                 }
 
                 // Fila total
-                table.Cell().Background(ColorAccent).Padding(4)
-                    .Text("Total gastos comunes").FontColor(ColorWhite).Bold();
-                table.Cell().Background(ColorAccent).Padding(4).AlignRight()
-                    .Text(FormatCurrency(total)).FontColor(ColorWhite).Bold();
+                table.Cell().Background(p.TotalFill).Padding(4)
+                    .Text("Total gastos comunes").FontColor(p.TotalText).Bold();
+                table.Cell().Background(p.TotalFill).Padding(4).AlignRight()
+                    .Text(FormatCurrency(total)).FontColor(p.TotalText).Bold();
             });
         });
     }
@@ -250,7 +276,7 @@ public sealed class SettlementPdfDocument(
         });
     }
 
-    private static void ComposeSignatureBlock(IContainer container, SettlementSignature? signature)
+    private void ComposeSignatureBlock(IContainer container, SettlementSignature? signature)
     {
         if (signature is null) return;
 
@@ -260,9 +286,9 @@ public sealed class SettlementPdfDocument(
             {
                 if (signature.Image is { Length: > 0 }) img.Image(signature.Image).FitArea();
             });
-            col.Item().PaddingTop(2).LineHorizontal(0.75f).LineColor(ColorGray);
-            col.Item().PaddingTop(3).AlignCenter().Text(signature.Name).Bold().FontColor(ColorPrimary);
-            col.Item().AlignCenter().Text(signature.Title).FontColor(ColorGray);
+            col.Item().PaddingTop(2).LineHorizontal(0.75f).LineColor(p.Gray);
+            col.Item().PaddingTop(3).AlignCenter().Text(signature.Name).Bold().FontColor(p.Primary);
+            col.Item().AlignCenter().Text(signature.Title).FontColor(p.Gray);
         });
     }
 
@@ -272,17 +298,19 @@ public sealed class SettlementPdfDocument(
         {
             row.RelativeItem().Text(t =>
             {
-                t.Span("Generado por CONDOPY").FontColor(ColorGray);
+                if (standardTemplate)
+                    t.Span("Generado por CONDOPY").FontColor(p.Gray);
                 if (summary.GeneratedAtUtc.HasValue)
                 {
-                    t.Span($" · {summary.GeneratedAtUtc.Value:dd/MM/yyyy HH:mm} UTC").FontColor(ColorGray);
+                    var stamp = summary.GeneratedAtUtc.Value.ToString("dd/MM/yyyy HH:mm");
+                    t.Span(standardTemplate ? $" · {stamp} UTC" : $"Generado el {stamp} UTC").FontColor(p.Gray);
                 }
             });
             row.ConstantItem(80).AlignRight().Text(t =>
             {
-                t.CurrentPageNumber().FontColor(ColorGray);
-                t.Span(" / ").FontColor(ColorGray);
-                t.TotalPages().FontColor(ColorGray);
+                t.CurrentPageNumber().FontColor(p.Gray);
+                t.Span(" / ").FontColor(p.Gray);
+                t.TotalPages().FontColor(p.Gray);
             });
         });
     }
