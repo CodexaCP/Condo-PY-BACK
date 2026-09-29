@@ -46,6 +46,10 @@ public sealed class SettlementPdfDocument(
         ["mes"] = new(215, 112, 10),
         ["anio"] = new(330, 112, 10),
 
+        // Saldo acumulado: titulo y valor aparte de los conceptos (solo en la primera hoja).
+        ["saldoLabel"] = new(50, 130, 8, 200),
+        ["saldoValor"] = new(475, 130, 8, 70, 'R'),
+
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
         ["colConcepto"] = new(50, 145, 8, 135),
         ["colDescripcion"] = new(185, 145, 8, 220),
@@ -275,7 +279,7 @@ public sealed class SettlementPdfDocument(
                 page.Foreground().Layers(fg =>
                 {
                     fg.PrimaryLayer().Text(string.Empty);
-                    ComposePaperFixedBlocks(fg, isLastPage);
+                    ComposePaperFixedBlocks(fg, isFirstPage: pageIndex == 0, isLastPage);
                 });
             });
         }
@@ -323,7 +327,7 @@ public sealed class SettlementPdfDocument(
             });
     }
 
-    private void ComposePaperFixedBlocks(LayersDescriptor fg, bool isLastPage)
+    private void ComposePaperFixedBlocks(LayersDescriptor fg, bool isFirstPage, bool isLastPage)
     {
         var titleStyle = true;
 
@@ -332,6 +336,13 @@ public sealed class SettlementPdfDocument(
         PaperText(fg, "edificio", summary.BuildingName.ToUpperInvariant(), bold: true);
         PaperText(fg, "mes", MonthText(), bold: true);
         PaperText(fg, "anio", summary.PeriodYear > 0 ? summary.PeriodYear.ToString() : string.Empty, bold: true);
+
+        // Saldo acumulado: aparte de los conceptos, solo en la primera hoja.
+        if (isFirstPage)
+        {
+            PaperText(fg, "saldoLabel", "SALDO ACUMULADO", bold: true);
+            PaperText(fg, "saldoValor", FormatNumber(summary.AccumulatedBalance), bold: true);
+        }
 
         // Totales: solo en la ultima hoja, cada titulo y cada valor por separado.
         if (isLastPage)

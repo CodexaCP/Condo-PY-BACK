@@ -1726,14 +1726,18 @@ public class ExpensePeriodsController(
             .Select(x => new { x.Category, x.Description, x.Amount, x.IncomeDate })
             .ToListAsync(cancellationToken);
 
+        // El saldo acumulado se imprime aparte (titulo y valor propios), no como un concepto mas.
+        summary.AccumulatedBalance = incomes
+            .Where(x => x.Category == BuildingIncomeCategory.AccumulatedBalance)
+            .Sum(x => x.Amount);
+
         summary.IncomeLines = incomes
+            .Where(x => x.Category != BuildingIncomeCategory.AccumulatedBalance)
             .OrderBy(x => x.Category)
             .ThenBy(x => x.IncomeDate)
             .Select(x => new SettlementIncomeLineDto
             {
-                Label = x.Category == BuildingIncomeCategory.AccumulatedBalance
-                    ? "Saldo acumulado"
-                    : CategoryLabels.IncomeLabel(x.Category),
+                Label = CategoryLabels.IncomeLabel(x.Category),
                 Description = x.Description,
                 Amount = x.Amount
             })

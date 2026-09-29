@@ -661,9 +661,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ReserveFundAmount = 2_640_000m,
             GeneratedAtUtc = today,
             IsCalculated = true,
+            AccumulatedBalance = 2_500_000m,
             IncomeLines =
             [
-                new() { Label = "Saldo acumulado", Description = string.Empty, Amount = 2_500_000m },
                 new() { Label = "Alquiler area comun", Description = "Alquiler / uso de salon", Amount = 900_000m }
             ],
             ExpenseLines =

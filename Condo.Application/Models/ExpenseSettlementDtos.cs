@@ -42,6 +42,8 @@ public class ExpenseSettlementSummaryDto
     public int GeneratedChargeCount { get; set; }
     public bool IsCalculated { get; set; }
     public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
+    // Suma de los ingresos de categoria "Saldo acumulado" (va aparte de los demas ingresos en la planilla).
+    public decimal AccumulatedBalance { get; set; }
     public int PeriodYear { get; set; }
     public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();
