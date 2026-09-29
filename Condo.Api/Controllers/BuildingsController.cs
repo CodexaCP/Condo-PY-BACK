@@ -653,6 +653,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             BuildingId = building.Id,
             BuildingName = building.Name,
             ExpensePeriodName = "Período de ejemplo",
+            PeriodYear = today.Year,
+            PeriodMonth = today.Month,
             TotalBuildingExpenses = 43_590_000m,
             TotalBuildingIncomes = 3_400_000m,
             NetCommonAmount = 40_190_000m,

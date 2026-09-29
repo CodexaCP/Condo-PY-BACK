@@ -1350,6 +1350,8 @@ public class ExpensePeriodsController(
 
         // Detalle linea por linea (proveedor, concepto, monto) para la planilla sobre el modelo propio.
         await LoadSettlementLinesAsync(summary, id, cancellationToken);
+        summary.PeriodYear = period.Year;
+        summary.PeriodMonth = period.Month;
 
         // Si el edificio tiene su propio modelo de liquidacion (cargado por el superadmin) la liquidacion se
         // imprime sobre ese papel; sin modelo propio (o si el archivo ya no esta) sale con el diseno estandar.

@@ -42,6 +42,8 @@ public class ExpenseSettlementSummaryDto
     public int GeneratedChargeCount { get; set; }
     public bool IsCalculated { get; set; }
     public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
+    public int PeriodYear { get; set; }
+    public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();
     public List<SettlementIncomeLineDto> IncomeLines { get; set; } = new();
 }
