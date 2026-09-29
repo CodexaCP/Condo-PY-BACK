@@ -30,6 +30,7 @@ public static class CategoryLabels
         BuildingIncomeCategory.Interest => "Interes",
         BuildingIncomeCategory.OperationalFund => "Fondo operativo",
         BuildingIncomeCategory.CreditAdjustment => "Ajuste a favor",
+        BuildingIncomeCategory.ExtraordinaryContribution => "Aporte extraordinario",
         _ => "Otro"
     };
 }

@@ -7,5 +7,6 @@ public enum BuildingIncomeCategory
     Interest = 3,
     OperationalFund = 4,
     CreditAdjustment = 5,
-    Other = 6
+    Other = 6,
+    ExtraordinaryContribution = 7
 }
