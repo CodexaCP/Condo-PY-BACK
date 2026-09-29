@@ -1723,13 +1723,19 @@ public class ExpensePeriodsController(
         var incomes = await dbContext.BuildingIncomes
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId)
-            .Select(x => new { x.Category, x.Amount })
+            .Select(x => new { x.Category, x.Description, x.Amount })
             .ToListAsync(cancellationToken);
 
         // Cada categoria de ingreso se imprime aparte (titulo y valor propios), no como filas del cuerpo.
         summary.IncomeTotals = incomes
             .GroupBy(x => x.Category)
             .ToDictionary(g => g.Key.ToString(), g => g.Sum(x => x.Amount));
+
+        summary.IncomeDescriptions = incomes
+            .GroupBy(x => x.Category)
+            .ToDictionary(
+                g => g.Key.ToString(),
+                g => string.Join(" / ", g.Select(x => x.Description.Trim()).Where(x => x.Length > 0).Distinct()));
     }
 
     private async Task<List<SettlementCategoryTotalDto>> BuildCategoryTotalsAsync(Guid expensePeriodId, CancellationToken cancellationToken)

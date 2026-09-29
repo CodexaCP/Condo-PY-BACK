@@ -671,6 +671,16 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ["ExtraordinaryContribution"] = 350_000m,
                 ["Other"] = 50_000m
             },
+            IncomeDescriptions = new Dictionary<string, string>
+            {
+                ["AccumulatedBalance"] = "Saldo anterior período",
+                ["OperationalFund"] = "Gs. 121.700.000",
+                ["CommonAreaRental"] = "Alquiler / uso de salón",
+                ["Interest"] = "Fondo mutuo Gs. 100.000.000",
+                ["CreditAdjustment"] = "Ajuste de ejemplo",
+                ["ExtraordinaryContribution"] = "Aporte extraordinario",
+                ["Other"] = "Otros ingresos"
+            },
             ExpenseLines =
             [
                 new() { Supplier = "ANDE", Description = "Consumo ciclo 03/26", Amount = 3_150_000m },

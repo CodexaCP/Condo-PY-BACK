@@ -46,6 +46,8 @@ public class ExpenseSettlementSummaryDto
     // solo estan las categorias que tienen ingresos en el periodo. Cada una se imprime en la planilla con su
     // propio titulo y valor. Solo se completa al generar el PDF.
     public Dictionary<string, decimal> IncomeTotals { get; set; } = new();
+    // Descripcion de cada categoria de ingreso (las de sus ingresos, sin repetir, separadas por " / ").
+    public Dictionary<string, string> IncomeDescriptions { get; set; } = new();
     public int PeriodYear { get; set; }
     public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();

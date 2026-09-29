@@ -49,22 +49,29 @@ public sealed class SettlementPdfDocument(
 
         // Saldo acumulado: titulo y valor aparte de los conceptos (solo en la primera hoja).
         ["saldoLabel"] = new(50, 130, 8, 200),
+        ["saldoDescripcion"] = new(255, 130, 8, 110),
         ["saldoValor"] = new(475, 130, 8, 70, 'R'),
 
         // Fondo operativo: igual que el saldo acumulado, titulo y valor aparte (solo en la primera hoja).
         ["fondoOperativoLabel"] = new(50, 118, 8, 200),
+        ["fondoOperativoDescripcion"] = new(255, 118, 8, 110),
         ["fondoOperativoValor"] = new(475, 118, 8, 70, 'R'),
 
         // El resto de las categorias de ingreso, cada una con su titulo y su valor.
         ["alquilerLabel"] = new(370, 106, 8, 105),
+        ["alquilerDescripcion"] = new(250, 106, 8, 115),
         ["alquilerValor"] = new(475, 106, 8, 70, 'R'),
         ["interesLabel"] = new(370, 94, 8, 105),
+        ["interesDescripcion"] = new(250, 94, 8, 115),
         ["interesValor"] = new(475, 94, 8, 70, 'R'),
         ["ajusteLabel"] = new(370, 82, 8, 105),
+        ["ajusteDescripcion"] = new(250, 82, 8, 115),
         ["ajusteValor"] = new(475, 82, 8, 70, 'R'),
         ["aporteExtraLabel"] = new(370, 70, 8, 105),
+        ["aporteExtraDescripcion"] = new(250, 70, 8, 115),
         ["aporteExtraValor"] = new(475, 70, 8, 70, 'R'),
         ["otroLabel"] = new(370, 58, 8, 105),
+        ["otroDescripcion"] = new(250, 58, 8, 115),
         ["otroValor"] = new(475, 58, 8, 70, 'R'),
 
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
@@ -213,15 +220,15 @@ public sealed class SettlementPdfDocument(
     ];
 
     // Una categoria de ingreso = un titulo y un valor, cada uno su bloque calibrable.
-    private static readonly (BuildingIncomeCategory Category, string LabelKey, string ValueKey, string Text)[] IncomeBlocks =
+    private static readonly (BuildingIncomeCategory Category, string Prefix, string Text)[] IncomeBlocks =
     [
-        (BuildingIncomeCategory.AccumulatedBalance, "saldoLabel", "saldoValor", "SALDO ACUMULADO"),
-        (BuildingIncomeCategory.OperationalFund, "fondoOperativoLabel", "fondoOperativoValor", "FONDO OPERATIVO"),
-        (BuildingIncomeCategory.CommonAreaRental, "alquilerLabel", "alquilerValor", "ALQUILER/USO DE SALÓN"),
-        (BuildingIncomeCategory.Interest, "interesLabel", "interesValor", "INTERÉS"),
-        (BuildingIncomeCategory.CreditAdjustment, "ajusteLabel", "ajusteValor", "AJUSTE A FAVOR"),
-        (BuildingIncomeCategory.ExtraordinaryContribution, "aporteExtraLabel", "aporteExtraValor", "APORTE EXTRAORDINARIO"),
-        (BuildingIncomeCategory.Other, "otroLabel", "otroValor", "OTROS INGRESOS")
+        (BuildingIncomeCategory.AccumulatedBalance, "saldo", "SALDO ACUMULADO"),
+        (BuildingIncomeCategory.OperationalFund, "fondoOperativo", "FONDO OPERATIVO"),
+        (BuildingIncomeCategory.CommonAreaRental, "alquiler", "ALQUILER/USO DE SALÓN"),
+        (BuildingIncomeCategory.Interest, "interes", "INTERÉS"),
+        (BuildingIncomeCategory.CreditAdjustment, "ajuste", "AJUSTE A FAVOR"),
+        (BuildingIncomeCategory.ExtraordinaryContribution, "aporteExtra", "APORTE EXTRAORDINARIO"),
+        (BuildingIncomeCategory.Other, "otro", "OTROS INGRESOS")
     ];
 
     private IReadOnlyList<BodyRow> BuildBodyRows()
@@ -351,15 +358,17 @@ public sealed class SettlementPdfDocument(
         PaperText(fg, "mes", MonthText(), bold: true);
         PaperText(fg, "anio", summary.PeriodYear > 0 ? summary.PeriodYear.ToString() : string.Empty, bold: true);
 
-        // Ingresos: cada categoria con su titulo y su valor por separado, solo en la primera hoja y solo las que
+        // Ingresos: cada categoria con su titulo, su descripcion y su valor por separado, solo en la primera hoja y solo las que
         // tienen ingresos en el periodo.
         if (isFirstPage)
         {
-            foreach (var (category, labelKey, valueKey, text) in IncomeBlocks)
+            foreach (var (category, prefix, text) in IncomeBlocks)
             {
                 if (!summary.IncomeTotals.TryGetValue(category.ToString(), out var amount)) continue;
-                PaperText(fg, labelKey, text, bold: true);
-                PaperText(fg, valueKey, FormatNumber(amount), bold: true);
+                summary.IncomeDescriptions.TryGetValue(category.ToString(), out var description);
+                PaperText(fg, prefix + "Label", text, bold: true);
+                PaperText(fg, prefix + "Descripcion", description?.ToUpperInvariant());
+                PaperText(fg, prefix + "Valor", FormatNumber(amount), bold: true);
             }
         }
 
@@ -406,6 +415,8 @@ public sealed class SettlementPdfDocument(
         var box = place.Width > 0 ? layer.Width(BlockWidthAt(place.X, place.Width)) : layer;
         box.Text(t =>
         {
+            // Con ancho propio, una sola linea (se corta con "..."): asi un texto largo no pisa al de abajo.
+            if (place.Width > 0) t.ClampLines(1);
             if (align == 'R') t.AlignRight();
             else if (align == 'C') t.AlignCenter();
             var span = t.Span(text).FontSize(place.Size);
