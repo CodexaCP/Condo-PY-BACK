@@ -210,6 +210,28 @@ public class ExpenseChargesController(ICondoDbContext dbContext, IAccessScopeSer
             return BadRequest("Un cargo de reversión no se puede modificar directamente.");
         }
 
+        // Se autoriza el cargo EXISTENTE (su edificio y su periodo actual), no solo el destino del request:
+        // si no, con el Id de un cargo ajeno se lo podia "mudar" a un edificio propio, o sacarlo de un periodo
+        // ya publicado pasandolo a uno en borrador.
+        var currentPeriod = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == entity.ExpensePeriodId, cancellationToken);
+
+        if (currentPeriod is null)
+        {
+            return BadRequest("El periodo de expensas del cargo no existe.");
+        }
+
+        if (!await accessScope.CanAccessBuildingAsync(currentPeriod.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        if (currentPeriod.Status != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("Los cargos solo se pueden modificar mientras el periodo esta en borrador.");
+        }
+
         var period = await dbContext.ExpensePeriods
             .AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.ExpensePeriodId, cancellationToken);

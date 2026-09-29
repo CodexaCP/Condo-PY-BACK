@@ -161,6 +161,26 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             return NotFound();
         }
 
+        // Se autoriza el ingreso EXISTENTE (su edificio y su periodo actual), no solo el destino del request.
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var currentPeriod = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == entity.ExpensePeriodId, cancellationToken);
+
+        if (currentPeriod is null)
+        {
+            return BadRequest("Expense period not found.");
+        }
+
+        if (currentPeriod.Status != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("Building incomes can only be managed while the expense period is in draft status.");
+        }
+
         var context = await ValidateContextAsync(request, cancellationToken);
         if (context.Error is not null)
         {

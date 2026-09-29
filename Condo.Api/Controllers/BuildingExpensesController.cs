@@ -183,6 +183,26 @@ public class BuildingExpensesController(
             return NotFound();
         }
 
+        // Se autoriza el gasto EXISTENTE (su edificio y su periodo actual), no solo el destino del request.
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var currentPeriod = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == entity.ExpensePeriodId, cancellationToken);
+
+        if (currentPeriod is null)
+        {
+            return BadRequest("El periodo de expensas asociado no existe.");
+        }
+
+        if (currentPeriod.Status != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("Los gastos del edificio solo se pueden gestionar mientras el periodo este en borrador.");
+        }
+
         var context = await ValidateContextAsync(request, cancellationToken);
         if (context.Error is not null)
         {
