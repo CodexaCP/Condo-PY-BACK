@@ -602,7 +602,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         // Solo los bloques que existen en el documento, con valores razonables (puntos PDF, A4 = 595 x 842).
         var known = SettlementPdfDocument.CalibratableKeys;
-        var clean = new Dictionary<string, FieldOffsetDto>();
+        var clean = new Dictionary<string, SettlementFieldOffsetDto>();
         foreach (var (key, value) in request.Positions)
         {
             if (!known.Contains(key)) continue;
@@ -610,6 +610,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 return BadRequest("Una de las posiciones está fuera de la hoja.");
             if (value.FontSize is { } size && (!float.IsFinite(size) || size < 4 || size > 60))
                 return BadRequest("El tamaño de letra debe estar entre 4 y 60.");
+            if (value.Width is { } width && (!float.IsFinite(width) || width < 10 || width > 600))
+                return BadRequest("El ancho debe estar entre 10 y 600.");
+            if (value.RowHeight is { } rowHeight && (!float.IsFinite(rowHeight) || rowHeight < 6 || rowHeight > 80))
+                return BadRequest("El alto de fila debe estar entre 6 y 80.");
             clean[key] = value;
         }
 

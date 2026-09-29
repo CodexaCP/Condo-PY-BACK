@@ -60,8 +60,20 @@ public class BuildingDto
     public bool SettlementHideFrame { get; set; }
 }
 
+
+public class SettlementFieldOffsetDto
+{
+    public float Dx { get; set; }
+    public float Dy { get; set; }
+    public float? FontSize { get; set; }
+    // Ancho del bloque (columnas y bloques de la liquidacion), alto de fila (solo la key "filas") y ocultar.
+    public float? Width { get; set; }
+    public float? RowHeight { get; set; }
+    public bool Hidden { get; set; }
+}
+
 public class UpdateSettlementCalibrationRequest
 {
-    public Dictionary<string, FieldOffsetDto> Positions { get; set; } = new();
+    public Dictionary<string, SettlementFieldOffsetDto> Positions { get; set; } = new();
     public bool HideFrame { get; set; } = true;
 }
