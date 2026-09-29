@@ -1322,21 +1322,6 @@ public class ExpensePeriodsController(
         return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
     }
 
-    // Modelos de documentos del edificio (PDF ya convertido a imagen al subirlo): solo se lee de /uploads.
-    private byte[]? ReadTemplateImage(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return null;
-
-        var fileName = Path.GetFileName(Uri.TryCreate(url, UriKind.Absolute, out var abs) ? abs.AbsolutePath : url);
-        if (string.IsNullOrEmpty(fileName)) return null;
-
-        var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        if (extension is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".gif")) return null;
-
-        var path = Path.Combine(env.WebRootPath, "uploads", fileName);
-        return System.IO.File.Exists(path) ? System.IO.File.ReadAllBytes(path) : null;
-    }
-
     [HttpGet("{id:guid}/settlement-pdf")]
     public async Task<IActionResult> DownloadSettlementPdf(Guid id, CancellationToken cancellationToken)
     {
@@ -1373,10 +1358,13 @@ public class ExpensePeriodsController(
 
         var (approverSignature, presidentSignature, publisherSignature) = await LoadSettlementSignaturesAsync(id, cancellationToken);
 
+        // Detalle linea por linea (proveedor, concepto, monto) para la planilla sobre el modelo propio.
+        await LoadSettlementLinesAsync(summary, id, cancellationToken);
+
         // Si el edificio tiene su propio modelo de liquidacion (cargado por el superadmin) la liquidacion se
         // imprime sobre ese papel; sin modelo propio (o si el archivo ya no esta) sale con el diseno estandar.
         var settlementTemplate = period.Building is { UseStandardTemplates: false }
-            ? ReadTemplateImage(period.Building.SettlementTemplateUrl)
+            ? TemplateImageReader.Read(env.WebRootPath, period.Building.SettlementTemplateUrl)
             : null;
 
         var document = new SettlementPdfDocument(
@@ -1388,7 +1376,9 @@ public class ExpensePeriodsController(
             presidentSignature,
             publisherSignature,
             standardTemplate: settlementTemplate is null,
-            backgroundImage: settlementTemplate);
+            backgroundImage: settlementTemplate,
+            fieldPositionsJson: period.Building?.SettlementFieldPositionsJson,
+            hideFrame: period.Building?.SettlementHideFrame ?? true);
 
         var pdfBytes = document.GeneratePdf();
         var fileName = $"liquidacion_{summary.ExpensePeriodName.Replace(" ", "_")}_{summary.BuildingName.Replace(" ", "_")}.pdf";
@@ -1710,6 +1700,52 @@ public class ExpensePeriodsController(
             IsCalculated = true,
             CategoryTotals = await BuildCategoryTotalsAsync(period.Id, cancellationToken)
         };
+    }
+
+    // Mismos gastos que las categorias de la liquidacion (los que se reparten a las unidades), uno por linea;
+    // los del fondo de reserva van en su propia columna de la planilla. Los ingresos del periodo van aparte.
+    private async Task LoadSettlementLinesAsync(ExpenseSettlementSummaryDto summary, Guid expensePeriodId, CancellationToken cancellationToken)
+    {
+        var expenses = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted
+                     && x.ExpensePeriodId == expensePeriodId
+                     && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
+                      || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
+            .Select(x => new { x.Category, x.SupplierName, x.Description, x.Amount, x.ExpenseDate })
+            .ToListAsync(cancellationToken);
+
+        summary.ExpenseLines = expenses
+            .OrderBy(x => x.Category == BuildingExpenseCategory.ReserveFund ? 1 : 0)
+            .ThenBy(x => x.Category)
+            .ThenBy(x => x.ExpenseDate)
+            .Select(x => new SettlementExpenseLineDto
+            {
+                Supplier = x.SupplierName,
+                Description = x.Description,
+                Amount = x.Amount,
+                IsReserveFund = x.Category == BuildingExpenseCategory.ReserveFund
+            })
+            .ToList();
+
+        var incomes = await dbContext.BuildingIncomes
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId)
+            .Select(x => new { x.Category, x.Description, x.Amount, x.IncomeDate })
+            .ToListAsync(cancellationToken);
+
+        summary.IncomeLines = incomes
+            .OrderBy(x => x.Category)
+            .ThenBy(x => x.IncomeDate)
+            .Select(x => new SettlementIncomeLineDto
+            {
+                Label = x.Category == BuildingIncomeCategory.AccumulatedBalance
+                    ? "Saldo acumulado"
+                    : CategoryLabels.IncomeLabel(x.Category),
+                Description = x.Description,
+                Amount = x.Amount
+            })
+            .ToList();
     }
 
     private async Task<List<SettlementCategoryTotalDto>> BuildCategoryTotalsAsync(Guid expensePeriodId, CancellationToken cancellationToken)

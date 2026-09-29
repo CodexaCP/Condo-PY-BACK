@@ -38,6 +38,10 @@ public class Building : BaseEntity
     public string? CreditNoteTemplateFileName { get; set; }
     public string? SettlementTemplateUrl { get; set; }
     public string? SettlementTemplateFileName { get; set; }
+    // Calibracion de la liquidacion sobre el modelo propio: JSON { campo: { dx, dy, fontSize } } (puntos PDF).
+    public string? SettlementFieldPositionsJson { get; set; }
+    // El papel del edificio ya trae su propio marco/lineas impresas: la liquidacion dibuja solo el texto.
+    public bool SettlementHideFrame { get; set; } = true;
 
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }

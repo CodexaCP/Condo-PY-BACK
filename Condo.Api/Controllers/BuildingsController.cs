@@ -1,3 +1,4 @@
+using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -7,6 +8,8 @@ using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Condo.Api.Controllers;
@@ -14,7 +17,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/buildings")]
-public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, PushDispatcher pushDispatcher) : ControllerBase
+public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, PushDispatcher pushDispatcher, IWebHostEnvironment env) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingDto>>> GetAll(CancellationToken cancellationToken)
@@ -72,7 +75,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
                 CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
                 SettlementTemplateUrl = x.SettlementTemplateUrl,
-                SettlementTemplateFileName = x.SettlementTemplateFileName
+                SettlementTemplateFileName = x.SettlementTemplateFileName,
+                SettlementFieldPositionsJson = x.SettlementFieldPositionsJson,
+                SettlementHideFrame = x.SettlementHideFrame
             })
             .ToListAsync(cancellationToken);
 
@@ -114,7 +119,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
                 CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
                 SettlementTemplateUrl = x.SettlementTemplateUrl,
-                SettlementTemplateFileName = x.SettlementTemplateFileName
+                SettlementTemplateFileName = x.SettlementTemplateFileName,
+                SettlementFieldPositionsJson = x.SettlementFieldPositionsJson,
+                SettlementHideFrame = x.SettlementHideFrame
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -572,6 +579,122 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.SettlementTemplateFileName = standard ? null : TrimOrNull(request.SettlementTemplateFileName);
     }
 
+    // Calibracion de la liquidacion sobre el modelo propio del edificio: solo CompanyAdmin y BuildingManager
+    // (el superadmin adjunta el modelo; quien administra el edificio lo ajusta al papel).
+    private bool CanCalibrateSettlement() =>
+        accessScope.IsCompanyAdmin ||
+        string.Equals(tenantContext.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    private static readonly JsonSerializerOptions CamelCaseJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    [HttpPut("{id:guid}/settlement-positions")]
+    public async Task<ActionResult<BuildingDto>> UpdateSettlementPositions(
+        Guid id, [FromBody] UpdateSettlementCalibrationRequest request, CancellationToken cancellationToken)
+    {
+        if (!CanCalibrateSettlement()) return Forbid();
+
+        var entity = await dbContext.Buildings
+            .Include(x => x.Condominium)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+
+        if (!await accessScope.CanAccessBuildingAsync(id, cancellationToken)) return Forbid();
+
+        // Solo los bloques que existen en el documento, con valores razonables (puntos PDF, A4 = 595 x 842).
+        var known = SettlementPdfDocument.CalibratableKeys;
+        var clean = new Dictionary<string, FieldOffsetDto>();
+        foreach (var (key, value) in request.Positions)
+        {
+            if (!known.Contains(key)) continue;
+            if (!float.IsFinite(value.Dx) || !float.IsFinite(value.Dy) || Math.Abs(value.Dx) > 1000 || Math.Abs(value.Dy) > 1000)
+                return BadRequest("Una de las posiciones está fuera de la hoja.");
+            if (value.FontSize is { } size && (!float.IsFinite(size) || size < 4 || size > 60))
+                return BadRequest("El tamaño de letra debe estar entre 4 y 60.");
+            clean[key] = value;
+        }
+
+        entity.SettlementFieldPositionsJson = clean.Count > 0 ? JsonSerializer.Serialize(clean, CamelCaseJson) : null;
+        entity.SettlementHideFrame = request.HideFrame;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToDto(entity));
+    }
+
+    // Liquidacion de datos de ejemplo (no una real) con las posiciones guardadas, para imprimir sobre el papel
+    // y verificar que calza antes de generar liquidaciones de verdad.
+    [HttpGet("{id:guid}/settlement-sample-pdf")]
+    public async Task<IActionResult> DownloadSettlementSamplePdf(Guid id, CancellationToken cancellationToken)
+    {
+        // La URL es siempre la misma; sin esto el navegador puede servir una version vieja de la calibracion.
+        Response.Headers.CacheControl = "no-store";
+
+        if (!CanCalibrateSettlement()) return Forbid();
+
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (building is null) return NotFound();
+
+        if (!await accessScope.CanAccessBuildingAsync(id, cancellationToken)) return Forbid();
+
+        var template = building.UseStandardTemplates
+            ? null
+            : TemplateImageReader.Read(env.WebRootPath, building.SettlementTemplateUrl);
+        if (template is null)
+            return BadRequest("El edificio no tiene un modelo de liquidación propio cargado. El superadmin lo adjunta en la ficha del edificio.");
+
+        var today = DateTime.UtcNow;
+        var summary = new ExpenseSettlementSummaryDto
+        {
+            BuildingId = building.Id,
+            BuildingName = building.Name,
+            ExpensePeriodName = "Período de ejemplo",
+            TotalBuildingExpenses = 43_590_000m,
+            TotalBuildingIncomes = 3_400_000m,
+            NetCommonAmount = 40_190_000m,
+            ReserveFundAmount = 2_640_000m,
+            GeneratedAtUtc = today,
+            IsCalculated = true,
+            IncomeLines =
+            [
+                new() { Label = "Saldo acumulado", Description = string.Empty, Amount = 2_500_000m },
+                new() { Label = "Alquiler area comun", Description = "Alquiler / uso de salon", Amount = 900_000m }
+            ],
+            ExpenseLines =
+            [
+                new() { Supplier = "ANDE", Description = "Consumo ciclo 03/26", Amount = 3_150_000m },
+                new() { Supplier = "ESSAP S.A.", Description = "Consumo ciclo 03/26", Amount = 1_090_000m },
+                new() { Supplier = "Todo Brillo S.A.", Description = "Servicio de limpieza", Amount = 11_290_000m },
+                new() { Supplier = "Seguridad S.A.", Description = "Seguridad - valet parking", Amount = 21_650_000m },
+                new() { Supplier = "Administracion", Description = "Administracion consorcio", Amount = 6_410_000m },
+                new() { Supplier = "CGI S.R.L.", Description = "Cambio de barrera en ascensor", Amount = 2_640_000m, IsReserveFund = true }
+            ],
+            CategoryTotals =
+            [
+                new SettlementCategoryTotalDto
+                {
+                    Category = "Utilities", ExpenseCount = 2, Amount = 4_240_000m,
+                    Items = [new() { Description = "ANDE", Amount = 3_150_000m }, new() { Description = "ESSAP", Amount = 1_090_000m }]
+                }
+            ]
+        };
+
+        var document = new SettlementPdfDocument(
+            summary,
+            new DateOnly(today.Year, today.Month, 1).ToString("dd/MM/yyyy"),
+            new DateOnly(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)).ToString("dd/MM/yyyy"),
+            today.AddDays(15).ToString("dd/MM/yyyy"),
+            new SettlementSignature("Nombre Apellido", "Administrador de la empresa", null),
+            new SettlementSignature("Nombre Apellido", "Presidente del consorcio", null),
+            null,
+            standardTemplate: false,
+            backgroundImage: template,
+            fieldPositionsJson: building.SettlementFieldPositionsJson,
+            hideFrame: building.SettlementHideFrame);
+
+        return File(document.GeneratePdf(), "application/pdf", $"calibracion_liquidacion_{building.Code}.pdf");
+    }
+
     private static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool IsUniqueCodeViolation(DbUpdateException exception) =>
@@ -618,6 +741,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             CreditNoteTemplateUrl = entity.CreditNoteTemplateUrl,
             CreditNoteTemplateFileName = entity.CreditNoteTemplateFileName,
             SettlementTemplateUrl = entity.SettlementTemplateUrl,
-            SettlementTemplateFileName = entity.SettlementTemplateFileName
+            SettlementTemplateFileName = entity.SettlementTemplateFileName,
+            SettlementFieldPositionsJson = entity.SettlementFieldPositionsJson,
+            SettlementHideFrame = entity.SettlementHideFrame
         };
 }

@@ -56,4 +56,12 @@ public class BuildingDto
     public string? CreditNoteTemplateFileName { get; set; }
     public string? SettlementTemplateUrl { get; set; }
     public string? SettlementTemplateFileName { get; set; }
+    public string? SettlementFieldPositionsJson { get; set; }
+    public bool SettlementHideFrame { get; set; }
+}
+
+public class UpdateSettlementCalibrationRequest
+{
+    public Dictionary<string, FieldOffsetDto> Positions { get; set; } = new();
+    public bool HideFrame { get; set; } = true;
 }

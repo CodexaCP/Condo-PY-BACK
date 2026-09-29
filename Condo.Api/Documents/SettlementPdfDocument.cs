@@ -21,8 +21,63 @@ public sealed class SettlementPdfDocument(
     SettlementSignature? president = null,
     SettlementSignature? publisher = null,
     bool standardTemplate = true,
-    byte[]? backgroundImage = null) : IDocument
+    byte[]? backgroundImage = null,
+    string? fieldPositionsJson = null,
+    bool hideFrame = true) : IDocument
 {
+    private sealed record FieldOffset(float Dx, float Dy, float? FontSize = null);
+
+    // Posicion base de cada bloque sobre el papel propio (puntos PDF, desde la esquina superior izquierda).
+    // Las keys, x, top y tamanos tienen que coincidir con FIELDS de settlement-calibration-page.component.ts:
+    // si se agrega un bloque calibrable aca, hay que agregarlo alla tambien para poder arrastrarlo.
+    private sealed record FieldDefault(float X, float Top, float Size);
+
+    private static readonly IReadOnlyDictionary<string, FieldDefault> FieldDefaults = new Dictionary<string, FieldDefault>
+    {
+        ["titulo"] = new(195, 86, 11),
+        ["edificio"] = new(66, 100, 8),
+        ["periodo"] = new(215, 112, 10),
+        ["columnas"] = new(385, 128, 6.5f),
+        ["cuerpo"] = new(50, 145, 8),
+        ["control"] = new(60, 668, 8),
+        ["firmas"] = new(50, 725, 9),
+        ["pie"] = new(50, 815, 7)
+    };
+
+    public static IReadOnlyCollection<string> CalibratableKeys => FieldDefaults.Keys.ToList();
+
+    private const float PageWidth = 595.2756f;
+    private const float PageHeight = 841.8898f;
+    private const float BlockWidth = 495f;
+    private const float PaperBodyWidth = 495f;   // proveedor 120 + concepto 215 + dos columnas de monto de 80
+    private const float PaperAmountWidth = 80f;
+
+    private readonly Dictionary<string, FieldOffset> offsets = ParseOffsets(fieldPositionsJson);
+
+    private static readonly System.Text.Json.JsonSerializerOptions OffsetJsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    private static Dictionary<string, FieldOffset> ParseOffsets(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, FieldOffset>();
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, FieldOffset>>(json, OffsetJsonOptions)
+                   ?? new Dictionary<string, FieldOffset>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new Dictionary<string, FieldOffset>();
+        }
+    }
+
+    // dy positivo = hacia arriba (mismo criterio que la calibracion de la factura).
+    private (float X, float Top, float Size) Place(string key)
+    {
+        var d = FieldDefaults[key];
+        offsets.TryGetValue(key, out var o);
+        return (d.X + (o?.Dx ?? 0), d.Top - (o?.Dy ?? 0), o?.FontSize is > 0 ? o.FontSize.Value : d.Size);
+    }
+
     private sealed record Palette(
         string Primary, string Accent, string Gray, string RowAlt, string CatHeader,
         string HeaderFill, string HeaderText, string TotalFill, string TotalText);
@@ -49,16 +104,17 @@ public sealed class SettlementPdfDocument(
 
     public void Compose(IDocumentContainer container)
     {
+        if (backgroundImage is not null)
+        {
+            ComposeOnPaper(container);
+            return;
+        }
+
         container.Page(page =>
         {
             page.Size(PageSizes.A4);
             page.Margin(32, Unit.Point);
             page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(9));
-
-            // El fondo va fuera del margen: el modelo del edificio cubre toda la hoja y el contenido
-            // se acomoda dentro del margen, pagina por pagina.
-            if (backgroundImage is not null)
-                page.Background().Image(backgroundImage).FitArea();
 
             page.Header().Element(ComposeHeader);
             page.Content().Layers(layers =>
@@ -73,6 +129,176 @@ public sealed class SettlementPdfDocument(
         });
     }
 
+    // Sobre el papel propio del edificio la liquidacion sale como planilla (proveedor, concepto y dos columnas
+    // de monto: fondos de reservas y gastos comunes). Cada bloque va en una posicion absoluta calibrable sobre
+    // una hoja A4; solo el cuerpo (ingresos, gastos y totales) crece y, si no entra, sigue en la hoja siguiente
+    // en la misma zona del papel. El papel ya trae su marco: por defecto solo se dibuja el texto.
+    private void ComposeOnPaper(IDocumentContainer container)
+    {
+        container.Page(page =>
+        {
+            page.Size(PageSizes.A4);
+            page.Margin(0);
+            page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(8).FontColor(p.Primary));
+            page.Background().Image(backgroundImage!).FitArea();
+
+            page.Content().Layers(layers =>
+            {
+                var (bodyX, bodyTop, bodySize) = Place("cuerpo");
+                var lowest = Place("pie").Top;
+                if (hasSignatures) lowest = Math.Min(lowest, Place("firmas").Top);
+                lowest = Math.Min(lowest, Place("control").Top);
+                var bottomReserve = Math.Max(20f, PageHeight - lowest + 6f);
+                var rightPadding = Math.Max(0f, PageWidth - bodyX - PaperBodyWidth);
+
+                layers.PrimaryLayer()
+                    .PaddingLeft(bodyX).PaddingTop(bodyTop).PaddingRight(rightPadding).PaddingBottom(bottomReserve)
+                    .DefaultTextStyle(x => x.FontSize(bodySize))
+                    .Element(ComposePaperBody);
+            });
+
+            // Todo lo demas, cada bloque en su posicion y repetido en cada hoja (las capas del contenido
+            // solo se dibujan en la primera).
+            page.Foreground().Layers(fg =>
+            {
+                fg.PrimaryLayer().Text(string.Empty);
+
+                var titulo = Place("titulo");
+                fg.Layer().TranslateX(titulo.X).TranslateY(titulo.Top)
+                    .Text("LIQUIDACIÓN EXPENSAS COMUNES").FontSize(titulo.Size).Bold();
+
+                var edificio = Place("edificio");
+                fg.Layer().TranslateX(edificio.X).TranslateY(edificio.Top)
+                    .Text(summary.BuildingName.ToUpperInvariant()).FontSize(edificio.Size).Bold();
+
+                var periodo = Place("periodo");
+                fg.Layer().TranslateX(periodo.X).TranslateY(periodo.Top)
+                    .Text($"MES: {summary.ExpensePeriodName.ToUpperInvariant()}").FontSize(periodo.Size).Bold();
+
+                var columnas = Place("columnas");
+                fg.Layer().TranslateX(columnas.X).TranslateY(columnas.Top)
+                    .Width(PaperAmountWidth * 2)
+                    .DefaultTextStyle(x => x.FontSize(columnas.Size).Bold())
+                    .Row(row =>
+                    {
+                        row.ConstantItem(PaperAmountWidth).AlignCenter().Text("FONDOS DE RESERVA");
+                        row.ConstantItem(PaperAmountWidth).AlignCenter().Text("GASTOS COMUNES");
+                    });
+
+                var control = Place("control");
+                fg.Layer().TranslateX(control.X).TranslateY(control.Top)
+                    .Width(BlockWidthAt(control.X, 260))
+                    .DefaultTextStyle(x => x.FontSize(control.Size))
+                    .Element(ComposePaperControl);
+
+                if (hasSignatures)
+                {
+                    var firmas = Place("firmas");
+                    fg.Layer().TranslateX(firmas.X).TranslateY(firmas.Top)
+                        .Width(BlockWidthAt(firmas.X))
+                        .DefaultTextStyle(x => x.FontSize(firmas.Size))
+                        .Element(ComposeSignatures);
+                }
+
+                var pie = Place("pie");
+                fg.Layer().TranslateX(pie.X).TranslateY(pie.Top)
+                    .Width(BlockWidthAt(pie.X))
+                    .DefaultTextStyle(x => x.FontSize(pie.Size))
+                    .Element(ComposeFooter);
+            });
+        });
+    }
+
+    // Gastos y ingresos linea por linea; si no vinieron (p. ej. una liquidacion sin detalle) se arman con los
+    // totales por categoria.
+    private IReadOnlyList<SettlementExpenseLineDto> ExpenseRows() =>
+        summary.ExpenseLines.Count > 0
+            ? summary.ExpenseLines
+            : summary.CategoryTotals.SelectMany(c => c.Items.Select(i => new SettlementExpenseLineDto
+            {
+                Description = i.Description,
+                Amount = i.Amount,
+                IsReserveFund = c.Category == "ReserveFund"
+            })).ToList();
+
+    private void ComposePaperBody(IContainer container)
+    {
+        var expenses = ExpenseRows();
+        var reserveTotal = expenses.Where(x => x.IsReserveFund).Sum(x => x.Amount);
+        var commonTotal = expenses.Where(x => !x.IsReserveFund).Sum(x => x.Amount);
+        var lineColor = "#000000";
+
+        IContainer Cell(TableDescriptor t, uint span = 1) => span > 1
+            ? Styled(t.Cell().ColumnSpan(span))
+            : Styled(t.Cell());
+
+        // Con marco propio del sistema (papel liso) cada celda lleva su linea fina; sobre papel con marco, nada.
+        IContainer Styled(IContainer c) => hideFrame
+            ? c.PaddingVertical(2).PaddingHorizontal(3)
+            : c.BorderBottom(0.5f).BorderColor(lineColor).PaddingVertical(2).PaddingHorizontal(3);
+
+        container.Table(table =>
+        {
+            table.ColumnsDefinition(c =>
+            {
+                c.RelativeColumn(120);
+                c.RelativeColumn(215);
+                c.ConstantColumn(PaperAmountWidth);
+                c.ConstantColumn(PaperAmountWidth);
+            });
+
+            // Ingresos del periodo (saldo acumulado, alquileres, intereses...) y el total disponible.
+            foreach (var income in summary.IncomeLines)
+            {
+                Cell(table).Text(income.Label.ToUpperInvariant());
+                Cell(table).Text(income.Description);
+                Cell(table).Text(string.Empty);
+                Cell(table).AlignRight().Text(FormatNumber(income.Amount));
+            }
+
+            if (summary.IncomeLines.Count > 0 || summary.TotalBuildingIncomes > 0)
+            {
+                Cell(table, 3).Text("TOTAL PARA GASTOS").Bold();
+                Cell(table).AlignRight().Text(FormatNumber(summary.TotalBuildingIncomes)).Bold();
+                table.Cell().ColumnSpan(4).PaddingTop(8).Text(" ").FontSize(1);
+            }
+
+            // Un gasto por linea: el del fondo de reserva va en su columna.
+            foreach (var expense in expenses)
+            {
+                Cell(table).Text(expense.Supplier.ToUpperInvariant());
+                Cell(table).Text(expense.Description.ToUpperInvariant());
+                Cell(table).AlignRight().Text(expense.IsReserveFund ? FormatNumber(expense.Amount) : string.Empty);
+                Cell(table).AlignRight().Text(expense.IsReserveFund ? string.Empty : FormatNumber(expense.Amount));
+            }
+
+            table.Cell().ColumnSpan(4).PaddingTop(8).Text(" ").FontSize(1);
+
+            Cell(table, 2).Text("TOTAL GASTOS DEL MES").Bold();
+            Cell(table).AlignRight().Text(reserveTotal > 0 ? FormatNumber(reserveTotal) : string.Empty).Bold();
+            Cell(table).AlignRight().Text(FormatNumber(commonTotal)).Bold();
+
+            Cell(table, 3).Text("MONTO NETO A DISTRIBUIR").Bold();
+            Cell(table).AlignRight().Text(FormatNumber(summary.NetCommonAmount)).Bold();
+        });
+    }
+
+    private void ComposePaperControl(IContainer container)
+    {
+        var emitted = (summary.GeneratedAtUtc ?? DateTime.UtcNow).ToLocalTime();
+        container.Column(col =>
+        {
+            col.Item().Text($"Fecha de emisión: {emitted:dd/MM/yyyy}");
+            col.Item().Text($"Vigencia: {periodStartDate} al {periodEndDate}");
+            col.Item().Text($"Vencimiento: {periodDueDate}");
+        });
+    }
+
+    private static string FormatNumber(decimal value) => value.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"));
+
+    // Ancho de los bloques: el estandar, recortado para que nunca se salgan de la hoja si se arrastran a la derecha.
+    private static float BlockWidthAt(float x, float width = BlockWidth) => Math.Max(40f, Math.Min(width, PageWidth - x - 4));
+
     private void ComposeHeader(IContainer container)
     {
         container.PaddingBottom(10).Column(col =>
@@ -81,15 +307,8 @@ public sealed class SettlementPdfDocument(
             {
                 row.RelativeItem().Column(c =>
                 {
-                    if (standardTemplate)
-                    {
-                        c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(p.Primary);
-                        c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
-                    }
-                    else
-                    {
-                        c.Item().Text("Liquidacion de Expensas").FontSize(14).Bold().FontColor(p.Primary);
-                    }
+                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(p.Primary);
+                    c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
                 {

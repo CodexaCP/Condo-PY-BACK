@@ -42,6 +42,8 @@ public class ExpenseSettlementSummaryDto
     public int GeneratedChargeCount { get; set; }
     public bool IsCalculated { get; set; }
     public List<SettlementCategoryTotalDto> CategoryTotals { get; set; } = new();
+    public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();
+    public List<SettlementIncomeLineDto> IncomeLines { get; set; } = new();
 }
 
 public class SettlementCategoryTotalDto
@@ -150,4 +152,21 @@ public class ExpensePeriodOperationalAlertItemDto
     public ExpensePeriodStatus PeriodStatus { get; set; }
     public ExpenseSettlementStatus? SettlementStatus { get; set; }
     public decimal PendingAmount { get; set; }
+}
+
+// Detalle linea por linea para la liquidacion impresa sobre el modelo propio del edificio (planilla con
+// proveedor, concepto y monto). Solo se completa al generar el PDF.
+public class SettlementExpenseLineDto
+{
+    public string Supplier { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public bool IsReserveFund { get; set; }
+}
+
+public class SettlementIncomeLineDto
+{
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
