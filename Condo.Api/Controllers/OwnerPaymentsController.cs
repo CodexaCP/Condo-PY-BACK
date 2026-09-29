@@ -7,6 +7,7 @@ using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Condo.Api.Controllers;
@@ -315,9 +316,6 @@ public class OwnerPaymentsController(
             return BadRequest(ComprobanteService.MismatchMessage(request.DeclaredAmount + availableCreditForCreate, openComprobantes));
 
         var year = DateTime.UtcNow.Year;
-        var countThisYear = await dbContext.OwnerPayments
-            .CountAsync(x => x.CompanyId == companyId.Value && x.CreatedAtUtc.Year == year, ct);
-        var reference = $"PAY-{year}-{(countThisYear + 1):D6}";
 
         var ownerPayment = new OwnerPayment
         {
@@ -327,7 +325,7 @@ public class OwnerPaymentsController(
             ComprobanteUrl = request.ComprobanteUrl?.Trim() ?? string.Empty,
             DeclaredAmount = request.DeclaredAmount,
             Status = OwnerPaymentStatus.Pending,
-            Reference = reference
+            Reference = await NextReferenceAsync(companyId.Value, year, ct)
         };
 
         foreach (var unitId in request.UnitIds.Distinct())
@@ -341,6 +339,24 @@ public class OwnerPaymentsController(
         }
 
         dbContext.OwnerPayments.Add(ownerPayment);
+
+        // Dos pagos de la misma empresa enviados a la vez pueden calcular la misma referencia: el indice unico
+        // (empresa, referencia) rechaza al segundo y se reintenta con la siguiente. Las entidades siguen en
+        // estado Added tras el error, asi que alcanza con cambiar la referencia y volver a guardar.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync(ct);
+                break;
+            }
+            catch (DbUpdateException exception) when (attempt < 5 && IsReferenceCollision(exception))
+            {
+                ownerPayment.Reference = await NextReferenceAsync(companyId.Value, year, ct);
+            }
+        }
+
+        var reference = ownerPayment.Reference;
 
         // Notify managers: solo quienes trabajan con los edificios del pago (Encargado/Operador con el edificio
         // asignado; Administrador de empresa de toda la empresa, o de su condominio si esta acotado a uno).
@@ -832,6 +848,31 @@ public class OwnerPaymentsController(
         var creditUsed = Math.Min(availableCredit, Math.Max(0, withCredit.CoveredTotal - amount));
         return (withCredit, creditUsed);
     }
+
+    // ─── REFERENCIA DEL PAGO ─────────────────────────────────────────────────
+    // PAY-{año}-{n de 6 digitos}, numerada POR EMPRESA (dos empresas pueden tener el mismo PAY-2026-000001;
+    // por eso toda busqueda por referencia debe filtrar tambien por empresa).
+    private async Task<string> NextReferenceAsync(Guid companyId, int year, CancellationToken ct)
+    {
+        var prefix = $"PAY-{year}-";
+
+        // El sufijo lleva ceros a la izquierda: el mayor en orden alfabetico es el ultimo numero usado
+        // (incluye pagos eliminados, para no reutilizar numeros).
+        var last = await dbContext.OwnerPayments
+            .AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.Reference.StartsWith(prefix))
+            .OrderByDescending(x => x.Reference)
+            .Select(x => x.Reference)
+            .FirstOrDefaultAsync(ct);
+
+        var next = last is not null && int.TryParse(last[prefix.Length..], out var number) ? number + 1 : 1;
+        return $"{prefix}{next:D6}";
+    }
+
+    private static bool IsReferenceCollision(DbUpdateException exception) =>
+        exception.InnerException is SqlException sql
+        && (sql.Number == 2601 || sql.Number == 2627)
+        && sql.Message.Contains("IX_OwnerPayments_", StringComparison.OrdinalIgnoreCase);
 
     // ─── ALCANCE POR EDIFICIO (personal) ─────────────────────────────────────
     // Un pago de propietario puede abarcar unidades de varios edificios. El personal (Encargado/Operador)

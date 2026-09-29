@@ -184,10 +184,16 @@ public class InvoicesController(
         if (q.OwnerPaymentId.HasValue)
         {
             var ownerPaymentId = q.OwnerPaymentId.Value;
-            var ownerPaymentRef = await dbContext.OwnerPayments.AsNoTracking()
-                .Where(x => x.Id == ownerPaymentId).Select(x => x.Reference).FirstOrDefaultAsync(cancellationToken);
+            // La referencia solo es unica por empresa: se compara junto con la empresa del pago del propietario.
+            var ownerPaymentInfo = await dbContext.OwnerPayments.AsNoTracking()
+                .Where(x => x.Id == ownerPaymentId)
+                .Select(x => new { x.Reference, x.CompanyId })
+                .FirstOrDefaultAsync(cancellationToken);
+            var ownerPaymentRef = ownerPaymentInfo?.Reference;
+            var ownerPaymentCompanyId = ownerPaymentInfo?.CompanyId;
             query = query.Where(x => x.OwnerPaymentId == ownerPaymentId
-                                     || (x.OwnerPaymentId == null && ownerPaymentRef != null && x.Payment!.Reference == ownerPaymentRef));
+                                     || (x.OwnerPaymentId == null && ownerPaymentRef != null
+                                         && x.CompanyId == ownerPaymentCompanyId && x.Payment!.Reference == ownerPaymentRef));
         }
 
         if (!string.IsNullOrWhiteSpace(q.Search))
@@ -244,7 +250,7 @@ public class InvoicesController(
             {
                 x.Id, x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.CreatedAtUtc,
-                x.OwnerPaymentId, x.PaymentId, x.UnitId, x.BuildingId,
+                x.OwnerPaymentId, x.PaymentId, x.UnitId, x.BuildingId, x.CompanyId,
                 BuildingName = x.Building != null ? x.Building.Name : string.Empty,
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
                 SeriesRazonSocial = x.Series != null ? x.Series.RazonSocial : null,
@@ -268,6 +274,7 @@ public class InvoicesController(
         var unitIds = rows.Select(r => r.UnitId).Distinct().ToList();
         var ownerPaymentIds = rows.Where(r => r.OwnerPaymentId.HasValue).Select(r => r.OwnerPaymentId!.Value).Distinct().ToList();
         var paymentRefs = rows.Where(r => !r.OwnerPaymentId.HasValue).Select(r => r.PaymentReference).Distinct().ToList();
+        var rowCompanyIds = rows.Select(r => r.CompanyId).Distinct().ToList();
 
         var settlements = await dbContext.ExpenseSettlements.AsNoTracking()
             .Where(s => !s.IsDeleted && periodIds.Contains(s.ExpensePeriodId))
@@ -280,10 +287,11 @@ public class InvoicesController(
             .ToListAsync(cancellationToken);
 
         var ownerPayments = await dbContext.OwnerPayments.AsNoTracking()
-            .Where(o => !o.IsDeleted && (ownerPaymentIds.Contains(o.Id) || paymentRefs.Contains(o.Reference)))
+            .Where(o => !o.IsDeleted && (ownerPaymentIds.Contains(o.Id)
+                                         || (paymentRefs.Contains(o.Reference) && rowCompanyIds.Contains(o.CompanyId))))
             .Select(o => new
             {
-                o.Id, o.Reference, o.Status, o.ResolvedAt,
+                o.Id, o.CompanyId, o.Reference, o.Status, o.ResolvedAt,
                 OwnerName = o.Owner != null ? o.Owner.FullName : null,
                 ReviewedBy = o.ReviewedByUser != null ? o.ReviewedByUser.FullName : null
             })
@@ -305,7 +313,7 @@ public class InvoicesController(
             var lines = JsonSerializer.Deserialize<List<InvoiceLineDto>>(r.DetalleSnapshotJson) ?? new();
             var settlement = settlements.FirstOrDefault(s => s.ExpensePeriodId == r.ExpensePeriodId);
             var ownerPayment = (r.OwnerPaymentId.HasValue ? ownerPayments.FirstOrDefault(o => o.Id == r.OwnerPaymentId.Value) : null)
-                               ?? ownerPayments.FirstOrDefault(o => o.Reference == r.PaymentReference);
+                               ?? ownerPayments.FirstOrDefault(o => o.Reference == r.PaymentReference && o.CompanyId == r.CompanyId);
             var client = owners.Where(o => o.UnitId == r.UnitId).OrderByDescending(o => o.IsPrimary).ThenBy(o => o.CreatedAtUtc).FirstOrDefault();
             var comprobante = comprobantes.FirstOrDefault(c => c.UnitId == r.UnitId && c.ExpensePeriodId == r.ExpensePeriodId);
 

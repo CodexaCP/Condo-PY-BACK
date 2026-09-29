@@ -570,7 +570,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<OwnerPayment>().Property(x => x.Reference).HasMaxLength(50);
         modelBuilder.Entity<OwnerPayment>().Property(x => x.ComprobanteUrl).HasMaxLength(500);
         modelBuilder.Entity<OwnerPayment>().Property(x => x.RejectionReason).HasMaxLength(500);
-        modelBuilder.Entity<OwnerPayment>().HasIndex(x => x.Reference).IsUnique().HasFilter("[IsDeleted] = 0");
+        // La referencia (PAY-año-n) se numera por empresa, asi que es unica por empresa (antes era global y la
+        // segunda empresa chocaba con la primera).
+        modelBuilder.Entity<OwnerPayment>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique().HasFilter("[IsDeleted] = 0");
         modelBuilder.Entity<OwnerPayment>().HasIndex(x => new { x.CompanyId, x.Status, x.CreatedAtUtc });
         modelBuilder.Entity<OwnerPayment>()
             .HasOne(x => x.Company).WithMany()
