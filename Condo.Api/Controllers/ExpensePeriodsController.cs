@@ -1803,6 +1803,11 @@ public class ExpensePeriodsController(
         var reserveFundAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.ReserveFund)
             .Sum(x => x.Amount);
+        // Si los ingresos van al fondo de reserva, lo componen todas las categorias menos Fondo operativo.
+        // No es un cargo a las unidades: solo engrosa el valor del fondo.
+        var reserveFundIncomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund
+            ? incomes.Where(x => x.Category != BuildingIncomeCategory.OperationalFund).Sum(x => x.Amount)
+            : 0m;
         var extraordinaryAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.Extraordinary)
             .Sum(x => x.Amount);
@@ -1816,7 +1821,7 @@ public class ExpensePeriodsController(
             BuildingName = period.Building?.Name ?? string.Empty,
             TotalBuildingExpenses = totalBuildingExpenses,
             TotalBuildingIncomes = totalBuildingIncomes,
-            ReserveFundAmount = reserveFundAmount + contributions.ReserveContribution,
+            ReserveFundAmount = reserveFundAmount + contributions.ReserveContribution + reserveFundIncomes,
             ExtraordinaryAmount = extraordinaryAmount + contributions.ExtraordinaryContribution,
             NetCommonAmount = totalBuildingExpenses - creditedIncomes
                               + contributions.ReserveContribution + contributions.ExtraordinaryContribution,
