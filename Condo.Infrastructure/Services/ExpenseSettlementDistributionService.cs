@@ -1,4 +1,5 @@
 using Condo.Application.Abstractions;
+using Condo.Application.Services;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -36,13 +37,13 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
 
         // Los ingresos solo bajan la expensa de los propietarios si el edificio los acredita; si van al fondo
         // de reserva no se reparten.
-        var incomeTreatment = await dbContext.Buildings
+        var config = await dbContext.Buildings
             .AsNoTracking()
             .Where(x => x.Id == period.BuildingId)
-            .Select(x => x.IncomeTreatment)
+            .Select(x => new { x.IncomeTreatment, x.ReserveFundPercentage, x.ExtraordinaryPercentage })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var incomes = incomeTreatment == IncomeTreatment.ToReserveFund
+        var incomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund
             ? new List<BuildingIncome>()
             : await dbContext.BuildingIncomes
                 .AsNoTracking()
@@ -52,7 +53,19 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
                 .ToListAsync(cancellationToken);
 
         var totalCoefficient = units.Sum(x => x.Coefficient);
-        var requiresCoefficient = expenses.Any(x => x.DistributionType == BuildingExpenseDistributionType.ByCoefficient) || incomes.Count > 0;
+        // Aportes calculados: se cobran a las unidades por coeficiente, sobre los gastos comunes que se reparten
+        // (los de la categoria Fondo de reserva no son base: ya se cobran como tales).
+        var commonExpenses = expenses
+            .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient or BuildingExpenseDistributionType.FixedPerUnit
+                        && x.Category != BuildingExpenseCategory.ReserveFund)
+            .Sum(x => x.Amount);
+        var contributions = SettlementContributions.Compute(
+            commonExpenses, incomes.Sum(x => x.Amount), config?.ReserveFundPercentage, config?.ExtraordinaryPercentage);
+
+        var requiresCoefficient = expenses.Any(x => x.DistributionType == BuildingExpenseDistributionType.ByCoefficient)
+            || incomes.Count > 0
+            || contributions.ReserveContribution > 0
+            || contributions.ExtraordinaryContribution > 0;
         if (requiresCoefficient && !HasValidCoefficientBase(totalCoefficient))
         {
             throw new InvalidOperationException($"No se puede distribuir por coeficiente porque la suma de coeficientes del edificio debe ser {CoefficientDistributionExpectedTotal:0.####} y actualmente es {totalCoefficient:0.####}.");
@@ -91,6 +104,20 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
                 income.Notes.Trim(),
                 null,
                 settlement.Id));
+        }
+
+        if (contributions.ReserveContribution > 0)
+        {
+            items.AddRange(DistributeByCoefficient(
+                units, totalCoefficient, contributions.ReserveContribution, ExpenseChargeType.ReserveFund,
+                $"Aporte fondo de reserva {config!.ReserveFundPercentage:0.##}%", string.Empty, null, settlement.Id));
+        }
+
+        if (contributions.ExtraordinaryContribution > 0)
+        {
+            items.AddRange(DistributeByCoefficient(
+                units, totalCoefficient, contributions.ExtraordinaryContribution, ExpenseChargeType.Extraordinary,
+                $"Aporte extraordinario {config!.ExtraordinaryPercentage:0.##}%", string.Empty, null, settlement.Id));
         }
 
         return new ExpenseSettlementChargePreviewDto

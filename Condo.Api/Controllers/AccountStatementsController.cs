@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Api.Documents;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -441,9 +442,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
 
         var buildingOrdinaryTotal = await dbContext.ExpenseCharges
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && !x.IsReversal
-                        && x.ExpensePeriodId == expensePeriodId
-                        && x.ChargeType == ExpenseChargeType.Ordinary)
+            .CoefficientBase(expensePeriodId)
             .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
 
         var receipt = new ExpenseReceiptDto

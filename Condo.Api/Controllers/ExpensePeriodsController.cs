@@ -1,6 +1,7 @@
 using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
+using Condo.Application.Services;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -1785,11 +1786,20 @@ public class ExpensePeriodsController(
         var totalBuildingExpenses = expenses.Sum(x => x.Amount);
         var totalBuildingIncomes = incomes.Sum(x => x.Amount);
         // Si los ingresos van al fondo de reserva no reducen lo que se reparte entre las unidades.
-        var incomeTreatment = await dbContext.Buildings.AsNoTracking()
+        var config = await dbContext.Buildings.AsNoTracking()
             .Where(x => x.Id == period.BuildingId)
-            .Select(x => x.IncomeTreatment)
+            .Select(x => new { x.IncomeTreatment, x.ReserveFundPercentage, x.ExtraordinaryPercentage })
             .FirstOrDefaultAsync(cancellationToken);
-        var creditedIncomes = incomeTreatment == IncomeTreatment.ToReserveFund ? 0m : totalBuildingIncomes;
+        var creditedIncomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund ? 0m : totalBuildingIncomes;
+
+        // Mismos aportes que genera el reparto de cargos (base: gastos comunes que se reparten, sin los de la
+        // categoria Fondo de reserva).
+        var commonExpenses = expenses
+            .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient or BuildingExpenseDistributionType.FixedPerUnit
+                        && x.Category != BuildingExpenseCategory.ReserveFund)
+            .Sum(x => x.Amount);
+        var contributions = SettlementContributions.Compute(
+            commonExpenses, creditedIncomes, config?.ReserveFundPercentage, config?.ExtraordinaryPercentage);
         var reserveFundAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.ReserveFund)
             .Sum(x => x.Amount);
@@ -1806,9 +1816,10 @@ public class ExpensePeriodsController(
             BuildingName = period.Building?.Name ?? string.Empty,
             TotalBuildingExpenses = totalBuildingExpenses,
             TotalBuildingIncomes = totalBuildingIncomes,
-            ReserveFundAmount = reserveFundAmount,
-            ExtraordinaryAmount = extraordinaryAmount,
-            NetCommonAmount = totalBuildingExpenses - creditedIncomes,
+            ReserveFundAmount = reserveFundAmount + contributions.ReserveContribution,
+            ExtraordinaryAmount = extraordinaryAmount + contributions.ExtraordinaryContribution,
+            NetCommonAmount = totalBuildingExpenses - creditedIncomes
+                              + contributions.ReserveContribution + contributions.ExtraordinaryContribution,
             GeneratedAtUtc = null,
             GeneratedByUserId = null,
             GeneratedByUserName = string.Empty,
