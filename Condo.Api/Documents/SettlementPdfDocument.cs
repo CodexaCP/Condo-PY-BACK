@@ -137,6 +137,8 @@ public sealed class SettlementPdfDocument(
         ["extraPctValor"] = new(475, 650, 8, 70, 'R'),
         ["totIngresosValor"] = new(475, 585, 8, 70, 'R'),
         ["totGastosLabel"] = new(50, 598, 8, 200),
+        // Suma de los valores de todos los conceptos (todas las categorias de gasto), en un solo valor.
+        ["totGastosValor"] = new(335, 598, 8, 70, 'R'),
         ["totGastosReserva"] = new(405, 598, 8, 70, 'R'),
         ["totGastosComunes"] = new(475, 598, 8, 70, 'R'),
         ["subTotalValor"] = new(475, 611, 8, 70, 'R'),
@@ -267,7 +269,7 @@ public sealed class SettlementPdfDocument(
     private static readonly string[] BottomKeys =
     [
         "reservaPctLabel", "reservaPctValorReserva", "reservaPctValorComunes", "extraPctLabel", "extraPctValor",
-        "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosReserva", "totGastosComunes",
+        "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosValor", "totGastosReserva", "totGastosComunes",
         "subTotalValor", "totalValor",
         "fechaEmision", "vigenciaLabel", "vigenciaDesde", "vigenciaHasta", "vencimientoLabel", "vencimiento",
         "firmaAutorizado", "firmaAutorizadoNombre", "firmaAutorizadoCargo",
@@ -460,6 +462,7 @@ public sealed class SettlementPdfDocument(
             PaperText(fg, "totIngresosLabel", "TOTAL PARA GASTOS", bold: true);
             PaperText(fg, "totIngresosValor", FormatNumber(summary.TotalBuildingIncomes), bold: true);
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
+            PaperText(fg, "totGastosValor", FormatNumber(expenses.Sum(x => x.Amount)), bold: true);
             PaperText(fg, "totGastosReserva", reserveTotal > 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
             PaperText(fg, "totGastosComunes", FormatNumber(commonTotal), bold: true);
 
