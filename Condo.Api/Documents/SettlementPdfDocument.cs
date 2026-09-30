@@ -125,6 +125,8 @@ public sealed class SettlementPdfDocument(
         ["colMonto"] = new(475, 145, 8, 70, 'R', true),
 
         // Totales: cada titulo y cada valor por separado (solo salen en la ultima hoja).
+        // El mes se usa en dos lugares del papel: arriba (mes) y en la franja de totales (mesTotales).
+        ["mesTotales"] = new(250, 598, 8, 100, 'C'),
         ["totIngresosLabel"] = new(50, 585, 8, 200),
         ["totIngresosValor"] = new(475, 585, 8, 70, 'R'),
         ["totGastosLabel"] = new(50, 598, 8, 200),
@@ -446,6 +448,7 @@ public sealed class SettlementPdfDocument(
             var reserveTotal = expenses.Where(x => x.IsReserveFund).Sum(x => x.Amount);
             var commonTotal = expenses.Where(x => !x.IsReserveFund).Sum(x => x.Amount);
 
+            PaperText(fg, "mesTotales", MonthText(), bold: true);
             PaperText(fg, "totIngresosLabel", "TOTAL PARA GASTOS", bold: true);
             PaperText(fg, "totIngresosValor", FormatNumber(summary.TotalBuildingIncomes), bold: true);
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
