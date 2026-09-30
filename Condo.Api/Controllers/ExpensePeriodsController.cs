@@ -1711,7 +1711,7 @@ public class ExpensePeriodsController(
                      && x.ExpensePeriodId == expensePeriodId
                      && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
                       || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
-            .Select(x => new { x.Category, x.SupplierName, x.Description, x.Amount, x.ExpenseDate })
+            .Select(x => new { x.Category, x.SupplierName, x.Description, x.Amount, x.ExpenseDate, x.PaidByReserveFund })
             .ToListAsync(cancellationToken);
 
         summary.ExpenseLines = expenses
@@ -1724,6 +1724,7 @@ public class ExpensePeriodsController(
                 Description = x.Description,
                 Amount = x.Amount,
                 IsReserveFund = x.Category == BuildingExpenseCategory.ReserveFund,
+                PaidByReserveFund = x.PaidByReserveFund,
                 Category = x.Category.ToString()
             })
             .ToList();

@@ -21,10 +21,10 @@ public static class BuildingExpenseImportTemplateBuilder
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(12);
         sheet.Cell(2, 1).Value = $"Empresa: {companyName}";
         sheet.Cell(2, 1).Style.Font.SetBold();
-        sheet.Cell(3, 1).Value = "Completá una fila por gasto desde la fila 5. Esta plantilla solo sirve para este edificio: no cambies los encabezados ni las hojas.";
+        sheet.Cell(3, 1).Value = "Completá una fila por gasto desde la fila 5. Esta plantilla solo sirve para este edificio: no cambies los encabezados ni las hojas. Cada gasto lleva su monto en \"Monto\" o, si lo paga el fondo de reserva, en \"Monto por fondo de reserva\" (uno solo).";
         sheet.Cell(3, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
 
-        string[] headers = ["Categoria", "Proveedor", "Descripcion", "Monto"];
+        string[] headers = ["Categoria", "Proveedor", "Descripcion", "Monto", "Monto por fondo de reserva"];
         for (var i = 0; i < headers.Length; i++)
         {
             var cell = sheet.Cell(4, i + 1);
@@ -32,11 +32,12 @@ public static class BuildingExpenseImportTemplateBuilder
             cell.Style.Font.SetBold().Fill.SetBackgroundColor(XLColor.FromHtml("#e8f4f8"));
         }
 
-        sheet.Column(4).Style.NumberFormat.Format = "#,##0";
+        sheet.Columns(4, 5).Style.NumberFormat.Format = "#,##0";
         sheet.Column(1).Width = 24;
         sheet.Column(2).Width = 32;
         sheet.Column(3).Width = 56;
         sheet.Column(4).Width = 16;
+        sheet.Column(5).Width = 28;
 
         var categories = workbook.Worksheets.Add("Categorias");
         categories.Cell(1, 1).Value = "Categorias validas";

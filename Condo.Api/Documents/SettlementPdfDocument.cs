@@ -340,7 +340,7 @@ public sealed class SettlementPdfDocument(
             // Una fila por descripcion distinta (los gastos con la misma se suman); los del fondo de reserva van
             // en su columna.
             var rows = supplier.Lines
-                .GroupBy(x => (Description: x.Description.Trim().ToUpperInvariant(), x.IsReserveFund))
+                .GroupBy(x => (Description: x.Description.Trim().ToUpperInvariant(), IsReserveFund: InReserveColumn(x)))
                 .Select(g => (Description: g.Key.Description, Amount: g.Sum(x => x.Amount), Reserve: g.Key.IsReserveFund));
             foreach (var row in rows)
             {
@@ -372,6 +372,10 @@ public sealed class SettlementPdfDocument(
 
         return groups;
     }
+
+    // Columna "Fondos de reservas" de la planilla: los gastos de la categoria Fondo de reserva y los que se marcaron
+    // como pagados por el fondo de reserva.
+    private static bool InReserveColumn(SettlementExpenseLineDto line) => line.IsReserveFund || line.PaidByReserveFund;
 
     // Proveedor del gasto; si no tiene, el nombre de su categoria.
     private static string SupplierName(SettlementExpenseLineDto line)
@@ -620,8 +624,11 @@ public sealed class SettlementPdfDocument(
         if (isLastPage)
         {
             var expenses = ExpenseRows();
-            var reserveTotal = expenses.Where(x => x.IsReserveFund).Sum(x => x.Amount);
-            var commonTotal = expenses.Where(x => !x.IsReserveFund).Sum(x => x.Amount);
+            var reserveTotal = expenses.Where(InReserveColumn).Sum(x => x.Amount);
+            var commonTotal = expenses.Where(x => !InReserveColumn(x)).Sum(x => x.Amount);
+            // Base de los aportes: la misma que usa el reparto de cargos. Un gasto pagado por el fondo sigue en la base
+            // (por ahora no cambia lo que se cobra a las unidades; solo la columna en que se imprime).
+            var contributionBase = expenses.Where(x => !x.IsReserveFund).Sum(x => x.Amount);
 
             PaperText(fg, "mesTotales", MonthText(), bold: true);
             PaperText(fg, "totIngresosLabel", "TOTAL PARA GASTOS", bold: true);
@@ -638,7 +645,7 @@ public sealed class SettlementPdfDocument(
             // Mismo calculo que usa el reparto de cargos: base = gastos comunes (menos los ingresos si el edificio
             // los acredita a los propietarios).
             var calc = SettlementContributions.Compute(
-                commonTotal, summary.IncomeTreatment == IncomeTreatment.CreditToOwners ? summary.TotalBuildingIncomes : 0m,
+                contributionBase, summary.IncomeTreatment == IncomeTreatment.CreditToOwners ? summary.TotalBuildingIncomes : 0m,
                 summary.ReservePercentage, summary.ExtraordinaryPercentage);
             var reserveContribution = calc.ReserveContribution;
             var subTotal = calc.SubTotal;

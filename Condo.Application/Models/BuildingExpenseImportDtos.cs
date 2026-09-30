@@ -22,6 +22,8 @@ public class BuildingExpenseImportRowDto
     public string Supplier { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal? Amount { get; set; }
+    // El monto viene de la columna "Monto por fondo de reserva": el gasto se crea pagado por el fondo.
+    public bool PaidByReserveFund { get; set; }
     // Ok, Warning (se importa), Duplicate (ya existe: se omite) o Error (no se importa nada mientras haya errores).
     public string Status { get; set; } = "Ok";
     public string Message { get; set; } = string.Empty;

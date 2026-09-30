@@ -80,6 +80,7 @@ public class BuildingExpensesController(
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
                 Notes = x.Notes,
+                PaidByReserveFund = x.PaidByReserveFund,
                 HasReceipt = x.ReceiptStoredName != null,
                 ReceiptFileName = x.ReceiptFileName
             })
@@ -111,6 +112,7 @@ public class BuildingExpensesController(
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
                 Notes = x.Notes,
+                PaidByReserveFund = x.PaidByReserveFund,
                 HasReceipt = x.ReceiptStoredName != null,
                 ReceiptFileName = x.ReceiptFileName
             })
@@ -161,7 +163,8 @@ public class BuildingExpensesController(
             Amount = request.Amount,
             DistributionType = request.DistributionType,
             TargetUnitId = request.DistributionType == BuildingExpenseDistributionType.IndividualUnit ? request.TargetUnitId : null,
-            Notes = request.Notes.Trim()
+            Notes = request.Notes.Trim(),
+            PaidByReserveFund = request.PaidByReserveFund
         };
 
         dbContext.BuildingExpenses.Add(entity);
@@ -234,6 +237,7 @@ public class BuildingExpensesController(
         entity.DistributionType = request.DistributionType;
         entity.TargetUnitId = request.DistributionType == BuildingExpenseDistributionType.IndividualUnit ? request.TargetUnitId : null;
         entity.Notes = request.Notes.Trim();
+        entity.PaidByReserveFund = request.PaidByReserveFund;
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(ToDto(entity, context.Building!, context.Period!, context.TargetUnit));
@@ -348,11 +352,11 @@ public class BuildingExpensesController(
             .ToListAsync(cancellationToken);
 
         // Con "reemplazar" los existentes se eliminan, asi que no cuentan como duplicados.
-        static string Key(string supplier, string description, decimal amount) =>
-            $"{supplier.Trim().ToUpperInvariant()}|{description.Trim().ToUpperInvariant()}|{amount:0.00}";
+        static string Key(string supplier, string description, decimal amount, bool paidByReserveFund) =>
+            $"{supplier.Trim().ToUpperInvariant()}|{description.Trim().ToUpperInvariant()}|{amount:0.00}|{paidByReserveFund}";
         var existingKeys = replaceExisting
             ? new HashSet<string>()
-            : existing.Select(x => Key(x.SupplierName, x.Description, x.Amount)).ToHashSet();
+            : existing.Select(x => Key(x.SupplierName, x.Description, x.Amount, x.PaidByReserveFund)).ToHashSet();
         var seenInFile = new HashSet<string>();
 
         var result = new BuildingExpenseImportResultDto { ExistingCount = existing.Count };
@@ -366,7 +370,8 @@ public class BuildingExpensesController(
                 Category = row.Category,
                 Supplier = row.Supplier,
                 Description = row.Description,
-                Amount = row.Amount
+                Amount = row.Amount,
+                PaidByReserveFund = row.PaidByReserveFund
             };
 
             string? error = null;
@@ -389,7 +394,7 @@ public class BuildingExpensesController(
             }
 
             dto.Category = CategoryLabels.ExpenseLabel(category);
-            var key = Key(row.Supplier, row.Description, row.Amount!.Value);
+            var key = Key(row.Supplier, row.Description, row.Amount!.Value, row.PaidByReserveFund);
             if (existingKeys.Contains(key))
             {
                 dto.Status = "Duplicate";
@@ -420,7 +425,8 @@ public class BuildingExpensesController(
                     ExpenseDate = period.StartDate,
                     Amount = row.Amount!.Value,
                     DistributionType = BuildingExpenseDistributionType.ByCoefficient,
-                    Notes = string.Empty
+                    Notes = string.Empty,
+                    PaidByReserveFund = row.PaidByReserveFund
                 });
             }
 
@@ -786,6 +792,7 @@ public class BuildingExpensesController(
             TargetUnitId = entity.TargetUnitId,
             TargetUnitCode = targetUnit?.Code ?? string.Empty,
             Notes = entity.Notes,
+            PaidByReserveFund = entity.PaidByReserveFund,
             HasReceipt = entity.ReceiptStoredName != null,
             ReceiptFileName = entity.ReceiptFileName
         };

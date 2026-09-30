@@ -15,6 +15,8 @@ public class BuildingExpense : CompanyScopedEntity
     public BuildingExpenseDistributionType DistributionType { get; set; } = BuildingExpenseDistributionType.ByCoefficient;
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
+    // El gasto lo paga el fondo de reserva (no la expensa): decide la columna de la planilla y queda para operaciones futuras.
+    public bool PaidByReserveFund { get; set; }
     public string? ReceiptFileName { get; set; }
     public string? ReceiptStoredName { get; set; }
 

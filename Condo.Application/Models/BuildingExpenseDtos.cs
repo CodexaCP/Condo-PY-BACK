@@ -14,6 +14,7 @@ public class BuildingExpenseUpsertRequest
     public BuildingExpenseDistributionType DistributionType { get; set; } = BuildingExpenseDistributionType.ByCoefficient;
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
+    public bool PaidByReserveFund { get; set; }
 }
 
 public class BuildingExpenseDto
@@ -33,6 +34,7 @@ public class BuildingExpenseDto
     public Guid? TargetUnitId { get; set; }
     public string TargetUnitCode { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    public bool PaidByReserveFund { get; set; }
     public bool HasReceipt { get; set; }
     public string? ReceiptFileName { get; set; }
 }

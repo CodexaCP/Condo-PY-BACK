@@ -16,9 +16,13 @@ public static class BuildingExpenseImportParser
 {
     public const int MaxRows = 500;
 
-    public sealed record ParsedRow(int RowNumber, string Category, string Supplier, string Description, decimal? Amount, string? AmountError);
+    public sealed record ParsedRow(
+        int RowNumber, string Category, string Supplier, string Description, decimal? Amount, string? AmountError, bool PaidByReserveFund);
 
     private static readonly string[] RequiredHeaders = ["categoria", "proveedor", "descripcion", "monto"];
+
+    // Columna opcional: si la fila trae monto aca, el gasto se crea marcado como pagado por el fondo de reserva.
+    private const string ReserveFundHeader = "monto por fondo de reserva";
 
     private static readonly Dictionary<string, BuildingExpenseCategory> CategoryLookup = BuildCategoryLookup();
 
@@ -53,10 +57,10 @@ public static class BuildingExpenseImportParser
                 for (var column = 1; column <= lastColumn; column++)
                 {
                     var header = Normalize(sheet.Cell(row, column).GetString());
-                    if (RequiredHeaders.Contains(header) && !found.ContainsKey(header)) found[header] = column;
+                    if ((RequiredHeaders.Contains(header) || header == ReserveFundHeader) && !found.ContainsKey(header)) found[header] = column;
                 }
 
-                if (found.Count == RequiredHeaders.Length)
+                if (RequiredHeaders.All(found.ContainsKey))
                 {
                     headerRow = row;
                     columns = found;
@@ -75,16 +79,29 @@ public static class BuildingExpenseImportParser
                 var supplier = sheet.Cell(row, columns["proveedor"]).GetString().Trim();
                 var description = sheet.Cell(row, columns["descripcion"]).GetString().Trim();
                 var amountCell = sheet.Cell(row, columns["monto"]);
+                var fundCell = columns.TryGetValue(ReserveFundHeader, out var fundColumn) ? sheet.Cell(row, fundColumn) : null;
+                var hasFundAmount = fundCell is not null && !fundCell.IsEmpty();
 
-                if (category.Length == 0 && supplier.Length == 0 && description.Length == 0 && amountCell.IsEmpty()) continue;
+                if (category.Length == 0 && supplier.Length == 0 && description.Length == 0 && amountCell.IsEmpty() && !hasFundAmount) continue;
 
                 if (rows.Count >= MaxRows)
                 {
                     return (null, null, $"El archivo tiene mas de {MaxRows} filas. Dividilo en varios archivos.");
                 }
 
-                var (amount, amountError) = ReadAmount(amountCell);
-                rows.Add(new ParsedRow(row, category, supplier, description, amount, amountError));
+                // El monto va en una de las dos columnas: "Monto" (gasto comun) o "Monto por fondo de reserva".
+                decimal? amount;
+                string? amountError;
+                if (hasFundAmount && !amountCell.IsEmpty())
+                {
+                    (amount, amountError) = (null, "Completa solo uno: Monto o Monto por fondo de reserva.");
+                }
+                else
+                {
+                    (amount, amountError) = ReadAmount(hasFundAmount ? fundCell! : amountCell);
+                }
+
+                rows.Add(new ParsedRow(row, category, supplier, description, amount, amountError, hasFundAmount));
             }
 
             if (rows.Count == 0)
