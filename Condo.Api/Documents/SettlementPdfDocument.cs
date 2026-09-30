@@ -164,6 +164,8 @@ public sealed class SettlementPdfDocument(
         // Suma de los valores de todos los conceptos (todas las categorias de gasto), en un solo valor.
         ["totGastosValor"] = new(335, 598, 8, 70, 'R'),
         ["totGastosReserva"] = new(405, 598, 8, 70, 'R'),
+        // Suma de los gastos pagados por el fondo de reserva por -1 (sale en negativo, en la columna de reserva).
+        ["totPagadoFondoValor"] = new(405, 598, 8, 70, 'R'),
         ["totGastosComunes"] = new(475, 598, 8, 70, 'R'),
         ["subTotalValor"] = new(475, 611, 8, 70, 'R'),
         ["totalValor"] = new(475, 624, 8, 70, 'R'),
@@ -298,7 +300,7 @@ public sealed class SettlementPdfDocument(
     [
         "reservaPctLabel", "reservaPctValorReserva", "reservaPctValorComunes", "extraPctLabel", "extraPctValor",
         "saldoAcumuladoLabel", "saldoAcumuladoValor",
-        "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosValor", "totGastosReserva", "totGastosComunes",
+        "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosValor", "totGastosReserva", "totPagadoFondoValor", "totGastosComunes",
         "subTotalValor", "totalValor",
         "fechaEmision", "vigenciaLabel", "vigenciaDesde", "vigenciaHasta", "vencimientoLabel", "vencimiento",
         "firmaAutorizado", "firmaAutorizadoNombre", "firmaAutorizadoCargo",
@@ -628,11 +630,10 @@ public sealed class SettlementPdfDocument(
         if (isLastPage)
         {
             var expenses = ExpenseRows();
-            // Columna de reserva: lo cobrado como Fondo de reserva menos lo que pago el fondo (que sale en negativo,
+            // Columna de reserva: lo cobrado como Fondo de reserva y, aparte, lo que pago el fondo (que sale en negativo,
             // como en la planilla). Lo pagado por el fondo no toca la columna de gastos comunes ni los totales.
             var reserveCategoryTotal = expenses.Where(x => x.IsReserveFund && !x.PaidByReserveFund).Sum(x => x.Amount);
             var paidByFundTotal = expenses.Where(x => x.PaidByReserveFund).Sum(x => x.Amount);
-            var reserveTotal = reserveCategoryTotal - paidByFundTotal;
             var commonTotal = expenses.Where(x => !InReserveColumn(x)).Sum(x => x.Amount);
 
             PaperText(fg, "mesTotales", MonthText(), bold: true);
@@ -641,7 +642,8 @@ public sealed class SettlementPdfDocument(
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
             // Lo pagado por el fondo de reserva no suma al total de gastos del mes.
             PaperText(fg, "totGastosValor", FormatNumber(expenses.Where(x => !x.PaidByReserveFund).Sum(x => x.Amount)), bold: true);
-            PaperText(fg, "totGastosReserva", reserveTotal != 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
+            PaperText(fg, "totGastosReserva", reserveCategoryTotal > 0 ? FormatNumber(reserveCategoryTotal) : string.Empty, bold: true);
+            PaperText(fg, "totPagadoFondoValor", paidByFundTotal > 0 ? FormatNumber(-paidByFundTotal) : string.Empty, bold: true);
             PaperText(fg, "totGastosComunes", FormatNumber(commonTotal), bold: true);
 
             // Aportes calculados (redondeo al guarani): reserva = % de los gastos comunes; sub total = gastos
