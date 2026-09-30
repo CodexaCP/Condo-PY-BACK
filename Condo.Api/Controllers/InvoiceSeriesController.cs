@@ -194,6 +194,8 @@ public class InvoiceSeriesController(
         return CreatedAtAction(nameof(GetAll), null, ToDto(entity, building.Name, today: DateOnly.FromDateTime(DateTime.UtcNow)));
     }
 
+    private static readonly JsonSerializerOptions CamelCaseJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     // Calibracion de posiciones para que la factura calce sobre el papel preimpreso de este timbrado puntual
     // (cada imprenta puede entregarlo con un desvio distinto). No afecta a otros timbrados ni al diseno base.
     [HttpPut("{id:guid}/field-positions")]
@@ -216,7 +218,23 @@ public class InvoiceSeriesController(
             return Forbid();
         }
 
-        entity.FieldPositionsJson = request.Positions.Count > 0 ? JsonSerializer.Serialize(request.Positions) : null;
+        // Solo los bloques que existen en la factura, con valores razonables (puntos PDF, A4 = 595 x 842).
+        var clean = new Dictionary<string, FieldOffsetDto>();
+        foreach (var (key, value) in request.Positions)
+        {
+            if (!InvoicePdfDocument.CalibratableKeys.Contains(key)) continue;
+            if (!float.IsFinite(value.Dx) || !float.IsFinite(value.Dy) || Math.Abs(value.Dx) > 1000 || Math.Abs(value.Dy) > 1000)
+                return BadRequest("Una de las posiciones está fuera de la hoja.");
+            if (value.FontSize is { } size && (!float.IsFinite(size) || size < 4 || size > 60))
+                return BadRequest("El tamaño de letra debe estar entre 4 y 60.");
+            if (value.Width is { } width && (!float.IsFinite(width) || width < 10 || width > 600))
+                return BadRequest("El ancho debe estar entre 10 y 600.");
+            clean[key] = value;
+        }
+
+        // camelCase (dx, dy, fontSize...) para que la pantalla de calibracion lo lea igual que lo envia; antes se
+        // guardaba en PascalCase y al volver a abrir la pantalla las posiciones aparecian en cero.
+        entity.FieldPositionsJson = clean.Count > 0 ? JsonSerializer.Serialize(clean, CamelCaseJson) : null;
         entity.ReferenceScanUrl = string.IsNullOrWhiteSpace(request.ReferenceScanUrl) ? null : request.ReferenceScanUrl.Trim();
         entity.HideFrame = request.HideFrame;
         entity.HalfPage = request.HalfPage;

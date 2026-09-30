@@ -18,7 +18,24 @@ namespace Condo.Api.Documents;
 /// </summary>
 public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate = false, byte[]? backgroundImage = null) : IDocument
 {
-    private sealed record FieldOffset(float Dx, float Dy, float? FontSize = null);
+    private sealed record FieldOffset(float Dx, float Dy, float? FontSize = null, float? Width = null, bool? Hidden = null);
+
+    // Los bloques que se pueden calibrar desde la pantalla de calibracion (las mismas keys estan en
+    // invoice-series-calibration-page.component.ts). El controlador descarta cualquier otra.
+    public static readonly IReadOnlySet<string> CalibratableKeys = new HashSet<string>
+    {
+        "edificioLabel", "headerEdificio", "headerEmisor", "headerTimbradoNumero", "vigenciaDesde", "vigenciaHasta",
+        "seriesRuc", "docTitulo", "numeroCondicion", "headerNumero",
+        "fechaLabel", "fechaEmision", "condicionLabel", "contadoLabel", "marcaContado", "creditoLabel",
+        "nombreLabel", "clienteNombre", "ciLabel", "clienteDocumento", "rucLabel", "clienteRuc", "unidadLabel", "unidad",
+        "itemLabel", "conceptoLabel", "valorVentaLabel", "exentasLabel", "pct5Label", "pct10Label",
+        "conceptosBloque", "montoExentas", "conceptosNota", "vencimiento",
+        "subtotalesLabel", "subtotal", "totalLabel", "totalPagar", "liqLabel", "liq10Label", "totalIvaLabel", "sonLabel", "sonEnLetras",
+        "pieOriginal", "pieCopia", "generadoPor"
+    };
+
+    // Se guarda en camelCase (como la liquidacion); se acepta tambien PascalCase por lo que ya estaba guardado.
+    private static readonly JsonSerializerOptions OffsetsJson = new() { PropertyNameCaseInsensitive = true };
 
     private readonly Dictionary<string, FieldOffset> offsets = ParseOffsets(invoice.FieldPositionsJson);
 
@@ -27,7 +44,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, FieldOffset>();
         try
         {
-            return JsonSerializer.Deserialize<Dictionary<string, FieldOffset>>(json) ?? new Dictionary<string, FieldOffset>();
+            return JsonSerializer.Deserialize<Dictionary<string, FieldOffset>>(json, OffsetsJson) ?? new Dictionary<string, FieldOffset>();
         }
         catch (JsonException)
         {
@@ -92,6 +109,15 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     // tamano por defecto del formulario.
     private float FontSizeFor(string? key, float defaultSize) =>
         key is not null && offsets.TryGetValue(key, out var o) && o.FontSize.HasValue ? o.FontSize.Value : defaultSize;
+
+    // "No dibujar": el papel ya trae ese dato impreso. Sin decision guardada, los titulos (label) se ocultan cuando
+    // el papel trae su propio marco y el resto se dibuja.
+    private bool IsHidden(string? key, bool hiddenByDefault) =>
+        key is not null && offsets.TryGetValue(key, out var o) && o.Hidden.HasValue ? o.Hidden.Value : hiddenByDefault;
+
+    // Ancho calibrado (ya en puntos del papel real) o el de fabrica llevado al papel (MW).
+    private float WidthFor(string? key, float x, float defaultWidth) =>
+        key is not null && offsets.TryGetValue(key, out var o) && o.Width.HasValue ? o.Width.Value : MW(x, defaultWidth);
 
     private sealed record Palette(
         string Stroke, string Title, string? Label, string BuildingName, string Correlative,
@@ -184,34 +210,39 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     }
 
     // ─── Emisor y datos del timbrado ─────────────────────────────────────────
+    // Cada titulo y cada valor es un bloque calibrable propio (key): se mueve, cambia de letra y de ancho, o se
+    // deja de dibujar ("No dibujar") si el papel ya lo trae impreso. Los titulos (label: true) arrancan sin
+    // dibujar cuando el papel trae su propio marco (HideFrame), porque ese papel ya tiene todos los titulos.
 
     private void DrawHeader(LayersDescriptor l)
     {
         var issued = invoice.Status != InvoiceStatus.Draft;
 
         // Caja izquierda: el edificio a la izquierda; razon social, direccion y telefono a la derecha.
-        Text(l, 48, 793, 7.5f, "Edificio", color: p.Label ?? Colors.Grey.Darken1);
+        Text(l, 48, 793, 7.5f, "Edificio", color: p.Label ?? Colors.Grey.Darken1, key: "edificioLabel", label: true);
         var (edificioX, edificioY) = Offset("headerEdificio", 48, 758f);
         var edificioSize = FontSizeFor("headerEdificio", 15f);
-        l.Layer().TranslateX(edificioX).TranslateY(PageHeight - edificioY).Width(MW(48, 126f)).Column(col =>
-        {
-            col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(edificioSize).Bold().FontColor(p.BuildingName);
-        });
+        if (!IsHidden("headerEdificio", false))
+            l.Layer().TranslateX(edificioX).TranslateY(PageHeight - edificioY).Width(WidthFor("headerEdificio", 48, 126f)).Column(col =>
+            {
+                col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(edificioSize).Bold().FontColor(p.BuildingName);
+            });
 
         var (emisorX, emisorY) = Offset("headerEmisor", 182, 784f);
         // Un solo tamano calibrado se aplica a las 3 lineas (razon social, direccion, telefono) por igual.
         var emisorSize = FontSizeFor("headerEmisor", 10f);
-        l.Layer().TranslateX(emisorX).TranslateY(PageHeight - emisorY).Width(MW(182, 164f)).Column(col =>
-        {
-            if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
-                col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(emisorSize).Bold();
+        if (!IsHidden("headerEmisor", false))
+            l.Layer().TranslateX(emisorX).TranslateY(PageHeight - emisorY).Width(WidthFor("headerEmisor", 182, 164f)).Column(col =>
+            {
+                if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
+                    col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(emisorSize).Bold();
 
-            if (!string.IsNullOrWhiteSpace(invoice.BuildingAddress))
-                col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(emisorSize * 0.8f).Bold();
+                if (!string.IsNullOrWhiteSpace(invoice.BuildingAddress))
+                    col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(emisorSize * 0.8f).Bold();
 
-            if (!string.IsNullOrWhiteSpace(invoice.BuildingPhone))
-                col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(emisorSize * 0.8f).Bold();
-        });
+                if (!string.IsNullOrWhiteSpace(invoice.BuildingPhone))
+                    col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(emisorSize * 0.8f).Bold();
+            });
 
         // Caja derecha: timbrado, vigencia, RUC, tipo de documento y numero.
         const float boxX = 362.8346f, boxW = 198.4252f;
@@ -224,28 +255,31 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
 
         // Linea tenue con el numero y la condicion, como en el formulario impreso.
         if (issued && !string.IsNullOrEmpty(invoice.NumeroFormateado))
-            Text(l, boxX, 718, 7, $"{invoice.NumeroFormateado}   CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium, key: "headerNumero");
+            Text(l, boxX, 718, 7, $"{invoice.NumeroFormateado}   CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium, key: "numeroCondicion", label: true);
         else
-            Text(l, boxX, 718, 7, "CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium);
+            Text(l, boxX, 718, 7, "CONTADO", width: boxW, align: Align.Center, color: Colors.Grey.Medium, key: "numeroCondicion", label: true);
 
         // Numero grande: "Nº 001-001-" y el correlativo destacado.
         var (prefix, correlative) = SplitNumber(invoice.NumeroFormateado);
         var (numX, numY) = Offset("headerNumero", boxX, 712f);
         var numeroSize = FontSizeFor("headerNumero", 14f);
-        var numberBox = l.Layer().TranslateX(numX).TranslateY(PageHeight - numY).Width(MW(boxX, boxW)).AlignCenter();
-        numberBox.Text(t =>
+        if (!IsHidden("headerNumero", false))
         {
-            if (issued)
+            var numberBox = l.Layer().TranslateX(numX).TranslateY(PageHeight - numY).Width(WidthFor("headerNumero", boxX, boxW)).AlignCenter();
+            numberBox.Text(t =>
             {
-                t.Span("Nº ").FontSize(numeroSize).Bold().FontColor(p.Title);
-                t.Span(prefix).FontSize(numeroSize).Bold().FontColor(p.Title);
-                t.Span(correlative).FontSize(numeroSize + 3).Bold().FontColor(p.Correlative);
-            }
-            else
-            {
-                t.Span("Nº SIN NUMERAR").FontSize(13).Bold().FontColor("#B45309");
-            }
-        });
+                if (issued)
+                {
+                    t.Span("Nº ").FontSize(numeroSize).Bold().FontColor(p.Title);
+                    t.Span(prefix).FontSize(numeroSize).Bold().FontColor(p.Title);
+                    t.Span(correlative).FontSize(numeroSize + 3).Bold().FontColor(p.Correlative);
+                }
+                else
+                {
+                    t.Span("Nº SIN NUMERAR").FontSize(13).Bold().FontColor("#B45309");
+                }
+            });
+        }
     }
 
     // "001-001-0002777" -> ("001-001-", "0002777")
@@ -265,24 +299,24 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // Un documento con guion es RUC (8540611-2); sin guion es cedula.
         var isRuc = document.Contains('-');
 
-        Text(l, 45, 645, 8.5f, "FECHA DE EMISION:", color: p.Label);
+        Text(l, 45, 645, 8.5f, "FECHA DE EMISION:", color: p.Label, key: "fechaLabel", label: true);
         Text(l, 148, 645, 8.5f, DateInWords(date), bold: true, width: 160, key: "fechaEmision");
-        Text(l, 292, 645, 8.5f, "CONDICION DE VENTA:", bold: true, color: p.Label);
-        Text(l, 404, 645, 8.5f, "CONTADO", bold: true);
-        CheckBox(l, 452, 642.5f, 11.5f, checkedBox: true);
-        Text(l, 472, 645, 8.5f, "CREDITO", bold: true);
-        CheckBox(l, 517, 642.5f, 11.5f, checkedBox: false);
+        Text(l, 292, 645, 8.5f, "CONDICION DE VENTA:", bold: true, color: p.Label, key: "condicionLabel", label: true);
+        Text(l, 404, 645, 8.5f, "CONTADO", bold: true, key: "contadoLabel", label: true);
+        CheckBox(l, 452, 642.5f, 11.5f, "marcaContado", checkedBox: true);
+        Text(l, 472, 645, 8.5f, "CREDITO", bold: true, key: "creditoLabel", label: true);
+        CheckBox(l, 517, 642.5f, 11.5f, null, checkedBox: false);
 
-        Text(l, 45, 619, 8.5f, "NOMBRE O RAZON SOCIAL:", color: p.Label);
+        Text(l, 45, 619, 8.5f, "NOMBRE O RAZON SOCIAL:", color: p.Label, key: "nombreLabel", label: true);
         Text(l, 172, 619, 9, invoice.ClienteNombre ?? string.Empty, width: 280, key: "clienteNombre");
-        Text(l, 470, 619, 8.5f, "C.I. Nº", color: p.Label);
+        Text(l, 470, 619, 8.5f, "C.I. Nº", color: p.Label, key: "ciLabel", label: true);
         if (!string.IsNullOrEmpty(document) && !isRuc)
             Text(l, 497, 619, 9, document, width: 60, key: "clienteDocumento");
 
-        Text(l, 45, 593, 8.5f, "RUC:", color: p.Label);
+        Text(l, 45, 593, 8.5f, "RUC:", color: p.Label, key: "rucLabel", label: true);
         if (!string.IsNullOrEmpty(document) && isRuc)
-            Text(l, 74, 593, 9, document, width: 200, key: "clienteDocumento");
-        Text(l, 300, 593, 8.5f, "UNIDAD", bold: true, color: p.Label);
+            Text(l, 74, 593, 9, document, width: 200, key: "clienteRuc");
+        Text(l, 300, 593, 8.5f, "UNIDAD", bold: true, color: p.Label, key: "unidadLabel", label: true);
         Text(l, 420, 593, 9, invoice.UnitCode, width: 135, align: Align.Right, key: "unidad");
     }
 
@@ -293,12 +327,12 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         const float col1 = 70.86614f, col2 = 328.8189f, col3 = 411.0236f, col4 = 493.2283f, right = 561.2598f;
 
         var bold = standardTemplate;
-        Text(l, 34.01575f, 537, 8.5f, "ITEM", bold: bold, width: col1 - 34.01575f, align: Align.Center, color: p.Label);
-        Text(l, col1, 537, 9, "CONCEPTO", bold: bold, width: col2 - col1, align: Align.Center, color: p.Label);
-        Text(l, col2, 552, 8.5f, "VALOR DE VENTA", bold: bold, width: right - col2, align: Align.Center, color: p.Label);
-        Text(l, col2, 531, 8.5f, "EXENTAS", bold: bold, width: col3 - col2, align: Align.Center, color: p.Label);
-        Text(l, col3, 531, 8.5f, "5%", bold: bold, width: col4 - col3, align: Align.Center, color: p.Label);
-        Text(l, col4, 531, 8.5f, "10%", bold: bold, width: right - col4, align: Align.Center, color: p.Label);
+        Text(l, 34.01575f, 537, 8.5f, "ITEM", bold: bold, width: col1 - 34.01575f, align: Align.Center, color: p.Label, key: "itemLabel", label: true);
+        Text(l, col1, 537, 9, "CONCEPTO", bold: bold, width: col2 - col1, align: Align.Center, color: p.Label, key: "conceptoLabel", label: true);
+        Text(l, col2, 552, 8.5f, "VALOR DE VENTA", bold: bold, width: right - col2, align: Align.Center, color: p.Label, key: "valorVentaLabel", label: true);
+        Text(l, col2, 531, 8.5f, "EXENTAS", bold: bold, width: col3 - col2, align: Align.Center, color: p.Label, key: "exentasLabel", label: true);
+        Text(l, col3, 531, 8.5f, "5%", bold: bold, width: col4 - col3, align: Align.Center, color: p.Label, key: "pct5Label", label: true);
+        Text(l, col4, 531, 8.5f, "10%", bold: bold, width: right - col4, align: Align.Center, color: p.Label, key: "pct10Label", label: true);
 
         var lines = BuildConsolidatedLines();
 
@@ -308,21 +342,47 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         const float spacing = 13f;
         const float subNoteSpacing = 10f;
 
-        // Un solo offset calibrado mueve todo el bloque (filas + montos) junto, en vez de fila por fila.
-        var (blockX, baseline) = Offset("conceptosBloque", 76, firstBaseline);
-        var fontSize = FontSizeFor("conceptosBloque", 8.5f);
-        var blockDx = blockX - MX(76);
+        // Cuanto baja cada renglon (y su nota) respecto de la primera linea; los tres bloques (concepto, monto y
+        // nota del coeficiente) comparten estas alturas pero cada uno tiene su propio origen calibrado.
+        var rows = new List<(float Down, string Concepto, string? SubNota, decimal Monto)>();
+        var down = 0f;
         foreach (var (concepto, subNota, monto) in lines)
         {
-            Text(l, blockX, baseline, fontSize, concepto, width: MW(76, 248), raw: true);
-            Text(l, MX(col2) + blockDx, baseline, fontSize, FormatNumber(monto), width: MW(col2, col3 - col2 - 6), align: Align.Right, raw: true);
-            baseline -= spacing;
+            rows.Add((down, concepto, subNota, monto));
+            down += spacing;
+            if (subNota is not null) down += subNoteSpacing;
+        }
 
-            if (subNota is not null)
-            {
-                Text(l, blockX, baseline, 7.5f, subNota, width: MW(76, 248), color: Colors.Grey.Darken1, raw: true);
-                baseline -= subNoteSpacing;
-            }
+        // Concepto
+        if (!IsHidden("conceptosBloque", false))
+        {
+            var (x, y) = Offset("conceptosBloque", 76, firstBaseline);
+            var size = FontSizeFor("conceptosBloque", 8.5f);
+            var width = WidthFor("conceptosBloque", 76, 248f);
+            foreach (var r in rows)
+                Text(l, x, y - r.Down, size, r.Concepto, width: width, raw: true);
+        }
+
+        // Monto (columna exentas). Si nunca se calibro aparte, sigue al bloque de concepto como antes.
+        if (!IsHidden("montoExentas", false))
+        {
+            var amountKey = offsets.ContainsKey("montoExentas") ? "montoExentas" : "conceptosBloque";
+            var (x, y) = Offset(amountKey, col2, firstBaseline);
+            var size = FontSizeFor(amountKey, 8.5f);
+            var width = WidthFor("montoExentas", col2, col3 - col2 - 6);
+            foreach (var r in rows)
+                Text(l, x, y - r.Down, size, FormatNumber(r.Monto), width: width, align: Align.Right, raw: true);
+        }
+
+        // Nota del coeficiente, debajo de la primera linea.
+        if (!IsHidden("conceptosNota", false))
+        {
+            var noteKey = offsets.ContainsKey("conceptosNota") ? "conceptosNota" : "conceptosBloque";
+            var (x, y) = Offset(noteKey, 76, firstBaseline);
+            var size = offsets.ContainsKey("conceptosNota") ? FontSizeFor("conceptosNota", 7.5f) : 7.5f;
+            var width = WidthFor("conceptosNota", 76, 248f);
+            foreach (var r in rows.Where(r => r.SubNota is not null))
+                Text(l, x, y - r.Down - spacing, size, r.SubNota!, width: width, color: Colors.Grey.Darken1, raw: true);
         }
 
         if (invoice.PeriodDueDate.HasValue)
@@ -371,17 +431,17 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     {
         var total = invoice.MontoTotal;
 
-        Text(l, 45, 226, 8.5f, "SUBTOTALES", color: p.Label);
+        Text(l, 45, 226, 8.5f, "SUBTOTALES", color: p.Label, key: "subtotalesLabel", label: true);
         Text(l, 328.8189f, 226, 8.5f, FormatNumber(total), width: 411.0236f - 328.8189f - 6, align: Align.Right, key: "subtotal");
 
-        Text(l, 45, 203, 8.5f, "TOTAL A PAGAR", bold: standardTemplate, color: p.Label);
+        Text(l, 45, 203, 8.5f, "TOTAL A PAGAR", bold: standardTemplate, color: p.Label, key: "totalLabel", label: true);
         Text(l, 493.2283f, 203, 9.5f, FormatNumber(total), bold: true, width: 561.2598f - 493.2283f - 6, align: Align.Right, color: p.TotalText, key: "totalPagar");
 
-        Text(l, 45, 180, 8.5f, "LIQUIDACION DEL IVA: (5%)", color: p.Label);
-        Text(l, 332, 180, 8.5f, "(10%)", color: p.Label);
-        Text(l, 470, 180, 8.5f, "TOTAL IVA:", color: p.Label);
+        Text(l, 45, 180, 8.5f, "LIQUIDACION DEL IVA: (5%)", color: p.Label, key: "liqLabel", label: true);
+        Text(l, 332, 180, 8.5f, "(10%)", color: p.Label, key: "liq10Label", label: true);
+        Text(l, 470, 180, 8.5f, "TOTAL IVA:", color: p.Label, key: "totalIvaLabel", label: true);
 
-        Text(l, 45, 156, 8.5f, "SON:", bold: true, color: p.Label);
+        Text(l, 45, 156, 8.5f, "SON:", bold: true, color: p.Label, key: "sonLabel", label: true);
         Text(l, 82, 156, 8.5f, NumberToWordsEs.Guaranies(total), width: 474, key: "sonEnLetras");
     }
 
@@ -389,10 +449,10 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
 
     private void DrawFooter(LayersDescriptor l)
     {
-        Text(l, 34.01575f, 131, 6.5f, "Original: Comprador - Copia: Arch. Tributario", bold: true, width: 527.2441f, align: Align.Right);
-        Text(l, 34.01575f, 122, 6.5f, "2°Copia: Contabilidad(No válido p/ crédito fiscal)", bold: true, width: 527.2441f, align: Align.Right);
+        Text(l, 34.01575f, 131, 6.5f, "Original: Comprador - Copia: Arch. Tributario", bold: true, width: 527.2441f, align: Align.Right, key: "pieOriginal", label: true);
+        Text(l, 34.01575f, 122, 6.5f, "2°Copia: Contabilidad(No válido p/ crédito fiscal)", bold: true, width: 527.2441f, align: Align.Right, key: "pieCopia", label: true);
         if (standardTemplate)
-            Text(l, 34.01575f, 131, 6.5f, "Generado por CONDOPY", width: 200, color: CondoPdfColors.Gray);
+            Text(l, 34.01575f, 131, 6.5f, "Generado por CONDOPY", width: 200, color: CondoPdfColors.Gray, key: "generadoPor");
 
         if (invoice.Status == InvoiceStatus.Voided)
         {
@@ -447,12 +507,17 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     }
 
     // Casilla cuadrada (Contado / Credito); marcada lleva una X.
-    private void CheckBox(LayersDescriptor l, float x, float bottomY, float size, bool checkedBox)
+    // La casilla solo se dibuja si el marco es del sistema; la "X" es un bloque calibrable aparte (markKey)
+    // porque el papel con casillas propias igual necesita la marca encima.
+    private void CheckBox(LayersDescriptor l, float x, float bottomY, float size, string? markKey, bool checkedBox)
     {
-        var b = Box(x, bottomY, size, size);
-        l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height).Border(0.9f).BorderColor(Colors.Black);
+        if (!invoice.HideFrame)
+        {
+            var b = Box(x, bottomY, size, size);
+            l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height).Border(0.9f).BorderColor(Colors.Black);
+        }
         if (checkedBox)
-            Text(l, x, bottomY + 2.2f, size - 1.5f, "X", bold: true, width: size, align: Align.Center);
+            Text(l, x, bottomY + 2.2f, size - 1.5f, "X", bold: true, width: size, align: Align.Center, key: markKey);
     }
 
     private void Rect(LayersDescriptor l, float x, float bottomY, float width, float height)
@@ -478,14 +543,15 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
 
     private void Text(
         LayersDescriptor l, float x, float baselineY, float size, string text,
-        bool bold = false, float? width = null, Align align = Align.Left, string? color = null, string? key = null, bool raw = false)
+        bool bold = false, float? width = null, Align align = Align.Left, string? color = null, string? key = null, bool raw = false, bool label = false)
     {
         if (string.IsNullOrEmpty(text)) return;
+        if (!raw && IsHidden(key, label && invoice.HideFrame)) return;
 
         // raw: x, baselineY y width ya vienen en coordenadas del papel real (bloques con offset ya aplicado).
         if (!raw)
         {
-            if (width.HasValue) width = MW(x, width.Value);
+            if (width.HasValue) width = WidthFor(key, x, width.Value);
             (x, baselineY) = Offset(key, x, baselineY);
         }
         size = FontSizeFor(key, size);

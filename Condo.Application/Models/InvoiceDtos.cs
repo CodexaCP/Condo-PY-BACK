@@ -39,6 +39,8 @@ public class FieldOffsetDto
     public float Dx { get; set; }
     public float Dy { get; set; }
     public float? FontSize { get; set; }
+    public float? Width { get; set; }
+    public bool? Hidden { get; set; }
 }
 
 public class UpdateInvoiceSeriesCalibrationRequest
