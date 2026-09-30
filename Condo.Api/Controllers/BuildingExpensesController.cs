@@ -1,3 +1,5 @@
+using Condo.Api.Documents;
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -234,6 +236,173 @@ public class BuildingExpensesController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(ToDto(entity, context.Building!, context.Period!, context.TargetUnit));
+    }
+
+    private const long MaxImportSizeBytes = 2 * 1024 * 1024; // 2 MB
+
+    [HttpGet("import-template")]
+    public IActionResult DownloadImportTemplate() =>
+        File(
+            BuildingExpenseImportTemplateBuilder.Build(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "plantilla-gastos.xlsx");
+
+    // Carga masiva desde Excel: una fila = un gasto del periodo (fecha = primer dia del periodo, reparto por
+    // coeficiente). Sin "confirm" solo valida y devuelve la vista previa; con "confirm" guarda todo o nada.
+    [HttpPost("import")]
+    [RequestSizeLimit(MaxImportSizeBytes)]
+    public async Task<ActionResult<BuildingExpenseImportResultDto>> Import(
+        IFormFile file,
+        [FromForm] Guid buildingId,
+        [FromForm] Guid expensePeriodId,
+        [FromForm] bool confirm,
+        [FromForm] bool replaceExisting,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0) return BadRequest("No se recibio ningun archivo.");
+        if (file.Length > MaxImportSizeBytes) return BadRequest("El archivo no puede superar los 2 MB.");
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Solo se permiten archivos Excel (.xlsx).");
+        }
+
+        // El operador solo carga y edita; reemplazar elimina los gastos que ya estaban.
+        if (replaceExisting && string.Equals(tenantContext.Role, "CompanyOperator", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, "El operador no puede reemplazar los gastos del periodo.");
+        }
+
+        var period = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == expensePeriodId, cancellationToken);
+        if (period is null) return BadRequest("El periodo de expensas indicado no existe.");
+        if (period.BuildingId != buildingId) return BadRequest("El periodo de expensas debe pertenecer al edificio seleccionado.");
+        if (!await accessScope.CanAccessBuildingAsync(buildingId, cancellationToken)) return Forbid();
+        if (period.Status != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("Los gastos del edificio solo se pueden gestionar mientras el periodo este en borrador.");
+        }
+
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == buildingId, cancellationToken);
+        var effectiveCompanyId = building?.CompanyId ?? building?.Condominium?.CompanyId;
+        if (!effectiveCompanyId.HasValue)
+        {
+            return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
+        }
+
+        List<BuildingExpenseImportParser.ParsedRow> parsed;
+        await using (var stream = file.OpenReadStream())
+        {
+            var (rows, parseError) = BuildingExpenseImportParser.Parse(stream);
+            if (rows is null) return BadRequest(parseError);
+            parsed = rows;
+        }
+
+        var existing = await dbContext.BuildingExpenses
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId)
+            .ToListAsync(cancellationToken);
+
+        // Con "reemplazar" los existentes se eliminan, asi que no cuentan como duplicados.
+        static string Key(string supplier, string description, decimal amount) =>
+            $"{supplier.Trim().ToUpperInvariant()}|{description.Trim().ToUpperInvariant()}|{amount:0.00}";
+        var existingKeys = replaceExisting
+            ? new HashSet<string>()
+            : existing.Select(x => Key(x.SupplierName, x.Description, x.Amount)).ToHashSet();
+        var seenInFile = new HashSet<string>();
+
+        var result = new BuildingExpenseImportResultDto { ExistingCount = existing.Count };
+        var toCreate = new List<BuildingExpense>();
+
+        foreach (var row in parsed)
+        {
+            var dto = new BuildingExpenseImportRowDto
+            {
+                RowNumber = row.RowNumber,
+                Category = row.Category,
+                Supplier = row.Supplier,
+                Description = row.Description,
+                Amount = row.Amount
+            };
+
+            string? error = null;
+            BuildingExpenseCategory category = default;
+            if (row.Category.Length == 0) error = "La categoria es obligatoria.";
+            else if (!BuildingExpenseImportParser.TryResolveCategory(row.Category, out category)) error = $"Categoria desconocida: \"{row.Category}\". Ver la hoja Categorias de la plantilla.";
+            else if (row.Description.Length == 0) error = "La descripcion es obligatoria.";
+            else if (row.Description.Length > 200) error = "La descripcion no puede superar los 200 caracteres.";
+            else if (row.Supplier.Length > 160) error = "El proveedor no puede superar los 160 caracteres.";
+            else if (row.AmountError is not null) error = row.AmountError;
+            else if (row.Amount is not > 0) error = "El monto debe ser mayor que cero.";
+
+            if (error is not null)
+            {
+                dto.Status = "Error";
+                dto.Message = error;
+                result.ErrorCount++;
+                result.Rows.Add(dto);
+                continue;
+            }
+
+            dto.Category = CategoryLabels.ExpenseLabel(category);
+            var key = Key(row.Supplier, row.Description, row.Amount!.Value);
+            if (existingKeys.Contains(key))
+            {
+                dto.Status = "Duplicate";
+                dto.Message = "Ya existe un gasto igual en el periodo: se omite.";
+                result.DuplicateCount++;
+            }
+            else
+            {
+                if (!seenInFile.Add(key))
+                {
+                    dto.Status = "Warning";
+                    dto.Message = "Fila repetida en el archivo (mismo proveedor, descripcion y monto): se importa igual.";
+                    result.WarningCount++;
+                }
+                else
+                {
+                    result.OkCount++;
+                }
+
+                toCreate.Add(new BuildingExpense
+                {
+                    CompanyId = effectiveCompanyId.Value,
+                    BuildingId = buildingId,
+                    ExpensePeriodId = expensePeriodId,
+                    Category = category,
+                    SupplierName = row.Supplier,
+                    Description = row.Description,
+                    ExpenseDate = period.StartDate,
+                    Amount = row.Amount!.Value,
+                    DistributionType = BuildingExpenseDistributionType.ByCoefficient,
+                    Notes = string.Empty
+                });
+            }
+
+            result.Rows.Add(dto);
+        }
+
+        // Todo o nada: con un solo error no se guarda ninguna fila.
+        if (!confirm || result.ErrorCount > 0 || (toCreate.Count == 0 && !replaceExisting))
+        {
+            return Ok(result);
+        }
+
+        if (replaceExisting)
+        {
+            foreach (var expense in existing) expense.IsDeleted = true;
+            result.DeletedCount = existing.Count;
+        }
+
+        dbContext.BuildingExpenses.AddRange(toCreate);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        result.Imported = true;
+        result.ImportedCount = toCreate.Count;
+        return Ok(result);
     }
 
     [HttpDelete("{id:guid}")]
