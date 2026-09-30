@@ -1651,7 +1651,10 @@ public class ExpensePeriodsController(
             ExpensePeriodName = period.Name,
             BuildingName = period.Building?.Name ?? string.Empty,
             TotalBuildingExpenses = settlement.TotalBuildingExpenses,
-            TotalBuildingIncomes = settlement.TotalBuildingIncomes,
+            // Se recalcula sin el Fondo operativo: las liquidaciones generadas antes de excluirlo guardan el total viejo.
+            TotalBuildingIncomes = await dbContext.BuildingIncomes.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id && x.Category != BuildingIncomeCategory.OperationalFund)
+                .SumAsync(x => x.Amount, cancellationToken),
             ReserveFundAmount = settlement.ReserveFundAmount,
             ExtraordinaryAmount = settlement.ExtraordinaryAmount,
             NetCommonAmount = settlement.NetCommonAmount,
