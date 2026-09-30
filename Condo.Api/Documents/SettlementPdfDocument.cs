@@ -95,9 +95,9 @@ public sealed class SettlementPdfDocument(
         {
             var top = 145f + i * 15f;
             var prefix = ExpensePrefix(ExpenseBlocks[i].Category);
-            defaults[prefix + "Label"] = new(50, top, 8, 135);
-            defaults[prefix + "Descripcion"] = new(185, top, 8, 220);
-            defaults[prefix + "Valor"] = new(475, top, 8, 70, 'R');
+            defaults[prefix + "Label"] = new(50, top, 8, 135, HiddenByDefault: true);
+            defaults[prefix + "Descripcion"] = new(185, top, 8, 220, HiddenByDefault: true);
+            defaults[prefix + "Valor"] = new(475, top, 8, 70, 'R', true);
         }
         return defaults;
     }
@@ -140,10 +140,10 @@ public sealed class SettlementPdfDocument(
         // Cuerpo: una columna por bloque, con el alto de fila comun ("filas").
         // (arrancan ocultos: los gastos se imprimen por categoria, cada una con su titulo, descripcion y valor;
         // el cuerpo con una fila por gasto sigue disponible destildando "No dibujar")
-        ["colConcepto"] = new(50, 145, 8, 135, HiddenByDefault: true),
-        ["colDescripcion"] = new(185, 145, 8, 220, HiddenByDefault: true),
-        ["colReserva"] = new(405, 145, 8, 70, 'R', true),
-        ["colMonto"] = new(475, 145, 8, 70, 'R', true),
+        ["colConcepto"] = new(50, 145, 8, 135),
+        ["colDescripcion"] = new(185, 145, 8, 220),
+        ["colReserva"] = new(405, 145, 8, 70, 'R'),
+        ["colMonto"] = new(475, 145, 8, 70, 'R'),
 
         // Totales: cada titulo y cada valor por separado (solo salen en la ultima hoja).
         // El mes se usa en dos lugares del papel: arriba (mes) y en la franja de totales (mesTotales).
@@ -284,7 +284,11 @@ public sealed class SettlementPdfDocument(
     // cada valor de los totales, de las fechas, de las firmas y del pie. Un renglon del cuerpo nunca pasa a dos
     // lineas (se corta con "..."): asi las columnas siempre quedan alineadas. Si las filas no entran en la hoja
     // siguen en la siguiente, en la misma zona del papel; los totales salen solo en la ultima hoja.
-    private sealed record BodyRow(string Concept, string Description, string Reserve, string Amount);
+    // EndsRow: la linea es la ultima del renglon (una descripcion larga ocupa varias lineas); marca donde va la
+    // linea fina del papel liso.
+    private sealed record BodyRow(string Concept, string Description, string Reserve, string Amount, bool EndsRow = true);
+
+    private const int MaxDescriptionLines = 3;
 
     // Todo lo que va abajo de las filas: si el bloque no esta oculto, las filas terminan antes de el.
     private static readonly string[] BottomKeys =
@@ -309,27 +313,147 @@ public sealed class SettlementPdfDocument(
         (BuildingIncomeCategory.Other, "otro", "OTROS INGRESOS")
     ];
 
-    private IReadOnlyList<BodyRow> BuildBodyRows()
+    // Lista corrida por proveedor: el nombre sale una vez (en la primera linea del grupo) y cada descripcion
+    // distinta va en su fila con su monto; una descripcion larga ocupa hasta MaxDescriptionLines lineas. ANDE y
+    // ESSAP van primero y despues el resto en el orden en que se cargo. Cada grupo es una lista de "renglones"
+    // (una linea de papel cada uno) que no se parte entre hojas salvo que sea mas largo que una hoja.
+    private List<List<BodyRow>> BuildBodyGroups()
     {
-        var rows = new List<BodyRow>();
+        var concept = Place("colConcepto");
+        var description = Place("colDescripcion");
 
-        // Un gasto por linea; el del fondo de reserva va en su columna. Los ingresos no van en el cuerpo: cada
-        // categoria tiene su propio titulo y valor.
-        foreach (var expense in ExpenseRows())
-            rows.Add(new BodyRow(
-                expense.Supplier.ToUpperInvariant(),
-                expense.Description.ToUpperInvariant(),
-                expense.IsReserveFund ? FormatNumber(expense.Amount) : string.Empty,
-                expense.IsReserveFund ? string.Empty : FormatNumber(expense.Amount)));
+        var suppliers = ExpenseRows()
+            .Select((line, index) => (Line: line, Index: index))
+            .GroupBy(x => SupplierName(x.Line), StringComparer.OrdinalIgnoreCase)
+            .Select(g => (
+                Name: g.Key,
+                Rank: g.Min(x => x.Line.Category switch { "Ande" => 0, "Essap" => 1, _ => 2 }),
+                First: g.Min(x => x.Index),
+                Lines: g.Select(x => x.Line).ToList()))
+            .OrderBy(g => g.Rank).ThenBy(g => g.First);
 
-        return rows;
+        var groups = new List<List<BodyRow>>();
+        foreach (var supplier in suppliers)
+        {
+            var slots = new List<BodyRow>();
+
+            // Una fila por descripcion distinta (los gastos con la misma se suman); los del fondo de reserva van
+            // en su columna.
+            var rows = supplier.Lines
+                .GroupBy(x => (Description: x.Description.Trim().ToUpperInvariant(), x.IsReserveFund))
+                .Select(g => (Description: g.Key.Description, Amount: g.Sum(x => x.Amount), Reserve: g.Key.IsReserveFund));
+            foreach (var row in rows)
+            {
+                var wrapped = WrapText(row.Description, description.Width, description.Size, MaxDescriptionLines);
+                var amount = FormatNumber(row.Amount);
+                for (var i = 0; i < wrapped.Count; i++)
+                    slots.Add(new BodyRow(
+                        string.Empty, wrapped[i],
+                        i == 0 && row.Reserve ? amount : string.Empty,
+                        i == 0 && !row.Reserve ? amount : string.Empty,
+                        EndsRow: i == wrapped.Count - 1));
+            }
+
+            // El nombre del proveedor puede ocupar mas de una linea; si el grupo es mas corto se agregan renglones.
+            var conceptLines = WrapText(supplier.Name.ToUpperInvariant(), concept.Width, concept.Size, MaxDescriptionLines);
+            if (supplier.Name.Length == 0) conceptLines.Clear();
+            for (var i = 0; i < conceptLines.Count; i++)
+            {
+                if (slots.Count <= i)
+                {
+                    if (slots.Count > 0) slots[^1] = slots[^1] with { EndsRow = false };
+                    slots.Add(new BodyRow(string.Empty, string.Empty, string.Empty, string.Empty));
+                }
+                slots[i] = slots[i] with { Concept = conceptLines[i] };
+            }
+
+            groups.Add(slots);
+        }
+
+        return groups;
+    }
+
+    // Proveedor del gasto; si no tiene, el nombre de su categoria.
+    private static string SupplierName(SettlementExpenseLineDto line)
+    {
+        var supplier = line.Supplier.Trim();
+        if (supplier.Length > 0) return supplier;
+        var category = ExpenseBlocks.FirstOrDefault(b => b.Category.ToString() == line.Category);
+        return category.Text ?? string.Empty;
+    }
+
+    // Corta el texto en lineas de a lo sumo el ancho de la columna (estimado por caracteres) y lo trunca con "..."
+    // si pasa de maxLines. Siempre devuelve al menos una linea.
+    private static List<string> WrapText(string text, float width, float fontSize, int maxLines)
+    {
+        var perLine = Math.Max(4, (int)Math.Floor(width / (fontSize * 0.65f)));
+        var lines = new List<string>();
+        var current = string.Empty;
+
+        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var rest = word;
+            while (rest.Length > perLine)
+            {
+                if (current.Length > 0) { lines.Add(current); current = string.Empty; }
+                lines.Add(rest[..perLine]);
+                rest = rest[perLine..];
+            }
+
+            var candidate = current.Length == 0 ? rest : current + " " + rest;
+            if (candidate.Length <= perLine) current = candidate;
+            else { lines.Add(current); current = rest; }
+        }
+
+        if (current.Length > 0) lines.Add(current);
+        if (lines.Count == 0) lines.Add(string.Empty);
+
+        if (lines.Count > maxLines)
+        {
+            lines = lines.Take(maxLines).ToList();
+            var last = lines[maxLines - 1];
+            if (last.Length > perLine - 3) last = last[..Math.Max(0, perLine - 3)];
+            lines[maxLines - 1] = last.TrimEnd() + "...";
+        }
+
+        return lines;
+    }
+
+    // Reparte los grupos en hojas de a lo sumo "capacity" renglones sin partir un grupo entre dos hojas.
+    private static List<BodyRow[]> PaginateGroups(List<List<BodyRow>> groups, int capacity)
+    {
+        var pages = new List<BodyRow[]>();
+        var current = new List<BodyRow>();
+
+        foreach (var group in groups)
+        {
+            if (current.Count > 0 && current.Count + group.Count > capacity)
+            {
+                pages.Add(current.ToArray());
+                current = new List<BodyRow>();
+            }
+
+            // Un grupo mas largo que una hoja se parte igual.
+            foreach (var chunk in group.Chunk(capacity))
+            {
+                if (current.Count + chunk.Length > capacity)
+                {
+                    pages.Add(current.ToArray());
+                    current = new List<BodyRow>();
+                }
+                current.AddRange(chunk);
+            }
+        }
+
+        if (current.Count > 0 || pages.Count == 0) pages.Add(current.ToArray());
+        return pages;
     }
 
     private void ComposeOnPaper(IDocumentContainer container)
     {
         // Sin columnas del cuerpo a la vista (por defecto), no hay filas: una sola hoja.
         var bodyVisible = new[] { "colConcepto", "colDescripcion", "colReserva", "colMonto" }.Any(key => !IsHidden(key));
-        var rows = bodyVisible ? BuildBodyRows() : Array.Empty<BodyRow>();
+        var groups = bodyVisible ? BuildBodyGroups() : new List<List<BodyRow>>();
         var rowHeight = RowHeight;
 
         // Las filas terminan antes del primer bloque que este DEBAJO de ellas y sobre su misma franja horizontal.
@@ -358,7 +482,7 @@ public sealed class SettlementPdfDocument(
 
         var capacity = Math.Max(3, (int)Math.Floor((lowest - 6f - firstTop) / rowHeight));
 
-        var chunks = rows.Count == 0 ? new List<BodyRow[]> { Array.Empty<BodyRow>() } : rows.Chunk(capacity).ToList();
+        var chunks = PaginateGroups(groups, capacity);
         for (var pageIndex = 0; pageIndex < chunks.Count; pageIndex++)
         {
             var pageRows = chunks[pageIndex];
@@ -399,7 +523,8 @@ public sealed class SettlementPdfDocument(
             var left = Math.Min(concepto.X, Math.Min(descripcion.X, Math.Min(reserva.X, monto.X)));
             var right = Math.Max(concepto.X + concepto.Width, Math.Max(descripcion.X + descripcion.Width, Math.Max(reserva.X + reserva.Width, monto.X + monto.Width)));
             for (var i = 0; i < pageRows.Length; i++)
-                layers.Layer().TranslateX(left).TranslateY(concepto.Top + (i + 1) * rowHeight - 1f)
+                if (pageRows[i].EndsRow)
+                    layers.Layer().TranslateX(left).TranslateY(concepto.Top + (i + 1) * rowHeight - 1f)
                     .Width(Math.Max(10f, right - left)).Height(0.5f).Background("#000000");
         }
 
