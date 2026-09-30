@@ -47,7 +47,7 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
             ? new List<BuildingIncome>()
             : await dbContext.BuildingIncomes
                 .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id && x.Category != BuildingIncomeCategory.OperationalFund)
                 .OrderBy(x => x.IncomeDate)
                 .ThenBy(x => x.Description)
                 .ToListAsync(cancellationToken);

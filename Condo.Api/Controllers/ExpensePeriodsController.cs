@@ -1778,9 +1778,10 @@ public class ExpensePeriodsController(
             .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
             .ToListAsync(cancellationToken);
 
+        // El Fondo operativo es informativo: no cuenta en los ingresos de la liquidacion (total para gastos).
         var incomes = await dbContext.BuildingIncomes
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id && x.Category != BuildingIncomeCategory.OperationalFund)
             .ToListAsync(cancellationToken);
 
         var totalBuildingExpenses = expenses.Sum(x => x.Amount);
@@ -1805,9 +1806,7 @@ public class ExpensePeriodsController(
             .Sum(x => x.Amount);
         // Si los ingresos van al fondo de reserva, lo componen todas las categorias menos Fondo operativo.
         // No es un cargo a las unidades: solo engrosa el valor del fondo.
-        var reserveFundIncomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund
-            ? incomes.Where(x => x.Category != BuildingIncomeCategory.OperationalFund).Sum(x => x.Amount)
-            : 0m;
+        var reserveFundIncomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund ? totalBuildingIncomes : 0m;
         var extraordinaryAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.Extraordinary)
             .Sum(x => x.Amount);
