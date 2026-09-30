@@ -458,11 +458,14 @@ public sealed class SettlementPdfDocument(
         if (isFirstPage)
         {
             var byCategory = ExpenseRows().Where(x => x.Category.Length > 0).GroupBy(x => x.Category).ToDictionary(g => g.Key, g => g.ToList());
+            // Lo que baja cada categoria siguiente por los renglones de mas que uso una anterior (ANDE con varias
+            // descripciones): asi nunca se pisan y no hace falta recalibrar segun cuantas haya.
+            var pushDown = 0f;
             foreach (var (category, text) in ExpenseBlocks)
             {
                 if (!byCategory.TryGetValue(category.ToString(), out var lines)) continue;
                 var prefix = ExpensePrefix(category);
-                PaperText(fg, prefix + "Label", text, bold: true);
+                PaperText(fg, prefix + "Label", text, bold: true, extraTop: pushDown);
 
                 // ANDE: un renglon por descripcion distinta (titulo una sola vez), con su propio monto. Con una
                 // sola descripcion sale una linea, sin renglones vacios.
@@ -472,9 +475,10 @@ public sealed class SettlementPdfDocument(
                     var categoryLines = CategoryLines(lines);
                     for (var i = 0; i < categoryLines.Count; i++)
                     {
-                        PaperText(fg, prefix + "Descripcion", categoryLines[i].Description.ToUpperInvariant(), extraTop: i * rowHeight);
-                        PaperText(fg, prefix + "Valor", FormatNumber(categoryLines[i].Amount), bold: true, extraTop: i * rowHeight);
+                        PaperText(fg, prefix + "Descripcion", categoryLines[i].Description.ToUpperInvariant(), extraTop: pushDown + i * rowHeight);
+                        PaperText(fg, prefix + "Valor", FormatNumber(categoryLines[i].Amount), bold: true, extraTop: pushDown + i * rowHeight);
                     }
+                    pushDown += (categoryLines.Count - 1) * rowHeight;
                     continue;
                 }
 
@@ -482,8 +486,8 @@ public sealed class SettlementPdfDocument(
                 if (descriptions.Count == 0)
                     descriptions = lines.Select(x => x.Supplier.Trim()).Where(x => x.Length > 0).Distinct().ToList();
 
-                PaperText(fg, prefix + "Descripcion", string.Join(" / ", descriptions).ToUpperInvariant());
-                PaperText(fg, prefix + "Valor", FormatNumber(lines.Sum(x => x.Amount)), bold: true);
+                PaperText(fg, prefix + "Descripcion", string.Join(" / ", descriptions).ToUpperInvariant(), extraTop: pushDown);
+                PaperText(fg, prefix + "Valor", FormatNumber(lines.Sum(x => x.Amount)), bold: true, extraTop: pushDown);
             }
         }
 
