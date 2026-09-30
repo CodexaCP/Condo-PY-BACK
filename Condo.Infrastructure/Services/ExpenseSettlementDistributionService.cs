@@ -30,7 +30,8 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
 
         var expenses = await dbContext.BuildingExpenses
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
+            // Los gastos pagados por el fondo de reserva no se reparten ni entran en ninguna base.
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id && !x.PaidByReserveFund)
             .OrderBy(x => x.ExpenseDate)
             .ThenBy(x => x.Description)
             .ToListAsync(cancellationToken);

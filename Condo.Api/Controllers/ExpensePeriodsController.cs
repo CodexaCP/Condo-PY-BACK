@@ -1710,7 +1710,8 @@ public class ExpensePeriodsController(
             .Where(x => !x.IsDeleted
                      && x.ExpensePeriodId == expensePeriodId
                      && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
-                      || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
+                      || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit
+                      || x.PaidByReserveFund))
             .Select(x => new { x.Category, x.SupplierName, x.Description, x.Amount, x.ExpenseDate, x.PaidByReserveFund })
             .ToListAsync(cancellationToken);
 
@@ -1753,6 +1754,7 @@ public class ExpensePeriodsController(
             .AsNoTracking()
             .Where(x => !x.IsDeleted
                      && x.ExpensePeriodId == expensePeriodId
+                     && !x.PaidByReserveFund
                      && (x.DistributionType == BuildingExpenseDistributionType.ByCoefficient
                       || x.DistributionType == BuildingExpenseDistributionType.FixedPerUnit))
             .Select(x => new { x.Category, x.Amount, x.Description })
@@ -1788,7 +1790,8 @@ public class ExpensePeriodsController(
             .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id && x.Category != BuildingIncomeCategory.OperationalFund)
             .ToListAsync(cancellationToken);
 
-        var totalBuildingExpenses = expenses.Sum(x => x.Amount);
+        // Lo pagado por el fondo de reserva no suma: ni al total de gastos ni a lo que se reparte a las unidades.
+        var totalBuildingExpenses = expenses.Where(x => !x.PaidByReserveFund).Sum(x => x.Amount);
         var totalBuildingIncomes = incomes.Sum(x => x.Amount);
         // Si los ingresos van al fondo de reserva no reducen lo que se reparte entre las unidades.
         var config = await dbContext.Buildings.AsNoTracking()
@@ -1801,16 +1804,19 @@ public class ExpensePeriodsController(
         // categoria Fondo de reserva).
         var commonExpenses = expenses
             .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient or BuildingExpenseDistributionType.FixedPerUnit
-                        && x.Category != BuildingExpenseCategory.ReserveFund)
+                        && x.Category != BuildingExpenseCategory.ReserveFund
+                        && !x.PaidByReserveFund)
             .Sum(x => x.Amount);
         var contributions = SettlementContributions.Compute(
             commonExpenses, creditedIncomes, config?.ReserveFundPercentage, config?.ExtraordinaryPercentage);
         var reserveFundAmount = expenses
-            .Where(x => x.Category == BuildingExpenseCategory.ReserveFund)
+            .Where(x => x.Category == BuildingExpenseCategory.ReserveFund && !x.PaidByReserveFund)
             .Sum(x => x.Amount);
         // Si los ingresos van al fondo de reserva, lo componen todas las categorias menos Fondo operativo.
         // No es un cargo a las unidades: solo engrosa el valor del fondo.
         var reserveFundIncomes = config?.IncomeTreatment == IncomeTreatment.ToReserveFund ? totalBuildingIncomes : 0m;
+        // Lo que pago el fondo de reserva se descuenta del fondo (y no suma a nada de lo que se cobra).
+        var paidByReserveFund = expenses.Where(x => x.PaidByReserveFund).Sum(x => x.Amount);
         var extraordinaryAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.Extraordinary)
             .Sum(x => x.Amount);
@@ -1824,7 +1830,8 @@ public class ExpensePeriodsController(
             BuildingName = period.Building?.Name ?? string.Empty,
             TotalBuildingExpenses = totalBuildingExpenses,
             TotalBuildingIncomes = totalBuildingIncomes,
-            ReserveFundAmount = reserveFundAmount + contributions.ReserveContribution + reserveFundIncomes,
+            ReserveFundAmount = SettlementContributions.ReserveFundBalance(
+                reserveFundAmount, contributions.ReserveContribution, reserveFundIncomes, paidByReserveFund),
             ExtraordinaryAmount = extraordinaryAmount + contributions.ExtraordinaryContribution,
             NetCommonAmount = totalBuildingExpenses - creditedIncomes
                               + contributions.ReserveContribution + contributions.ExtraordinaryContribution,
@@ -2146,7 +2153,8 @@ public class ExpensePeriodsController(
             Amount = e.Amount,
             DistributionType = e.DistributionType,
             TargetUnitId = e.TargetUnitId,
-            Notes = e.Notes
+            Notes = e.Notes,
+            PaidByReserveFund = e.PaidByReserveFund
         }).ToList();
 
         if (copiedExpenses.Count > 0)

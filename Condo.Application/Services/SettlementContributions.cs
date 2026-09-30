@@ -23,5 +23,14 @@ public static class SettlementContributions
         return new Result(baseAmount, reserve, subTotal, extraordinary, subTotal + extraordinary);
     }
 
+    /// <summary>
+    /// Saldo del fondo de reserva al cerrar el periodo (es el saldo acumulado que pasa al mes siguiente): lo que
+    /// se cobro a las unidades como Fondo de reserva, mas el aporte del %, mas los ingresos que van al fondo (todas
+    /// las categorias menos Fondo operativo), menos lo que el fondo pago (gastos marcados como pagados por el fondo).
+    /// </summary>
+    public static decimal ReserveFundBalance(
+        decimal reserveCategoryExpenses, decimal reserveContribution, decimal reserveFundIncomes, decimal paidByReserveFund) =>
+        reserveCategoryExpenses + reserveContribution + reserveFundIncomes - paidByReserveFund;
+
     private static decimal RoundGuarani(decimal value) => decimal.Round(value, 0, MidpointRounding.AwayFromZero);
 }

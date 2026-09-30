@@ -156,6 +156,9 @@ public sealed class SettlementPdfDocument(
         ["reservaPctValorComunes"] = new(475, 637, 8, 70, 'R'),
         ["extraPctLabel"] = new(50, 650, 8, 250),
         ["extraPctValor"] = new(475, 650, 8, 70, 'R'),
+        // Saldo del fondo de reserva al cierre del periodo (el saldo acumulado del mes siguiente), en la columna de reserva.
+        ["saldoAcumuladoLabel"] = new(50, 663, 8, 250),
+        ["saldoAcumuladoValor"] = new(405, 663, 8, 70, 'R'),
         ["totIngresosValor"] = new(475, 585, 8, 70, 'R'),
         ["totGastosLabel"] = new(50, 598, 8, 200),
         // Suma de los valores de todos los conceptos (todas las categorias de gasto), en un solo valor.
@@ -294,6 +297,7 @@ public sealed class SettlementPdfDocument(
     private static readonly string[] BottomKeys =
     [
         "reservaPctLabel", "reservaPctValorReserva", "reservaPctValorComunes", "extraPctLabel", "extraPctValor",
+        "saldoAcumuladoLabel", "saldoAcumuladoValor",
         "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosValor", "totGastosReserva", "totGastosComunes",
         "subTotalValor", "totalValor",
         "fechaEmision", "vigenciaLabel", "vigenciaDesde", "vigenciaHasta", "vencimientoLabel", "vencimiento",
@@ -624,18 +628,20 @@ public sealed class SettlementPdfDocument(
         if (isLastPage)
         {
             var expenses = ExpenseRows();
-            var reserveTotal = expenses.Where(InReserveColumn).Sum(x => x.Amount);
+            // Columna de reserva: lo cobrado como Fondo de reserva menos lo que pago el fondo (que sale en negativo,
+            // como en la planilla). Lo pagado por el fondo no toca la columna de gastos comunes ni los totales.
+            var reserveCategoryTotal = expenses.Where(x => x.IsReserveFund && !x.PaidByReserveFund).Sum(x => x.Amount);
+            var paidByFundTotal = expenses.Where(x => x.PaidByReserveFund).Sum(x => x.Amount);
+            var reserveTotal = reserveCategoryTotal - paidByFundTotal;
             var commonTotal = expenses.Where(x => !InReserveColumn(x)).Sum(x => x.Amount);
-            // Base de los aportes: la misma que usa el reparto de cargos. Un gasto pagado por el fondo sigue en la base
-            // (por ahora no cambia lo que se cobra a las unidades; solo la columna en que se imprime).
-            var contributionBase = expenses.Where(x => !x.IsReserveFund).Sum(x => x.Amount);
 
             PaperText(fg, "mesTotales", MonthText(), bold: true);
             PaperText(fg, "totIngresosLabel", "TOTAL PARA GASTOS", bold: true);
             PaperText(fg, "totIngresosValor", FormatNumber(summary.TotalBuildingIncomes), bold: true);
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
-            PaperText(fg, "totGastosValor", FormatNumber(expenses.Sum(x => x.Amount)), bold: true);
-            PaperText(fg, "totGastosReserva", reserveTotal > 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
+            // Lo pagado por el fondo de reserva no suma al total de gastos del mes.
+            PaperText(fg, "totGastosValor", FormatNumber(expenses.Where(x => !x.PaidByReserveFund).Sum(x => x.Amount)), bold: true);
+            PaperText(fg, "totGastosReserva", reserveTotal != 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
             PaperText(fg, "totGastosComunes", FormatNumber(commonTotal), bold: true);
 
             // Aportes calculados (redondeo al guarani): reserva = % de los gastos comunes; sub total = gastos
@@ -645,7 +651,7 @@ public sealed class SettlementPdfDocument(
             // Mismo calculo que usa el reparto de cargos: base = gastos comunes (menos los ingresos si el edificio
             // los acredita a los propietarios).
             var calc = SettlementContributions.Compute(
-                contributionBase, summary.IncomeTreatment == IncomeTreatment.CreditToOwners ? summary.TotalBuildingIncomes : 0m,
+                commonTotal, summary.IncomeTreatment == IncomeTreatment.CreditToOwners ? summary.TotalBuildingIncomes : 0m,
                 summary.ReservePercentage, summary.ExtraordinaryPercentage);
             var reserveContribution = calc.ReserveContribution;
             var subTotal = calc.SubTotal;
@@ -656,6 +662,16 @@ public sealed class SettlementPdfDocument(
                 PaperText(fg, "reservaPctLabel", $"APORTE DE FONDO DE RESERVA {reservePct:0.##}%", bold: true);
                 PaperText(fg, "reservaPctValorReserva", FormatNumber(reserveContribution), bold: true);
                 PaperText(fg, "reservaPctValorComunes", FormatNumber(reserveContribution), bold: true);
+            }
+
+            // Saldo acumulado que pasa al mes siguiente: total para gastos (los ingresos que van al fondo) menos lo que
+            // pago el fondo, mas el aporte del %.
+            var incomesToFund = summary.IncomeTreatment == IncomeTreatment.ToReserveFund ? summary.TotalBuildingIncomes : 0m;
+            var reserveBalance = SettlementContributions.ReserveFundBalance(reserveCategoryTotal, reserveContribution, incomesToFund, paidByFundTotal);
+            if (summary.IncomeTreatment == IncomeTreatment.ToReserveFund || paidByFundTotal > 0)
+            {
+                PaperText(fg, "saldoAcumuladoLabel", "SALDO ACUMULADO", bold: true);
+                PaperText(fg, "saldoAcumuladoValor", FormatNumber(reserveBalance), bold: true);
             }
 
             PaperText(fg, "subTotalValor", FormatNumber(subTotal), bold: true);

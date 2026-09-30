@@ -1,5 +1,6 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -322,6 +323,40 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
 
         var saldo = totalIngresos - totalGastos;
+        var rolloverNote = $"Rollover automático: ingresos {totalIngresos:N0} - gastos {totalGastos:N0}";
+
+        // Edificio cuyos ingresos van al fondo de reserva: el saldo que pasa es el del fondo (ingresos sin Fondo
+        // operativo + aporte del % - lo que pago el fondo), el mismo que sale en la planilla de liquidacion.
+        if (building.IncomeTreatment == IncomeTreatment.ToReserveFund)
+        {
+            var sourceExpenses = await dbContext.BuildingExpenses
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == request.SourcePeriodId && x.BuildingId == request.BuildingId)
+                .Select(x => new { x.Category, x.Amount, x.DistributionType, x.PaidByReserveFund })
+                .ToListAsync(cancellationToken);
+            var fundIncomes = await dbContext.BuildingIncomes
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == request.SourcePeriodId && x.BuildingId == request.BuildingId
+                            && x.Category != BuildingIncomeCategory.OperationalFund)
+                .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
+            var commonBase = sourceExpenses
+                .Where(x => x.DistributionType is BuildingExpenseDistributionType.ByCoefficient or BuildingExpenseDistributionType.FixedPerUnit
+                            && x.Category != BuildingExpenseCategory.ReserveFund
+                            && !x.PaidByReserveFund)
+                .Sum(x => x.Amount);
+            var contributions = SettlementContributions.Compute(
+                commonBase, 0m, building.ReserveFundPercentage, building.ExtraordinaryPercentage);
+            var reserveCategory = sourceExpenses
+                .Where(x => x.Category == BuildingExpenseCategory.ReserveFund && !x.PaidByReserveFund)
+                .Sum(x => x.Amount);
+            var paidByFund = sourceExpenses.Where(x => x.PaidByReserveFund).Sum(x => x.Amount);
+
+            totalIngresos = fundIncomes;
+            totalGastos = paidByFund;
+            saldo = SettlementContributions.ReserveFundBalance(reserveCategory, contributions.ReserveContribution, fundIncomes, paidByFund);
+            rolloverNote = $"Rollover automático (fondo de reserva): ingresos {fundIncomes:N0} + aporte {contributions.ReserveContribution:N0} - pagado por el fondo {paidByFund:N0}";
+        }
 
         var result = new RolloverIncomeResultDto
         {
@@ -347,7 +382,7 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             Description = $"Saldo anterior período {source.Name}",
             IncomeDate = target.StartDate,
             Amount = saldo,
-            Notes = $"Rollover automático: ingresos {totalIngresos:N0} - gastos {totalGastos:N0}"
+            Notes = rolloverNote
         };
 
         dbContext.BuildingIncomes.Add(entity);
