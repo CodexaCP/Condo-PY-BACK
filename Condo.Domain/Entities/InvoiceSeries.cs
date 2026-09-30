@@ -41,6 +41,10 @@ public class InvoiceSeries : CompanyScopedEntity
     // solo el texto encima, para no pisar el diseno que ya esta impreso en el papel.
     public bool HideFrame { get; set; }
 
+    // Papel de media A4 (210 x 148 mm, la factura ocupa solo la mitad superior de la hoja): el sistema usa el
+    // diseno de A4 completa comprimido a esa altura. False = A4 completa.
+    public bool HalfPage { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();

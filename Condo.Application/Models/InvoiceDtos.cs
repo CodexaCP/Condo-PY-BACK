@@ -31,6 +31,7 @@ public class InvoiceSeriesDto
     public string? FieldPositionsJson { get; set; }
     public string? ReferenceScanUrl { get; set; }
     public bool HideFrame { get; set; }
+    public bool HalfPage { get; set; }
 }
 
 public class FieldOffsetDto
@@ -45,6 +46,7 @@ public class UpdateInvoiceSeriesCalibrationRequest
     public Dictionary<string, FieldOffsetDto> Positions { get; set; } = new();
     public string? ReferenceScanUrl { get; set; }
     public bool HideFrame { get; set; }
+    public bool HalfPage { get; set; }
 }
 
 public class CreateInvoiceSeriesRequest
@@ -103,6 +105,7 @@ public class InvoiceDto
     public decimal BuildingOrdinaryTotal { get; set; }
     public string? FieldPositionsJson { get; set; }
     public bool HideFrame { get; set; }
+    public bool HalfPage { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
     public InvoiceStatus Status { get; set; }

@@ -84,7 +84,8 @@ public class InvoiceSeriesController(
                 ImprentaRazonSocial = x.ImprentaRazonSocial,
                 FieldPositionsJson = x.FieldPositionsJson,
                 ReferenceScanUrl = x.ReferenceScanUrl,
-                HideFrame = x.HideFrame
+                HideFrame = x.HideFrame,
+                HalfPage = x.HalfPage
             })
             .ToListAsync(cancellationToken);
 
@@ -218,6 +219,7 @@ public class InvoiceSeriesController(
         entity.FieldPositionsJson = request.Positions.Count > 0 ? JsonSerializer.Serialize(request.Positions) : null;
         entity.ReferenceScanUrl = string.IsNullOrWhiteSpace(request.ReferenceScanUrl) ? null : request.ReferenceScanUrl.Trim();
         entity.HideFrame = request.HideFrame;
+        entity.HalfPage = request.HalfPage;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -275,6 +277,7 @@ public class InvoiceSeriesController(
             BuildingOrdinaryTotal = 68_666_823m,
             FieldPositionsJson = entity.FieldPositionsJson,
             HideFrame = entity.HideFrame,
+            HalfPage = entity.HalfPage,
             ClienteNombre = "CLIENTE DE EJEMPLO",
             ClienteDocumento = "1234567",
             Status = InvoiceStatus.Issued,
@@ -375,7 +378,8 @@ public class InvoiceSeriesController(
         ImprentaRazonSocial = entity.ImprentaRazonSocial,
         FieldPositionsJson = entity.FieldPositionsJson,
         ReferenceScanUrl = entity.ReferenceScanUrl,
-        HideFrame = entity.HideFrame
+        HideFrame = entity.HideFrame,
+        HalfPage = entity.HalfPage
     };
 
     private static bool IsValidRequest(CreateInvoiceSeriesRequest request, out string error)

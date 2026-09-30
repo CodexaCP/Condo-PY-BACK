@@ -67,6 +67,7 @@ public class InvoicesController(
                 x.Unit != null ? x.Unit.Coefficient : 0m,
                 x.Series != null ? x.Series.FieldPositionsJson : null,
                 x.Series != null && x.Series.HideFrame,
+                x.Series != null && x.Series.HalfPage,
                 null))
             .ToListAsync(cancellationToken);
 
@@ -806,6 +807,7 @@ public class InvoicesController(
                 x.Unit != null ? x.Unit.Coefficient : 0m,
                 x.Series != null ? x.Series.FieldPositionsJson : null,
                 x.Series != null && x.Series.HideFrame,
+                x.Series != null && x.Series.HalfPage,
                 x.Series != null ? x.Series.ReferenceScanUrl : null))
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -834,6 +836,7 @@ public class InvoicesController(
         UnitCoefficient = row.UnitCoefficient,
         FieldPositionsJson = row.FieldPositionsJson,
         HideFrame = row.HideFrame,
+        HalfPage = row.HalfPage,
         Status = row.Status,
         Numero = row.Numero,
         NumeroFormateado = row.NumeroFormateado,
@@ -856,7 +859,7 @@ public class InvoicesController(
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
         DateOnly? PeriodDueDate, Guid? PeriodId, int? PeriodYear, int? PeriodMonth, decimal UnitCoefficient,
-        string? FieldPositionsJson, bool HideFrame, string? SeriesReferenceScanUrl);
+        string? FieldPositionsJson, bool HideFrame, bool HalfPage, string? SeriesReferenceScanUrl);
 
     // Mismo mecanismo que la calibracion del timbrado (InvoiceSeriesController.TryReadReferenceScan): si el
     // timbrado tiene un escaneo de referencia calibrado, la factura real tambien se imprime sobre ese papel.

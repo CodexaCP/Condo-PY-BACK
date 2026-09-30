@@ -35,10 +35,55 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         }
     }
 
-    // x/y ya vienen en el mismo sistema que usa Text() (origen abajo-izquierda, y crece hacia arriba);
-    // el offset calibrado se suma tal cual, tanto para Text() como para los bloques dibujados a mano.
+    // ─── Media A4 ────────────────────────────────────────────────────────────
+    // Todas las coordenadas del diseno estan en puntos de la A4 completa. Con papel de media A4 (la factura
+    // ocupa solo la mitad superior de la hoja) cada coordenada pasa por estas tablas: pares (A4 completa ->
+    // media A4) medidos sobre el papel real, interpolados linealmente entre ellos. Las mismas tablas estan
+    // en invoice-series-calibration-page.component.ts (HALF_X / HALF_Y) — si se cambian aca, cambian alla.
+    private static readonly (float From, float To)[] HalfX =
+    [
+        (34.01575f, 14.2f), (70.86614f, 44f), (328.8189f, 316.4f), (351.4961f, 344.8f),
+        (362.8346f, 353.7f), (411.0236f, 405.2f), (493.2283f, 495.5f), (561.2598f, 587.3f)
+    ];
+
+    private static readonly (float From, float To)[] HalfY =
+    [
+        (147.4016f, 443.4f), (172.9134f, 459f), (195.5906f, 479.2f), (218.2677f, 497.9f),
+        (243.7795f, 515f), (524.4094f, 641.1f), (542.8346f, 655.4f), (552f, 658.3f),
+        (561.2598f, 667.2f), (572.5984f, 671.7f), (663.3071f, 720.2f), (674.6457f, 726.2f),
+        (712f, 754f), (718f, 760f), (738f, 775f), (760f, 793f), (773f, 804f), (783f, 812.5f), (795f, 822f),
+        (807.874f, 830.7f)
+    ];
+
+    private bool HalfPage => invoice.HalfPage;
+
+    // Interpolacion lineal por tramos; fuera de la tabla se sigue con pendiente 1 desde el extremo.
+    private static float Interpolate((float From, float To)[] table, float v)
+    {
+        if (v <= table[0].From) return table[0].To + (v - table[0].From);
+        for (var i = 1; i < table.Length; i++)
+        {
+            if (v > table[i].From) continue;
+            var (f0, t0) = table[i - 1];
+            var (f1, t1) = table[i];
+            return t0 + (v - f0) * (t1 - t0) / (f1 - f0);
+        }
+        return table[^1].To + (v - table[^1].From);
+    }
+
+    private float MX(float x) => HalfPage ? Interpolate(HalfX, x) : x;
+    private float MY(float y) => HalfPage ? Interpolate(HalfY, y) : y;
+    // Ancho de un elemento que empieza en x (en coordenadas de A4 completa), ya en el papel real.
+    private float MW(float x, float width) => HalfPage ? MX(x + width) - MX(x) : width;
+    private float MH(float bottomY, float height) => HalfPage ? MY(bottomY + height) - MY(bottomY) : height;
+
+    // x/y vienen en coordenadas de A4 completa (origen abajo-izquierda, y crece hacia arriba); se llevan al
+    // papel real (MX/MY) y recien ahi se suma el offset calibrado, tanto para Text() como para los bloques
+    // dibujados a mano.
     private (float X, float Y) Offset(string? key, float x, float y)
     {
+        x = MX(x);
+        y = MY(y);
         if (key is not null && offsets.TryGetValue(key, out var o)) return (x + o.Dx, y + o.Dy);
         return (x, y);
     }
@@ -148,7 +193,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         Text(l, 48, 793, 7.5f, "Edificio", color: p.Label ?? Colors.Grey.Darken1);
         var (edificioX, edificioY) = Offset("headerEdificio", 48, 758f);
         var edificioSize = FontSizeFor("headerEdificio", 15f);
-        l.Layer().TranslateX(edificioX).TranslateY(PageHeight - edificioY).Width(126f).Column(col =>
+        l.Layer().TranslateX(edificioX).TranslateY(PageHeight - edificioY).Width(MW(48, 126f)).Column(col =>
         {
             col.Item().Text(invoice.BuildingName.ToUpperInvariant()).FontSize(edificioSize).Bold().FontColor(p.BuildingName);
         });
@@ -156,7 +201,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         var (emisorX, emisorY) = Offset("headerEmisor", 182, 784f);
         // Un solo tamano calibrado se aplica a las 3 lineas (razon social, direccion, telefono) por igual.
         var emisorSize = FontSizeFor("headerEmisor", 10f);
-        l.Layer().TranslateX(emisorX).TranslateY(PageHeight - emisorY).Width(164f).Column(col =>
+        l.Layer().TranslateX(emisorX).TranslateY(PageHeight - emisorY).Width(MW(182, 164f)).Column(col =>
         {
             if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
                 col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(emisorSize).Bold();
@@ -187,7 +232,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         var (prefix, correlative) = SplitNumber(invoice.NumeroFormateado);
         var (numX, numY) = Offset("headerNumero", boxX, 712f);
         var numeroSize = FontSizeFor("headerNumero", 14f);
-        var numberBox = l.Layer().TranslateX(numX).TranslateY(PageHeight - numY).Width(boxW).AlignCenter();
+        var numberBox = l.Layer().TranslateX(numX).TranslateY(PageHeight - numY).Width(MW(boxX, boxW)).AlignCenter();
         numberBox.Text(t =>
         {
             if (issued)
@@ -266,16 +311,16 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // Un solo offset calibrado mueve todo el bloque (filas + montos) junto, en vez de fila por fila.
         var (blockX, baseline) = Offset("conceptosBloque", 76, firstBaseline);
         var fontSize = FontSizeFor("conceptosBloque", 8.5f);
-        var blockDx = blockX - 76;
+        var blockDx = blockX - MX(76);
         foreach (var (concepto, subNota, monto) in lines)
         {
-            Text(l, blockX, baseline, fontSize, concepto, width: 248);
-            Text(l, col2 + blockDx, baseline, fontSize, FormatNumber(monto), width: col3 - col2 - 6, align: Align.Right);
+            Text(l, blockX, baseline, fontSize, concepto, width: MW(76, 248), raw: true);
+            Text(l, MX(col2) + blockDx, baseline, fontSize, FormatNumber(monto), width: MW(col2, col3 - col2 - 6), align: Align.Right, raw: true);
             baseline -= spacing;
 
             if (subNota is not null)
             {
-                Text(l, blockX, baseline, 7.5f, subNota, width: 248, color: Colors.Grey.Darken1);
+                Text(l, blockX, baseline, 7.5f, subNota, width: MW(76, 248), color: Colors.Grey.Darken1, raw: true);
                 baseline -= subNoteSpacing;
             }
         }
@@ -351,13 +396,13 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
 
         if (invoice.Status == InvoiceStatus.Voided)
         {
-            l.Layer().TranslateX(34.01575f).TranslateY(PageHeight - 105f).Width(527.2441f).Height(34f)
+            l.Layer().TranslateX(MX(34.01575f)).TranslateY(PageHeight - MY(105f)).Width(MW(34.01575f, 527.2441f)).Height(34f)
                 .Background("#FEE2E2").Border(1).BorderColor("#DC2626").Padding(6)
                 .Text($"FACTURA ANULADA — {invoice.MotivoAnulacion}").FontSize(9).Bold().FontColor("#991B1B");
         }
         else if (invoice.Status != InvoiceStatus.Issued)
         {
-            l.Layer().TranslateX(34.01575f).TranslateY(PageHeight - 105f).Width(527.2441f).Height(40f)
+            l.Layer().TranslateX(MX(34.01575f)).TranslateY(PageHeight - MY(105f)).Width(MW(34.01575f, 527.2441f)).Height(40f)
                 .Element(PdfWatermark.ComposeNonFiscal);
         }
     }
@@ -372,12 +417,24 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     // "7 DE AGOSTO DE 2026", como se escribe en el formulario impreso.
     private static string DateInWords(DateTime date) => $"{date.Day} DE {Months[date.Month - 1]} DE {date.Year}";
 
-    private static void FillRect(LayersDescriptor l, float x, float bottomY, float width, float height, string color) =>
-        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height).Background(color);
+    // Caja (x, bottomY, ancho, alto) de A4 completa -> (izquierda, arriba desde el borde superior, ancho, alto) en el papel real.
+    private (float Left, float Top, float Width, float Height) Box(float x, float bottomY, float width, float height)
+    {
+        var h = MH(bottomY, height);
+        return (MX(x), PageHeight - MY(bottomY) - h, MW(x, width), h);
+    }
+
+    private void FillRect(LayersDescriptor l, float x, float bottomY, float width, float height, string color)
+    {
+        var b = Box(x, bottomY, width, height);
+        l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height).Background(color);
+    }
 
     // Relleno con las esquinas superiores redondeadas (mismo radio que el marco) para no asomar fuera de el.
-    private static void FillTopRounded(LayersDescriptor l, float x, float bottomY, float width, float height, string color) =>
-        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height)
+    private void FillTopRounded(LayersDescriptor l, float x, float bottomY, float width, float height, string color)
+    {
+        var b = Box(x, bottomY, width, height);
+        l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height)
             .Svg(size =>
             {
                 static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
@@ -387,19 +444,21 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
                 return $"<svg xmlns='http://www.w3.org/2000/svg' width='{F(w)}' height='{F(h)}' viewBox='0 0 {F(w)} {F(h)}'>" +
                        $"<path d='M0 {F(h)} L0 {F(r)} Q0 0 {F(r)} 0 L{F(w - r)} 0 Q{F(w)} 0 {F(w)} {F(r)} L{F(w)} {F(h)} Z' fill='{color}'/></svg>";
             });
+    }
 
     // Casilla cuadrada (Contado / Credito); marcada lleva una X.
     private void CheckBox(LayersDescriptor l, float x, float bottomY, float size, bool checkedBox)
     {
-        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, size)).Width(size).Height(size).Border(0.9f).BorderColor(Colors.Black);
+        var b = Box(x, bottomY, size, size);
+        l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height).Border(0.9f).BorderColor(Colors.Black);
         if (checkedBox)
             Text(l, x, bottomY + 2.2f, size - 1.5f, "X", bold: true, width: size, align: Align.Center);
     }
 
-    private static float TopOf(float bottomY, float height) => PageHeight - bottomY - height;
-
-    private void Rect(LayersDescriptor l, float x, float bottomY, float width, float height) =>
-        l.Layer().TranslateX(x).TranslateY(TopOf(bottomY, height)).Width(width).Height(height)
+    private void Rect(LayersDescriptor l, float x, float bottomY, float width, float height)
+    {
+        var b = Box(x, bottomY, width, height);
+        l.Layer().TranslateX(b.Left).TranslateY(b.Top).Width(b.Width).Height(b.Height)
             .Svg(size =>
             {
                 var w = size.Width.ToString("0.###", CultureInfo.InvariantCulture);
@@ -409,20 +468,26 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
                 return $"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}' viewBox='0 0 {w} {h}'>" +
                        $"<rect x='0.45' y='0.45' width='{rw}' height='{rh}' rx='9' ry='9' fill='none' stroke='{p.Stroke}' stroke-width='0.9'/></svg>";
             });
+    }
 
     private void HLine(LayersDescriptor l, float x1, float y, float x2) =>
-        l.Layer().TranslateX(x1).TranslateY(PageHeight - y - 0.4f).Width(x2 - x1).Height(0.8f).Background(p.Stroke);
+        l.Layer().TranslateX(MX(x1)).TranslateY(PageHeight - MY(y) - 0.4f).Width(MX(x2) - MX(x1)).Height(0.8f).Background(p.Stroke);
 
     private void VLine(LayersDescriptor l, float x, float y1, float y2) =>
-        l.Layer().TranslateX(x - 0.4f).TranslateY(PageHeight - y2).Width(0.8f).Height(y2 - y1).Background(p.Stroke);
+        l.Layer().TranslateX(MX(x) - 0.4f).TranslateY(PageHeight - MY(y2)).Width(0.8f).Height(MY(y2) - MY(y1)).Background(p.Stroke);
 
     private void Text(
         LayersDescriptor l, float x, float baselineY, float size, string text,
-        bool bold = false, float? width = null, Align align = Align.Left, string? color = null, string? key = null)
+        bool bold = false, float? width = null, Align align = Align.Left, string? color = null, string? key = null, bool raw = false)
     {
         if (string.IsNullOrEmpty(text)) return;
 
-        (x, baselineY) = Offset(key, x, baselineY);
+        // raw: x, baselineY y width ya vienen en coordenadas del papel real (bloques con offset ya aplicado).
+        if (!raw)
+        {
+            if (width.HasValue) width = MW(x, width.Value);
+            (x, baselineY) = Offset(key, x, baselineY);
+        }
         size = FontSizeFor(key, size);
 
         var box = l.Layer().TranslateX(x).TranslateY(PageHeight - baselineY - (size * 0.95f)).Width(width ?? (PageWidth - x - 20f));
