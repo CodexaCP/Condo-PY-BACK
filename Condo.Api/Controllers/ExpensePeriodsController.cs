@@ -1350,6 +1350,8 @@ public class ExpensePeriodsController(
 
         // Detalle linea por linea (proveedor, concepto, monto) para la planilla sobre el modelo propio.
         await LoadSettlementLinesAsync(summary, id, cancellationToken);
+        summary.ReservePercentage = period.Building?.ReserveFundPercentage;
+        summary.ExtraordinaryPercentage = period.Building?.ExtraordinaryPercentage;
         summary.PeriodYear = period.Year;
         summary.PeriodMonth = period.Month;
 

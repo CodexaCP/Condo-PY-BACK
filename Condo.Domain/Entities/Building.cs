@@ -16,6 +16,11 @@ public class Building : BaseEntity
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
     public decimal? LateFeeRatePercentage { get; set; }
+
+    // Aportes de la liquidacion (ambos opcionales; vacio = no aplica): el de fondo de reserva es un % de los
+    // gastos comunes y el extraordinario un % del sub total (gastos comunes + aporte de reserva).
+    public decimal? ReserveFundPercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 

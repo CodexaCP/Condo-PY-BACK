@@ -48,6 +48,9 @@ public class ExpenseSettlementSummaryDto
     public Dictionary<string, decimal> IncomeTotals { get; set; } = new();
     // Descripcion de cada categoria de ingreso (las de sus ingresos, sin repetir, separadas por " / ").
     public Dictionary<string, string> IncomeDescriptions { get; set; } = new();
+    // Porcentajes del edificio para los aportes calculados de la planilla (null = no aplica).
+    public decimal? ReservePercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
     public int PeriodYear { get; set; }
     public int PeriodMonth { get; set; }
     public List<SettlementExpenseLineDto> ExpenseLines { get; set; } = new();

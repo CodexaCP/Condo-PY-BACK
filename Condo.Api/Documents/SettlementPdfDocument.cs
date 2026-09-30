@@ -128,6 +128,13 @@ public sealed class SettlementPdfDocument(
         // El mes se usa en dos lugares del papel: arriba (mes) y en la franja de totales (mesTotales).
         ["mesTotales"] = new(250, 598, 8, 100, 'C'),
         ["totIngresosLabel"] = new(50, 585, 8, 200),
+        // Aportes calculados: el de reserva es un % de los gastos comunes (en las dos columnas) y el
+        // extraordinario un % del sub total. Solo salen si el edificio tiene el porcentaje configurado.
+        ["reservaPctLabel"] = new(50, 637, 8, 250),
+        ["reservaPctValorReserva"] = new(405, 637, 8, 70, 'R'),
+        ["reservaPctValorComunes"] = new(475, 637, 8, 70, 'R'),
+        ["extraPctLabel"] = new(50, 650, 8, 250),
+        ["extraPctValor"] = new(475, 650, 8, 70, 'R'),
         ["totIngresosValor"] = new(475, 585, 8, 70, 'R'),
         ["totGastosLabel"] = new(50, 598, 8, 200),
         ["totGastosReserva"] = new(405, 598, 8, 70, 'R'),
@@ -259,6 +266,7 @@ public sealed class SettlementPdfDocument(
     // Todo lo que va abajo de las filas: si el bloque no esta oculto, las filas terminan antes de el.
     private static readonly string[] BottomKeys =
     [
+        "reservaPctLabel", "reservaPctValorReserva", "reservaPctValorComunes", "extraPctLabel", "extraPctValor",
         "totIngresosLabel", "totIngresosValor", "totGastosLabel", "totGastosReserva", "totGastosComunes",
         "subTotalValor", "totalValor",
         "fechaEmision", "vigenciaLabel", "vigenciaDesde", "vigenciaHasta", "vencimientoLabel", "vencimiento",
@@ -454,8 +462,31 @@ public sealed class SettlementPdfDocument(
             PaperText(fg, "totGastosLabel", "TOTAL GASTOS DEL MES", bold: true);
             PaperText(fg, "totGastosReserva", reserveTotal > 0 ? FormatNumber(reserveTotal) : string.Empty, bold: true);
             PaperText(fg, "totGastosComunes", FormatNumber(commonTotal), bold: true);
-            PaperText(fg, "subTotalValor", FormatNumber(reserveTotal + commonTotal), bold: true);
-            PaperText(fg, "totalValor", FormatNumber(summary.NetCommonAmount), bold: true);
+
+            // Aportes calculados (redondeo al guarani): reserva = % de los gastos comunes; sub total = gastos
+            // comunes + reserva; extraordinario = % del sub total; total general = sub total + extraordinario.
+            var reservePct = summary.ReservePercentage ?? 0m;
+            var extraPct = summary.ExtraordinaryPercentage ?? 0m;
+            var reserveContribution = Math.Round(commonTotal * reservePct / 100m, 0, MidpointRounding.AwayFromZero);
+            var subTotal = commonTotal + reserveContribution;
+            var extraContribution = Math.Round(subTotal * extraPct / 100m, 0, MidpointRounding.AwayFromZero);
+
+            if (reservePct > 0)
+            {
+                PaperText(fg, "reservaPctLabel", $"APORTE DE FONDO DE RESERVA {reservePct:0.##}%", bold: true);
+                PaperText(fg, "reservaPctValorReserva", FormatNumber(reserveContribution), bold: true);
+                PaperText(fg, "reservaPctValorComunes", FormatNumber(reserveContribution), bold: true);
+            }
+
+            PaperText(fg, "subTotalValor", FormatNumber(subTotal), bold: true);
+
+            if (extraPct > 0)
+            {
+                PaperText(fg, "extraPctLabel", $"APORTE EXTRAORDINARIO {extraPct:0.##}%", bold: true);
+                PaperText(fg, "extraPctValor", FormatNumber(extraContribution), bold: true);
+            }
+
+            PaperText(fg, "totalValor", FormatNumber(subTotal + extraContribution), bold: true);
         }
 
         // Fechas: el papel ya trae "Fecha de emision", asi que solo el valor; vigencia y vencimiento con su etiqueta.

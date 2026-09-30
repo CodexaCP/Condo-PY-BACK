@@ -15,6 +15,8 @@ public class BuildingUpsertRequest
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
     public decimal? LateFeeRatePercentage { get; set; }
+    public decimal? ReserveFundPercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
@@ -46,6 +48,8 @@ public class BuildingDto
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
     public decimal? LateFeeRatePercentage { get; set; }
+    public decimal? ReserveFundPercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; }
     public InvoicingMode InvoicingMode { get; set; }

@@ -66,6 +66,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
+                ReserveFundPercentage = x.ReserveFundPercentage,
+                ExtraordinaryPercentage = x.ExtraordinaryPercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
                 BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
                 InvoicingMode = x.InvoicingMode,
@@ -110,6 +112,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
+                ReserveFundPercentage = x.ReserveFundPercentage,
+                ExtraordinaryPercentage = x.ExtraordinaryPercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
                 BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
                 InvoicingMode = x.InvoicingMode,
@@ -203,6 +207,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim(),
             ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant(),
             LateFeeRatePercentage = NormalizedLateFeeRate(request),
+            ReserveFundPercentage = NormalizedPercentage(request.ReserveFundPercentage),
+            ExtraordinaryPercentage = NormalizedPercentage(request.ExtraordinaryPercentage),
             LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
             BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations,
             InvoicingMode = request.InvoicingMode ?? Domain.Enums.InvoicingMode.Preimpresa
@@ -336,6 +342,12 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim();
         entity.ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant();
         entity.LateFeeRatePercentage = newRate;
+        // Los porcentajes de la liquidacion los define quien administra; el encargado del edificio no los toca.
+        if (!isBuildingManager)
+        {
+            entity.ReserveFundPercentage = NormalizedPercentage(request.ReserveFundPercentage);
+            entity.ExtraordinaryPercentage = NormalizedPercentage(request.ExtraordinaryPercentage);
+        }
         entity.LateFeeFrequency = newFrequency;
         entity.BlockOverdueAmenityReservations = request.BlockOverdueAmenityReservations;
         if (request.InvoicingMode.HasValue)
@@ -365,6 +377,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         entity.Condominium = condominium;
         return Ok(ToDto(entity));
     }
+
+    // Vacio o 0 = no aplica.
+    private static decimal? NormalizedPercentage(decimal? value) =>
+        value is > 0m ? decimal.Round(value.Value, 2) : null;
 
     private static decimal? NormalizedLateFeeRate(BuildingUpsertRequest request) =>
         request.LateFeeRatePercentage is > 0m ? decimal.Round(request.LateFeeRatePercentage.Value, 2) : null;
@@ -545,6 +561,16 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return "La direccion es obligatoria.";
         }
 
+        if (request.ReserveFundPercentage is < 0m or > 100m)
+        {
+            return "El porcentaje de fondo de reserva debe estar entre 0 y 100.";
+        }
+
+        if (request.ExtraordinaryPercentage is < 0m or > 100m)
+        {
+            return "El porcentaje de aporte extraordinario debe estar entre 0 y 100.";
+        }
+
         if (request.LateFeeRatePercentage is < 0m or > 100m)
         {
             return "La tasa de interés por mora debe estar entre 0 y 100.";
@@ -653,6 +679,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             BuildingId = building.Id,
             BuildingName = building.Name,
             ExpensePeriodName = "Período de ejemplo",
+            ReservePercentage = building.ReserveFundPercentage ?? 10m,
+            ExtraordinaryPercentage = building.ExtraordinaryPercentage ?? 20m,
             PeriodYear = today.Year,
             PeriodMonth = today.Month,
             TotalBuildingExpenses = 43_590_000m,
@@ -754,6 +782,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = entity.ContactPhone,
             ContactEmail = entity.ContactEmail,
             LateFeeRatePercentage = entity.LateFeeRatePercentage,
+            ReserveFundPercentage = entity.ReserveFundPercentage,
+            ExtraordinaryPercentage = entity.ExtraordinaryPercentage,
             LateFeeFrequency = entity.LateFeeFrequency,
             BlockOverdueAmenityReservations = entity.BlockOverdueAmenityReservations,
             InvoicingMode = entity.InvoicingMode,
