@@ -19,6 +19,8 @@ public class Building : BaseEntity
 
     // Aportes de la liquidacion (ambos opcionales; vacio = no aplica): el de fondo de reserva es un % de los
     // gastos comunes y el extraordinario un % del sub total (gastos comunes + aporte de reserva).
+    // Tratamiento de los ingresos del periodo al liquidar (por defecto se acreditan a los propietarios).
+    public IncomeTreatment IncomeTreatment { get; set; } = IncomeTreatment.CreditToOwners;
     public decimal? ReserveFundPercentage { get; set; }
     public decimal? ExtraordinaryPercentage { get; set; }
     public LateFeeFrequency? LateFeeFrequency { get; set; }

@@ -49,6 +49,7 @@ public class ExpenseSettlementSummaryDto
     // Descripcion de cada categoria de ingreso (las de sus ingresos, sin repetir, separadas por " / ").
     public Dictionary<string, string> IncomeDescriptions { get; set; } = new();
     // Porcentajes del edificio para los aportes calculados de la planilla (null = no aplica).
+    public IncomeTreatment IncomeTreatment { get; set; } = IncomeTreatment.CreditToOwners;
     public decimal? ReservePercentage { get; set; }
     public decimal? ExtraordinaryPercentage { get; set; }
     public int PeriodYear { get; set; }

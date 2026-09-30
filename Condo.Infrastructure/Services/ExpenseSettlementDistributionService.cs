@@ -34,12 +34,22 @@ public class ExpenseSettlementDistributionService(ICondoDbContext dbContext) : I
             .ThenBy(x => x.Description)
             .ToListAsync(cancellationToken);
 
-        var incomes = await dbContext.BuildingIncomes
+        // Los ingresos solo bajan la expensa de los propietarios si el edificio los acredita; si van al fondo
+        // de reserva no se reparten.
+        var incomeTreatment = await dbContext.Buildings
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
-            .OrderBy(x => x.IncomeDate)
-            .ThenBy(x => x.Description)
-            .ToListAsync(cancellationToken);
+            .Where(x => x.Id == period.BuildingId)
+            .Select(x => x.IncomeTreatment)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var incomes = incomeTreatment == IncomeTreatment.ToReserveFund
+            ? new List<BuildingIncome>()
+            : await dbContext.BuildingIncomes
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == period.Id)
+                .OrderBy(x => x.IncomeDate)
+                .ThenBy(x => x.Description)
+                .ToListAsync(cancellationToken);
 
         var totalCoefficient = units.Sum(x => x.Coefficient);
         var requiresCoefficient = expenses.Any(x => x.DistributionType == BuildingExpenseDistributionType.ByCoefficient) || incomes.Count > 0;

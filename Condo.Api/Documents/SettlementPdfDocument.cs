@@ -470,8 +470,10 @@ public sealed class SettlementPdfDocument(
             // comunes + reserva; extraordinario = % del sub total; total general = sub total + extraordinario.
             var reservePct = summary.ReservePercentage ?? 0m;
             var extraPct = summary.ExtraordinaryPercentage ?? 0m;
-            var reserveContribution = Math.Round(commonTotal * reservePct / 100m, 0, MidpointRounding.AwayFromZero);
-            var subTotal = commonTotal + reserveContribution;
+            // Base: los gastos comunes; si el edificio acredita los ingresos a los propietarios, se descuentan.
+            var baseAmount = commonTotal - (summary.IncomeTreatment == IncomeTreatment.CreditToOwners ? summary.TotalBuildingIncomes : 0m);
+            var reserveContribution = Math.Round(baseAmount * reservePct / 100m, 0, MidpointRounding.AwayFromZero);
+            var subTotal = baseAmount + reserveContribution;
             var extraContribution = Math.Round(subTotal * extraPct / 100m, 0, MidpointRounding.AwayFromZero);
 
             if (reservePct > 0)

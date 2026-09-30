@@ -66,6 +66,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
+                IncomeTreatment = x.IncomeTreatment,
                 ReserveFundPercentage = x.ReserveFundPercentage,
                 ExtraordinaryPercentage = x.ExtraordinaryPercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
@@ -112,6 +113,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
                 ContactPhone = x.ContactPhone,
                 ContactEmail = x.ContactEmail,
                 LateFeeRatePercentage = x.LateFeeRatePercentage,
+                IncomeTreatment = x.IncomeTreatment,
                 ReserveFundPercentage = x.ReserveFundPercentage,
                 ExtraordinaryPercentage = x.ExtraordinaryPercentage,
                 LateFeeFrequency = x.LateFeeFrequency,
@@ -207,6 +209,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim(),
             ContactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim().ToLowerInvariant(),
             LateFeeRatePercentage = NormalizedLateFeeRate(request),
+            IncomeTreatment = request.IncomeTreatment ?? IncomeTreatment.CreditToOwners,
             ReserveFundPercentage = NormalizedPercentage(request.ReserveFundPercentage),
             ExtraordinaryPercentage = NormalizedPercentage(request.ExtraordinaryPercentage),
             LateFeeFrequency = NormalizedLateFeeRate(request).HasValue ? request.LateFeeFrequency : null,
@@ -345,6 +348,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         // Los porcentajes de la liquidacion los define quien administra; el encargado del edificio no los toca.
         if (!isBuildingManager)
         {
+            if (request.IncomeTreatment.HasValue) entity.IncomeTreatment = request.IncomeTreatment.Value;
             entity.ReserveFundPercentage = NormalizedPercentage(request.ReserveFundPercentage);
             entity.ExtraordinaryPercentage = NormalizedPercentage(request.ExtraordinaryPercentage);
         }
@@ -679,6 +683,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             BuildingId = building.Id,
             BuildingName = building.Name,
             ExpensePeriodName = "Período de ejemplo",
+            IncomeTreatment = building.IncomeTreatment,
             ReservePercentage = building.ReserveFundPercentage ?? 10m,
             ExtraordinaryPercentage = building.ExtraordinaryPercentage ?? 20m,
             PeriodYear = today.Year,
@@ -782,6 +787,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             ContactPhone = entity.ContactPhone,
             ContactEmail = entity.ContactEmail,
             LateFeeRatePercentage = entity.LateFeeRatePercentage,
+            IncomeTreatment = entity.IncomeTreatment,
             ReserveFundPercentage = entity.ReserveFundPercentage,
             ExtraordinaryPercentage = entity.ExtraordinaryPercentage,
             LateFeeFrequency = entity.LateFeeFrequency,

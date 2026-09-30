@@ -1350,6 +1350,7 @@ public class ExpensePeriodsController(
 
         // Detalle linea por linea (proveedor, concepto, monto) para la planilla sobre el modelo propio.
         await LoadSettlementLinesAsync(summary, id, cancellationToken);
+        summary.IncomeTreatment = period.Building?.IncomeTreatment ?? IncomeTreatment.CreditToOwners;
         summary.ReservePercentage = period.Building?.ReserveFundPercentage;
         summary.ExtraordinaryPercentage = period.Building?.ExtraordinaryPercentage;
         summary.PeriodYear = period.Year;
@@ -1783,6 +1784,12 @@ public class ExpensePeriodsController(
 
         var totalBuildingExpenses = expenses.Sum(x => x.Amount);
         var totalBuildingIncomes = incomes.Sum(x => x.Amount);
+        // Si los ingresos van al fondo de reserva no reducen lo que se reparte entre las unidades.
+        var incomeTreatment = await dbContext.Buildings.AsNoTracking()
+            .Where(x => x.Id == period.BuildingId)
+            .Select(x => x.IncomeTreatment)
+            .FirstOrDefaultAsync(cancellationToken);
+        var creditedIncomes = incomeTreatment == IncomeTreatment.ToReserveFund ? 0m : totalBuildingIncomes;
         var reserveFundAmount = expenses
             .Where(x => x.Category == BuildingExpenseCategory.ReserveFund)
             .Sum(x => x.Amount);
@@ -1801,7 +1808,7 @@ public class ExpensePeriodsController(
             TotalBuildingIncomes = totalBuildingIncomes,
             ReserveFundAmount = reserveFundAmount,
             ExtraordinaryAmount = extraordinaryAmount,
-            NetCommonAmount = totalBuildingExpenses - totalBuildingIncomes,
+            NetCommonAmount = totalBuildingExpenses - creditedIncomes,
             GeneratedAtUtc = null,
             GeneratedByUserId = null,
             GeneratedByUserName = string.Empty,
