@@ -17,7 +17,8 @@ public class BuildingExpensesController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
-    IWebHostEnvironment env) : ControllerBase
+    IWebHostEnvironment env,
+    IConfiguration configuration) : ControllerBase
 {
     private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
     private const long MaxReceiptSizeBytes = 10 * 1024 * 1024; // 10 MB
@@ -240,12 +241,41 @@ public class BuildingExpensesController(
 
     private const long MaxImportSizeBytes = 2 * 1024 * 1024; // 2 MB
 
+    private string ImportTemplateSecret => configuration["Jwt:Key"] ?? string.Empty;
+
+    // La plantilla se genera para un edificio: lleva una marca cifrada con su empresa y su id, y solo se acepta al
+    // importar en ese mismo edificio.
     [HttpGet("import-template")]
-    public IActionResult DownloadImportTemplate() =>
-        File(
-            BuildingExpenseImportTemplateBuilder.Build(),
+    public async Task<IActionResult> DownloadImportTemplate([FromQuery] Guid buildingId, CancellationToken cancellationToken)
+    {
+        if (buildingId == Guid.Empty) return BadRequest("El edificio es obligatorio.");
+        if (!await accessScope.CanAccessBuildingAsync(buildingId, cancellationToken)) return Forbid();
+
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Include(x => x.Condominium)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == buildingId, cancellationToken);
+        if (building is null) return BadRequest("El edificio indicado no existe.");
+
+        var companyId = building.CompanyId ?? building.Condominium?.CompanyId;
+        if (!companyId.HasValue)
+        {
+            return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
+        }
+
+        var companyName = await dbContext.Companies
+            .AsNoTracking()
+            .Where(x => x.Id == companyId.Value)
+            .Select(x => x.Name)
+            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+
+        var token = ExpenseImportTemplateToken.Create(ImportTemplateSecret, companyId.Value, building.Id);
+        var fileName = $"plantilla-gastos-{new string(building.Name.Where(char.IsLetterOrDigit).ToArray())}.xlsx";
+        return File(
+            BuildingExpenseImportTemplateBuilder.Build(building.Name, companyName, token),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "plantilla-gastos.xlsx");
+            fileName);
+    }
 
     // Carga masiva desde Excel: una fila = un gasto del periodo (fecha = primer dia del periodo, reparto por
     // coeficiente). Sin "confirm" solo valida y devuelve la vista previa; con "confirm" guarda todo o nada.
@@ -296,9 +326,21 @@ public class BuildingExpensesController(
         List<BuildingExpenseImportParser.ParsedRow> parsed;
         await using (var stream = file.OpenReadStream())
         {
-            var (rows, parseError) = BuildingExpenseImportParser.Parse(stream);
+            var (rows, token, parseError) = BuildingExpenseImportParser.Parse(stream);
             if (rows is null) return BadRequest(parseError);
             parsed = rows;
+
+            // La plantilla tiene que haberse generado para este edificio y esta empresa.
+            var marker = ExpenseImportTemplateToken.Read(ImportTemplateSecret, token);
+            if (marker is null)
+            {
+                return BadRequest("El archivo no es una plantilla valida. Generá la plantilla desde la pantalla de gastos, para este edificio.");
+            }
+
+            if (marker.BuildingId != buildingId || marker.CompanyId != effectiveCompanyId.Value)
+            {
+                return BadRequest("Esta plantilla fue generada para otro edificio o empresa. Generá una nueva para este edificio.");
+            }
         }
 
         var existing = await dbContext.BuildingExpenses

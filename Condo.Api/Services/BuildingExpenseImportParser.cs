@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
+using Condo.Api.Documents;
 using Condo.Domain.Enums;
 
 namespace Condo.Api.Services;
@@ -21,7 +22,7 @@ public static class BuildingExpenseImportParser
 
     private static readonly Dictionary<string, BuildingExpenseCategory> CategoryLookup = BuildCategoryLookup();
 
-    public static (List<ParsedRow>? Rows, string? Error) Parse(Stream stream)
+    public static (List<ParsedRow>? Rows, string? Token, string? Error) Parse(Stream stream)
     {
         XLWorkbook workbook;
         try
@@ -30,7 +31,7 @@ public static class BuildingExpenseImportParser
         }
         catch (Exception)
         {
-            return (null, "El archivo no es un Excel (.xlsx) valido.");
+            return (null, null, "El archivo no es un Excel (.xlsx) valido.");
         }
 
         using (workbook)
@@ -40,7 +41,7 @@ public static class BuildingExpenseImportParser
             var lastColumn = sheet?.LastColumnUsed()?.ColumnNumber() ?? 0;
             if (sheet is null || lastRow == 0 || lastColumn == 0)
             {
-                return (null, "El archivo esta vacio.");
+                return (null, null, "El archivo esta vacio.");
             }
 
             // Los encabezados se buscan en las primeras filas (por si la planilla trae un titulo arriba).
@@ -64,7 +65,7 @@ public static class BuildingExpenseImportParser
 
             if (headerRow == 0)
             {
-                return (null, "No se encontraron las columnas obligatorias: Categoria, Proveedor, Descripcion y Monto.");
+                return (null, null, "No se encontraron las columnas obligatorias: Categoria, Proveedor, Descripcion y Monto.");
             }
 
             var rows = new List<ParsedRow>();
@@ -79,7 +80,7 @@ public static class BuildingExpenseImportParser
 
                 if (rows.Count >= MaxRows)
                 {
-                    return (null, $"El archivo tiene mas de {MaxRows} filas. Dividilo en varios archivos.");
+                    return (null, null, $"El archivo tiene mas de {MaxRows} filas. Dividilo en varios archivos.");
                 }
 
                 var (amount, amountError) = ReadAmount(amountCell);
@@ -88,10 +89,13 @@ public static class BuildingExpenseImportParser
 
             if (rows.Count == 0)
             {
-                return (null, "El archivo no tiene filas de gastos debajo de los encabezados.");
+                return (null, null, "El archivo no tiene filas de gastos debajo de los encabezados.");
             }
 
-            return (rows, null);
+            var token = workbook.Worksheets.TryGetWorksheet(BuildingExpenseImportTemplateBuilder.MetaSheetName, out var meta)
+                ? meta.Cell(1, 1).GetString()
+                : null;
+            return (rows, token, null);
         }
     }
 

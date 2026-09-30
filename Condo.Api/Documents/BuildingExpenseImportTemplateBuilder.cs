@@ -4,36 +4,39 @@ using Condo.Domain.Enums;
 
 namespace Condo.Api.Documents;
 
-// Plantilla de la carga masiva de gastos: la hoja "Gastos" con los encabezados y ejemplos, y la hoja
-// "Categorias" con los nombres validos.
+// Plantilla de la carga masiva de gastos, generada para un edificio: la hoja "Gastos" con el edificio, la empresa y los
+// encabezados, la hoja "Categorias" con los nombres validos y una hoja oculta con la marca cifrada que ata el archivo a
+// ese edificio y empresa.
 public static class BuildingExpenseImportTemplateBuilder
 {
-    public static byte[] Build()
+    // Hoja oculta (no se puede mostrar desde Excel) con la marca cifrada; la lee BuildingExpenseImportParser.
+    public const string MetaSheetName = "_condopy";
+
+    public static byte[] Build(string buildingName, string companyName, string token)
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Gastos");
 
+        sheet.Cell(1, 1).Value = $"Edificio: {buildingName}";
+        sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(12);
+        sheet.Cell(2, 1).Value = $"Empresa: {companyName}";
+        sheet.Cell(2, 1).Style.Font.SetBold();
+        sheet.Cell(3, 1).Value = "Completá una fila por gasto desde la fila 5. Esta plantilla solo sirve para este edificio: no cambies los encabezados ni las hojas.";
+        sheet.Cell(3, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
+
         string[] headers = ["Categoria", "Proveedor", "Descripcion", "Monto"];
         for (var i = 0; i < headers.Length; i++)
         {
-            var cell = sheet.Cell(1, i + 1);
+            var cell = sheet.Cell(4, i + 1);
             cell.Value = headers[i];
             cell.Style.Font.SetBold().Fill.SetBackgroundColor(XLColor.FromHtml("#e8f4f8"));
         }
 
-        object[][] examples =
-        [
-            ["ANDE", "ANDE", "CONSUMO CICLO 03/26 NIS 1369916", 3155000],
-            ["ANDE", "ANDE", "CONSUMO CICLO 03/26 NIS 1369918", 392000],
-            ["Limpieza", "TODO BRILLO S.A", "SERVICIO DE LIMPIEZA ABRIL/26", 4500000]
-        ];
-        for (var r = 0; r < examples.Length; r++)
-        {
-            for (var c = 0; c < examples[r].Length; c++) sheet.Cell(r + 2, c + 1).Value = XLCellValue.FromObject(examples[r][c]);
-            sheet.Cell(r + 2, 4).Style.NumberFormat.Format = "#,##0";
-        }
-
-        sheet.Columns(1, 4).AdjustToContents();
+        sheet.Column(4).Style.NumberFormat.Format = "#,##0";
+        sheet.Column(1).Width = 24;
+        sheet.Column(2).Width = 32;
+        sheet.Column(3).Width = 56;
+        sheet.Column(4).Width = 16;
 
         var categories = workbook.Worksheets.Add("Categorias");
         categories.Cell(1, 1).Value = "Categorias validas";
@@ -45,6 +48,10 @@ public static class BuildingExpenseImportTemplateBuilder
         }
 
         categories.Column(1).AdjustToContents();
+
+        var meta = workbook.Worksheets.Add(MetaSheetName);
+        meta.Cell(1, 1).Value = token;
+        meta.Visibility = XLWorksheetVisibility.VeryHidden;
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
