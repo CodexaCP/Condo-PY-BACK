@@ -64,6 +64,26 @@ public sealed class SettlementPdfDocument(
 
     private static string ExpensePrefix(BuildingExpenseCategory category) => "gasto" + category;
 
+    // Categorias que se imprimen con un renglon por descripcion distinta (hasta MaxCategoryLines), cada uno con su
+    // monto; las demas van en una sola linea con el total.
+    private static readonly HashSet<BuildingExpenseCategory> MultiLineCategories = [BuildingExpenseCategory.Ande];
+    private const int MaxCategoryLines = 5;
+
+    // Agrupa los gastos de la categoria por descripcion (o proveedor si no tienen) y suma sus montos. Si hay mas de
+    // MaxCategoryLines, lo que sobra se junta en el ultimo renglon como "OTROS".
+    private static List<(string Description, decimal Amount)> CategoryLines(List<SettlementExpenseLineDto> lines)
+    {
+        var groups = lines
+            .GroupBy(x => x.Description.Trim().Length > 0 ? x.Description.Trim() : x.Supplier.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Description: g.Key, Amount: g.Sum(x => x.Amount)))
+            .ToList();
+        if (groups.Count <= MaxCategoryLines) return groups;
+
+        var result = groups.Take(MaxCategoryLines - 1).ToList();
+        result.Add(("OTROS", groups.Skip(MaxCategoryLines - 1).Sum(x => x.Amount)));
+        return result;
+    }
+
     // Perezoso: BaseDefaults se declara mas abajo y los campos estaticos se inicializan en orden de aparicion.
     private static IReadOnlyDictionary<string, FieldDefault>? fieldDefaults;
     private static IReadOnlyDictionary<string, FieldDefault> FieldDefaults => fieldDefaults ??= BuildFieldDefaults();
@@ -441,12 +461,27 @@ public sealed class SettlementPdfDocument(
             foreach (var (category, text) in ExpenseBlocks)
             {
                 if (!byCategory.TryGetValue(category.ToString(), out var lines)) continue;
+                var prefix = ExpensePrefix(category);
+                PaperText(fg, prefix + "Label", text, bold: true);
+
+                // ANDE: un renglon por descripcion distinta (titulo una sola vez), con su propio monto. Con una
+                // sola descripcion sale una linea, sin renglones vacios.
+                if (MultiLineCategories.Contains(category))
+                {
+                    var rowHeight = RowHeight;
+                    var categoryLines = CategoryLines(lines);
+                    for (var i = 0; i < categoryLines.Count; i++)
+                    {
+                        PaperText(fg, prefix + "Descripcion", categoryLines[i].Description.ToUpperInvariant(), extraTop: i * rowHeight);
+                        PaperText(fg, prefix + "Valor", FormatNumber(categoryLines[i].Amount), bold: true, extraTop: i * rowHeight);
+                    }
+                    continue;
+                }
+
                 var descriptions = lines.Select(x => x.Description.Trim()).Where(x => x.Length > 0).Distinct().ToList();
                 if (descriptions.Count == 0)
                     descriptions = lines.Select(x => x.Supplier.Trim()).Where(x => x.Length > 0).Distinct().ToList();
 
-                var prefix = ExpensePrefix(category);
-                PaperText(fg, prefix + "Label", text, bold: true);
                 PaperText(fg, prefix + "Descripcion", string.Join(" / ", descriptions).ToUpperInvariant());
                 PaperText(fg, prefix + "Valor", FormatNumber(lines.Sum(x => x.Amount)), bold: true);
             }
@@ -515,13 +550,13 @@ public sealed class SettlementPdfDocument(
 
     // Un dato suelto en su posicion. Los que tienen ancho se alinean segun su Align (montos a la derecha,
     // nombres centrados); los demas van en una linea desde su posicion.
-    private void PaperText(LayersDescriptor fg, string key, string? text, bool bold = false)
+    private void PaperText(LayersDescriptor fg, string key, string? text, bool bold = false, float extraTop = 0f)
     {
         if (string.IsNullOrWhiteSpace(text) || IsHidden(key)) return;
 
         var place = Place(key);
         var align = FieldDefaults[key].Align;
-        var layer = fg.Layer().TranslateX(place.X).TranslateY(place.Top);
+        var layer = fg.Layer().TranslateX(place.X).TranslateY(place.Top + extraTop);
         var box = place.Width > 0 ? layer.Width(BlockWidthAt(place.X, place.Width)) : layer;
         box.Text(t =>
         {
