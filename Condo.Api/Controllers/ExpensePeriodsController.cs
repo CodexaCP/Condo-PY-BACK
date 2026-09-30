@@ -2162,12 +2162,59 @@ public class ExpensePeriodsController(
             dbContext.BuildingExpenses.AddRange(copiedExpenses);
         }
 
+        // Ingresos: se copian todos menos el Saldo acumulado, que no se repite tal cual sino que arranca del valor con
+        // el que cerro el periodo anterior (el mismo calculo del arrastre de saldo).
+        var sourceIncomes = await dbContext.BuildingIncomes
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == source.Id && x.Category != BuildingIncomeCategory.AccumulatedBalance)
+            .ToListAsync(cancellationToken);
+
+        var copiedIncomes = sourceIncomes.Select(i => new BuildingIncome
+        {
+            CompanyId = i.CompanyId,
+            BuildingId = i.BuildingId,
+            ExpensePeriodId = cloned.Id,
+            Category = i.Category,
+            Description = i.Description,
+            IncomeDate = startDate,
+            Amount = i.Amount,
+            Notes = i.Notes
+        }).ToList();
+
+        var accumulatedBalance = 0m;
+        if (source.Building is not null)
+        {
+            var closing = await PeriodClosingBalance.ComputeAsync(dbContext, source.Building, source.Id, cancellationToken);
+            if (closing.Saldo > 0)
+            {
+                accumulatedBalance = closing.Saldo;
+                copiedIncomes.Add(new BuildingIncome
+                {
+                    CompanyId = source.CompanyId,
+                    BuildingId = source.BuildingId,
+                    ExpensePeriodId = cloned.Id,
+                    Category = BuildingIncomeCategory.AccumulatedBalance,
+                    Description = $"Saldo anterior período {source.Name}",
+                    IncomeDate = startDate,
+                    Amount = closing.Saldo,
+                    Notes = closing.Note
+                });
+            }
+        }
+
+        if (copiedIncomes.Count > 0)
+        {
+            dbContext.BuildingIncomes.AddRange(copiedIncomes);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new CloneExpensePeriodResultDto
         {
             Period = ToDto(cloned, source.Building?.Name),
-            CopiedExpenses = copiedExpenses.Count
+            CopiedExpenses = copiedExpenses.Count,
+            CopiedIncomes = sourceIncomes.Count,
+            AccumulatedBalance = accumulatedBalance
         });
     }
 

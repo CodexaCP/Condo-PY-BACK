@@ -58,6 +58,9 @@ public class CloneExpensePeriodResultDto
 {
     public ExpensePeriodDto Period { get; set; } = null!;
     public int CopiedExpenses { get; set; }
+    // Ingresos copiados (todos menos el Saldo acumulado) y Saldo acumulado creado con el cierre del periodo anterior (0 si no hubo).
+    public int CopiedIncomes { get; set; }
+    public decimal AccumulatedBalance { get; set; }
 }
 
 public class GenerateExpenseChargesRequest
