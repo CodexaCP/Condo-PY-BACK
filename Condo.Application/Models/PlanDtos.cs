@@ -9,6 +9,7 @@ public class PlanCreateRequest
     public decimal Price { get; set; }
     public string BillingCycle { get; set; } = string.Empty;
     public int GracePeriodDays { get; set; } = 5;
+    public bool IncludesFinanceModule { get; set; }
 }
 
 public class PlanUpdateRequest
@@ -19,6 +20,7 @@ public class PlanUpdateRequest
     public string BillingCycle { get; set; } = string.Empty;
     public int GracePeriodDays { get; set; }
     public bool IsActive { get; set; }
+    public bool IncludesFinanceModule { get; set; }
 }
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────
@@ -33,6 +35,7 @@ public class PlanDto
     public string BillingCycle { get; set; } = string.Empty;
     public int GracePeriodDays { get; set; }
     public bool IsActive { get; set; }
+    public bool IncludesFinanceModule { get; set; }
     public bool IsAssigned { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
