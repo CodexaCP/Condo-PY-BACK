@@ -13,6 +13,9 @@ public class Plan : BaseEntity
     public int GracePeriodDays { get; set; } = 5;
     public bool IsActive { get; set; } = true;
 
+    // El plan incluye el modulo "Finanzas del edificio": sin esto el SuperAdmin no puede habilitarlo en el edificio.
+    public bool IncludesFinanceModule { get; set; }
+
     // Readonly once at least one BuildingPlan references this plan
     public bool IsAssigned { get; set; }
 

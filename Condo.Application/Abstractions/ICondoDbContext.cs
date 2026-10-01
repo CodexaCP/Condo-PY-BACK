@@ -50,6 +50,9 @@ public interface ICondoDbContext
     DbSet<CreditNoteLine> CreditNoteLines { get; }
     DbSet<CreditNoteAttachment> CreditNoteAttachments { get; }
     DbSet<CreditNoteAuditLog> CreditNoteAuditLogs { get; }
+    DbSet<FinanceSettings> FinanceSettings { get; }
+    DbSet<FinancialAccount> FinancialAccounts { get; }
+    DbSet<LedgerCategory> LedgerCategories { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

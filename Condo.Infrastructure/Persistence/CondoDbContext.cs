@@ -49,6 +49,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<CreditNoteLine> CreditNoteLines => Set<CreditNoteLine>();
     public DbSet<CreditNoteAttachment> CreditNoteAttachments => Set<CreditNoteAttachment>();
     public DbSet<CreditNoteAuditLog> CreditNoteAuditLogs => Set<CreditNoteAuditLog>();
+    public DbSet<FinanceSettings> FinanceSettings => Set<FinanceSettings>();
+    public DbSet<FinancialAccount> FinancialAccounts => Set<FinancialAccount>();
+    public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -879,6 +882,47 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<CreditNoteAuditLog>()
             .HasOne(x => x.CreditNote).WithMany()
             .HasForeignKey(x => x.CreditNoteId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Finanzas del edificio ──────────────────────────────────────────────
+        modelBuilder.Entity<FinanceSettings>().HasIndex(x => x.BuildingId).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<FinanceSettings>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinanceSettings>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<FinancialAccount>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<FinancialAccount>().Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<FinancialAccount>().Property(x => x.OpeningBalance).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<FinancialAccount>().HasIndex(x => new { x.BuildingId, x.Name }).IsUnique().HasFilter("[IsDeleted] = 0");
+        // Una sola caja y un solo fondo de reserva por edificio (los bancos pueden ser varios).
+        modelBuilder.Entity<FinancialAccount>().HasIndex(x => new { x.BuildingId, x.Type }).IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Type] <> 'Bank'");
+        modelBuilder.Entity<FinancialAccount>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinancialAccount>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.Code).HasMaxLength(30);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.ExternalCode).HasMaxLength(50);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.SystemKey).HasMaxLength(60);
+        modelBuilder.Entity<LedgerCategory>().HasIndex(x => new { x.BuildingId, x.Code }).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<LedgerCategory>().HasIndex(x => new { x.BuildingId, x.SystemKey }).IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [SystemKey] IS NOT NULL");
+        modelBuilder.Entity<LedgerCategory>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<LedgerCategory>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<LedgerCategory>()
+            .HasOne(x => x.Parent).WithMany(x => x.Children)
+            .HasForeignKey(x => x.ParentId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }
