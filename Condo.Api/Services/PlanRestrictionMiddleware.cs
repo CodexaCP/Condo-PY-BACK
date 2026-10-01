@@ -17,6 +17,7 @@ public sealed class PlanRestrictionMiddleware(RequestDelegate next)
     private static readonly string[] AllowedPrefixes =
     [
         "/api/auth",
+        "/api/app",
         "/api/notifications",
         "/api/devices",
         "/api/uploads",

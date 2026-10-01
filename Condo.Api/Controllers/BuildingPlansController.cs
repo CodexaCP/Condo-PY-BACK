@@ -333,18 +333,8 @@ public class BuildingPlansController(
     }
 
     // Active > ExpiringSoon (<= 7 dias) > Expired (vencido, en gracia) > ReadOnly (solo consulta + pago) > Blocked.
-    private static string ComputeStatus(BuildingPlan bp, DateTime today)
-    {
-        if (bp.IsArchived) return "Archived";
-
-        var phase = PlanAccessPolicy.GetPhase(bp.EndDate, bp.Plan?.GracePeriodDays ?? 5, today);
-        if (phase == PlanAccessPhase.Blocked) return "Blocked";
-        if (phase == PlanAccessPhase.ReadOnly) return "ReadOnly";
-        if (phase == PlanAccessPhase.Grace) return "Expired";
-
-        var days = (int)(bp.EndDate.Date - today).TotalDays;
-        return days <= 7 ? "ExpiringSoon" : "Active";
-    }
+    private static string ComputeStatus(BuildingPlan bp, DateTime today) =>
+        PlanAccessPolicy.GetStatusName(bp.IsArchived, bp.EndDate, bp.Plan?.GracePeriodDays ?? 5, today);
 
     // Dias que quedan antes del bloqueo total; null mientras el plan no esta vencido.
     private static int? ComputeDaysUntilBlocked(BuildingPlan bp, DateTime today) =>

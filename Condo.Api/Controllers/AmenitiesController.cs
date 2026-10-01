@@ -142,11 +142,16 @@ public class AmenitiesController(
     [HttpGet("reservations")]
     [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
     public async Task<ActionResult<IReadOnlyList<AmenityReservationDto>>> GetReservations(
-        [FromQuery] Guid? buildingId, [FromQuery] string? status, CancellationToken ct)
+        [FromQuery] Guid? buildingId, [FromQuery] string? status,
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(ct);
 
         var query = dbContext.AmenityReservations.AsNoTracking().Where(x => !x.IsDeleted);
+
+        // Reservas que se superponen con el rango pedido (por ejemplo "las de hoy").
+        if (from.HasValue) query = query.Where(x => x.EndsAt >= from.Value);
+        if (to.HasValue) query = query.Where(x => x.StartsAt <= to.Value);
         if (buildingId.HasValue)
         {
             if (!accessScope.IsSuperAdmin && !accessibleBuildingIds.Contains(buildingId.Value)) return Forbid();

@@ -97,6 +97,7 @@ public class AnnouncementsController(
     }
 
     [HttpPost]
+    [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
     public async Task<ActionResult<AnnouncementDto>> Create(
         [FromBody] AnnouncementUpsertRequest request,
         CancellationToken cancellationToken)
@@ -119,6 +120,7 @@ public class AnnouncementsController(
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
     public async Task<ActionResult<AnnouncementDto>> Update(
         Guid id,
         [FromBody] AnnouncementUpsertRequest request,
@@ -154,6 +156,7 @@ public class AnnouncementsController(
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         var entity = await dbContext.Announcements
@@ -171,6 +174,7 @@ public class AnnouncementsController(
 
     // Crea el mismo comunicado en múltiples edificios (vacío = todos los accesibles).
     [HttpPost("broadcast")]
+    [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
     public async Task<ActionResult<IReadOnlyList<AnnouncementDto>>> Broadcast(
         [FromBody] AnnouncementBroadcastRequest request,
         CancellationToken cancellationToken)

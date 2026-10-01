@@ -42,6 +42,25 @@ public static class PlanAccessPolicy
         return PlanAccessPhase.Blocked;
     }
 
+    /// <summary>
+    /// Nombre del estado que ven las pantallas: Archived, Active, ExpiringSoon (7 dias o menos), Expired (vencido,
+    /// en gracia), ReadOnly o Blocked.
+    /// </summary>
+    public static string GetStatusName(bool isArchived, DateTime endDate, int graceDays, DateTime todayUtc)
+    {
+        if (isArchived) return "Archived";
+
+        switch (GetPhase(endDate, graceDays, todayUtc))
+        {
+            case PlanAccessPhase.Blocked: return "Blocked";
+            case PlanAccessPhase.ReadOnly: return "ReadOnly";
+            case PlanAccessPhase.Grace: return "Expired";
+        }
+
+        var days = (int)(endDate.Date - todayUtc.Date).TotalDays;
+        return days <= 7 ? "ExpiringSoon" : "Active";
+    }
+
     /// <summary>Dias que faltan para que empiece el bloqueo total (0 si ya esta bloqueado o el plan esta vigente).</summary>
     public static int DaysUntilBlocked(DateTime endDate, int graceDays, DateTime todayUtc)
     {

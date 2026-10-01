@@ -191,6 +191,9 @@ public class OwnerPaymentsController(
     public async Task<ActionResult<IReadOnlyList<OwnerPaymentDto>>> GetAll(
         [FromQuery] string? status,
         [FromQuery] Guid? ownerId,
+        [FromQuery] Guid? buildingId,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
         CancellationToken ct)
     {
         var companyId = tenantContext.CompanyId;
@@ -220,16 +223,44 @@ public class OwnerPaymentsController(
             if (ownerId.HasValue)
                 query = query.Where(x => x.OwnerId == ownerId.Value);
 
-            if (!string.IsNullOrWhiteSpace(status) &&
-                Enum.TryParse<OwnerPaymentStatus>(status, true, out var parsedStatus))
-                query = query.Where(x => x.Status == parsedStatus);
+            // Solo los pagos que tocan este edificio (que ademas tiene que estar en el alcance del usuario).
+            if (buildingId.HasValue)
+            {
+                if (!scope.Contains(buildingId.Value)) return Forbid();
+                query = query.Where(x => x.Units.Any(u => !u.IsDeleted && u.Unit != null && u.Unit.BuildingId == buildingId.Value));
+            }
+
+            // status admite una lista separada por comas ("Pending,UnderReview"); los valores no validos se ignoran.
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var statuses = status
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(s => Enum.TryParse<OwnerPaymentStatus>(s, true, out var parsed) ? (OwnerPaymentStatus?)parsed : null)
+                    .Where(s => s.HasValue)
+                    .Select(s => s!.Value)
+                    .ToList();
+
+                if (statuses.Count > 0)
+                    query = query.Where(x => statuses.Contains(x.Status));
+            }
         }
         else
         {
             return Forbid();
         }
 
-        var payments = await query.OrderByDescending(x => x.CreatedAtUtc).ToListAsync(ct);
+        query = query.OrderByDescending(x => x.CreatedAtUtc);
+
+        // Sin page se devuelve todo (como siempre: la web no pagina). Con page, se pagina y el total viaja en
+        // el encabezado X-Total-Count.
+        if (page.HasValue)
+        {
+            var size = Math.Clamp(pageSize ?? 25, 1, 100);
+            Response.Headers["X-Total-Count"] = (await query.CountAsync(ct)).ToString();
+            query = query.Skip((Math.Max(page.Value, 1) - 1) * size).Take(size);
+        }
+
+        var payments = await query.ToListAsync(ct);
         return Ok(payments.Select(p => ToDto(p, staffScope is null || FullyInScope(p, staffScope))).ToList());
     }
 

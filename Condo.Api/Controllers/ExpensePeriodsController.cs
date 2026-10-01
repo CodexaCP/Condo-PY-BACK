@@ -46,7 +46,10 @@ public class ExpensePeriodsController(
         string.Equals(tenantContext.Role, "CompanyAdmin", StringComparison.OrdinalIgnoreCase);
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<ExpensePeriodDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<ExpensePeriodDto>>> GetAll(
+        [FromQuery] Guid? buildingId,
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
     {
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
 
@@ -56,7 +59,9 @@ public class ExpensePeriodsController(
 
         if (!accessScope.IsSuperAdmin)
         {
-            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
+            // Solo el Administrador de empresa sin acotar ve toda la empresa; un administrador acotado a un
+            // condominio, el Operador y el Encargado ven los periodos de los edificios de su alcance.
+            if (accessScope.HasFullCompanyScope && accessScope.CompanyId.HasValue)
             {
                 query = query.Where(x => x.CompanyId == accessScope.CompanyId.Value);
             }
@@ -64,6 +69,20 @@ public class ExpensePeriodsController(
             {
                 query = query.Where(x => accessibleBuildingIds.Contains(x.BuildingId));
             }
+        }
+
+        // Filtros opcionales (los usa la app movil). Fuera de alcance no devuelve nada, sin revelar si existe.
+        if (buildingId.HasValue)
+        {
+            query = query.Where(x => x.BuildingId == buildingId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!Enum.TryParse<ExpensePeriodStatus>(status, true, out var parsedStatus))
+                return BadRequest("Estado de periodo inválido.");
+
+            query = query.Where(x => x.Status == parsedStatus);
         }
 
         var periods = await query
