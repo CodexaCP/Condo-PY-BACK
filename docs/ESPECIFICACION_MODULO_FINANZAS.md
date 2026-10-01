@@ -1,6 +1,6 @@
 # Módulo "Finanzas del edificio" — Especificación y plan de trabajo
 
-Estado: **fase 1 implementada (2026-10-01)**; fases 2 a 6 pendientes. Ver la sección 15 (estado de implementación y lo que sigue). Fecha del documento: 2026-10-01.
+Estado: **fases 1, 2 y 3 implementadas (2026-10-01)**; fases 4 a 6 pendientes. Ver la sección 15 (estado de implementación y lo que sigue). Fecha del documento: 2026-10-01.
 Pensado para trabajarse en una sesión nueva leyendo este documento. Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel Angular), `CondoPY-APP` (solo si más adelante se muestra algo al Encargado).
 
 > **Instrucción para la sesión que implemente esto:** leer primero la sección 2 (lo que ya existe) y verificar en el código cada punto marcado **[verificar]** antes de diseñar sobre él. Las decisiones abiertas están en la sección 12: no asumir, preguntarlas una por una.
@@ -322,12 +322,39 @@ Un gasto de categoría `ReserveFund` es un aporte al fondo (se cobra a las unida
 - **Pruebas:** 136 comprobaciones con datos de ejemplo y base en memoria (módulo apagado, habilitación, aislamiento entre empresas, roles, validaciones, bajada de plan, plan vencido en solo lectura y bloqueo, plantilla); traducción a SQL Server revisada con `ToQueryString`; recorrido completo de las pantallas contra el backend real en memoria.
 
 ### 15.4 Fuera de la fase 1 (queda para las fases siguientes)
-- IVA por rubro, política de uso del fondo de reserva y presupuesto (pasos 4, 6 y 7 del asistente de la sección 4).
+- IVA por rubro y política de uso del fondo de reserva (pasos 4 y 7 del asistente de la sección 4). El presupuesto se hizo en la fase 3 (15.6).
 - Auditoría del módulo (`FinanceAuditLog`): hoy solo se guarda quién habilitó y quién completó la configuración. Conviene sumarla antes de que existan movimientos.
 - Cuando existan movimientos: bloquear el cambio de la fecha de arranque y de los saldos iniciales, y permitir solo desactivar (no eliminar) cuentas y rubros usados.
 
-### 15.5 Qué sigue
-1. **Fase 2 — libro y tablero:** `FinanceMovement` derivado de pagos aprobados, gastos e ingresos; saldos por cuenta; flujo de caja. Decidir antes los cuatro puntos de 15.1 (gasto sin estado de pago, cobros por `Method`, aporte al fondo como transferencia, saldo del fondo).
-2. **Fase 3 — presupuesto y fondo de reserva.**
-3. **Fase 4 — cuentas por pagar y por cobrar**, con la corrección de pagos revertidos en `MorosityController`.
-4. Fases 5 (exportaciones para el contador) y 6 (conciliación manual y cierre de período).
+### 15.5 Fase 2 — libro y tablero (implementada 2026-10-01)
+
+**Decisión de diseño: libro virtual.** En vez de una tabla `FinanceMovement` que haya que mantener al día, los movimientos se **arman al consultar** a partir de los cobros, gastos e ingresos existentes (`FinanceLedgerService`). Así no se tocan los flujos de pagos ni de liquidación, y anulaciones, reversiones y bajas se reflejan solas. Hay dos caminos con las mismas reglas: agregados por mes (una consulta agrupada en la base, para saldos, flujo y tablero) y movimientos línea por línea de un rango acotado a 400 días. Una prueba verifica que ambos coinciden. La tabla persistente (con `ReconciledAt`) se agregará en la fase 6, cuando la conciliación la necesite.
+
+**Cómo se resolvieron los cuatro puntos de 15.1:**
+1. *Gasto sin estado de pago:* se cuenta como pagado en su `ExpenseDate`, hasta que la fase 4 separe obligación y pago.
+2. *Cobros sin cuenta:* el efectivo entra a la caja; los demás medios, a la **cuenta por defecto** del edificio (`FinanceSettings.DefaultAccountId`; si no se elige, el único banco activo; si hay varios y no se eligió, queda «sin cuenta asignada» con aviso en el tablero). Lo imputado a cargos de fondo de reserva entra a la cuenta del fondo.
+3. *Gasto de categoría Fondo de reserva:* no es un egreso (es el aporte que se cobra a las unidades): queda afuera del libro; el dinero se ve del lado de los cobros.
+4. *Saldo del fondo:* el del módulo parte del saldo inicial de su cuenta y suma lo cobrado desde el arranque; puede diferir del «saldo acumulado» de la liquidación, y la pantalla lo aclara.
+
+**Otras reglas del libro:** criterio percibido, desde la fecha de arranque y **hasta hoy** (lo fechado a futuro no entra); excluye pagos revertidos y borrados; el arrastre de saldo (`AccumulatedBalance`) y el fondo operativo (`OperationalFund`, informativo en la liquidación) no son ingresos; los ingresos propios del edificio entran a la cuenta del fondo si el edificio los manda al fondo (`ToReserveFund`) y, si no, a la cuenta por defecto; lo cobrado sin imputar a ningún cargo cae en expensas ordinarias, así que el total cobrado siempre coincide con la suma de los pagos; sin cuenta del fondo, sus movimientos pasan a la cuenta por defecto.
+
+**API** (`/api/finance`, lectura para los cuatro roles administrativos; exige la configuración completa, si no responde 409 `finance_setup_incomplete`): `GET balances`, `GET movements` (filtros por fecha, cuenta, rubro y sentido, paginación y saldo corrido), `GET cash-flow` (ejercicio por rubro y mes), `GET dashboard`, y `PUT settings/default-account` (SuperAdmin y Administrador de empresa).
+
+**Web:** Tablero (tarjetas, cuentas, flujo del mes y del ejercicio, gráfico de 12 meses), Movimientos, Flujo de caja y selector de cuenta por defecto en Configuración → Cuentas. Selector de edificio compartido: aparece solo con más de un edificio y recuerda la última elección.
+
+**Migración:** `20261001173551_FinanceLedgerDefaultAccount` (columna `FinanceSettings.DefaultAccountId`) con su script SQL.
+
+### 15.6 Fase 3 — presupuesto y fondo de reserva (implementada 2026-10-01)
+
+- **Presupuesto** (`BudgetLine`, migración `20261001174227_FinanceBudget` con su script SQL): importe mensual por subrubro de ingresos y de gastos (los fondos y los rubros principales no se presupuestan). Se identifica por mes calendario (`Year`/`Month`) en lugar de `FiscalYear`/`Month`; el ejercicio (desde `FiscalYearStartMonth`) solo agrupa 12 meses seguidos. Edita el SuperAdmin o el Administrador de empresa; los demás roles consultan. Atajos: copiar del ejercicio anterior y completar con el promedio real de los últimos 3, 6 o 12 meses completos (solo celdas vacías salvo que se pida reemplazar).
+- **Presupuesto vs. real** (mes y acumulado del ejercicio): lo real de los **gastos** es lo cargado como gasto del edificio en el mes (por fecha, incluido lo pagado por el fondo y el aporte al fondo cargado como gasto, para que cuadre con los gastos cargados); lo real de los **ingresos** es lo cobrado. Semáforo: verde dentro de lo presupuestado, amarillo hasta 10 % de desvío, rojo más allá (en gastos preocupa pasarse; en ingresos, quedar por debajo; un gasto sin presupuesto es rojo). Se rotula el criterio de cada tipo.
+- **Fondo de reserva:** libro mes a mes (aportes, usos, saldo de apertura y cierre) con movimientos y saldo corrido (`GET reserve-fund`). Requiere una cuenta de tipo Fondo de reserva. El tablero suma el resumen del presupuesto del mes y del fondo.
+- **Guardas del plan de cuentas:** un rubro con presupuesto cargado no se elimina, no cambia de tipo ni recibe subrubros.
+- **Limitaciones conocidas:** los rubros propios (creados a mano) se pueden presupuestar, pero su «real» queda en cero porque todavía no se les puede asignar categorías de gastos o ingresos; no se incluyó la **proyección del mes siguiente** del flujo de caja (sección 5.3); el tablero todavía no muestra cobranza/morosidad ni cuentas por pagar (fase 4).
+- **Pruebas:** 257 comprobaciones con datos de ejemplo y base en memoria (libro, saldos, filtros, semáforo, presupuesto, copiar y promedio, fondo, permisos y aislamiento); consultas agrupadas revisadas contra la traducción a SQL Server; pantallas recorridas contra el backend real en memoria.
+
+### 15.7 Qué sigue
+1. **Fase 4 — cuentas por pagar y por cobrar:** proveedores con RUC, facturas de proveedor con vencimiento y pago (separar obligación de pago), cuentas por cobrar con la corrección de pagos revertidos en `MorosityController`, y cobranza/morosidad en el tablero.
+2. **Fase 5 — para el contador:** exportaciones con códigos de cuenta, asientos sugeridos, IVA por rubro, auditoría del módulo (`FinanceAuditLog`; conviene adelantarla) y mapeo de rubros propios a categorías.
+3. **Fase 6 — control:** conciliación bancaria manual (con la tabla persistente de movimientos) y cierre de período con constancia.
+4. Pendientes menores: proyección del mes siguiente, bloquear el cambio de la fecha de arranque y de los saldos iniciales una vez que existan movimientos, e importación del plan de cuentas del contador por Excel (si el contador lo pide).
