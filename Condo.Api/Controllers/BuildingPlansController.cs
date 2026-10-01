@@ -1,5 +1,6 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -22,7 +23,7 @@ public class BuildingPlansController(
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingPlanDto>>> GetAll(CancellationToken ct)
     {
-        var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+        var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
         if (!tenantContext.IsSuperAdmin && accessibleIds.Count == 0)
             return Ok(Array.Empty<BuildingPlanDto>());
 
@@ -58,7 +59,7 @@ public class BuildingPlansController(
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<BuildingPlanDto>> GetById(Guid id, CancellationToken ct)
     {
-        var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+        var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
 
         var bp = await dbContext.BuildingPlans
             .AsNoTracking()
@@ -87,7 +88,7 @@ public class BuildingPlansController(
     {
         if (tenantContext.IsSuperAdmin) return Forbid();
 
-        var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+        var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
         if (accessibleIds.Count == 0) return Ok(Array.Empty<BuildingPlanSummaryDto>());
 
         var today = DateTime.UtcNow.Date;
@@ -112,7 +113,8 @@ public class BuildingPlansController(
             IsPaid = bp.IsPaid,
             IsActive = bp.IsActive,
             Status = ComputeStatus(bp, today),
-            DaysUntilExpiry = Math.Max(0, (int)(bp.EndDate.Date - today).TotalDays)
+            DaysUntilExpiry = Math.Max(0, (int)(bp.EndDate.Date - today).TotalDays),
+            DaysUntilBlocked = ComputeDaysUntilBlocked(bp, today)
         }).ToList());
     }
 
@@ -258,8 +260,6 @@ public class BuildingPlansController(
 
         if (bp.IsArchived)
             return BadRequest("No se puede establecer renovación en un plan archivado.");
-        if (!bp.IsActive)
-            return BadRequest("No se puede establecer renovación en un plan suspendido.");
         if (request.RenewalStartDate >= request.RenewalEndDate)
             return BadRequest("La fecha de inicio de renovación debe ser anterior a la fecha de fin.");
         if (request.RenewalStartDate < bp.EndDate)
@@ -332,15 +332,25 @@ public class BuildingPlansController(
         return ToDto(bp, hasPending, DateTime.UtcNow.Date);
     }
 
+    // Active > ExpiringSoon (<= 7 dias) > Expired (vencido, en gracia) > ReadOnly (solo consulta + pago) > Blocked.
     private static string ComputeStatus(BuildingPlan bp, DateTime today)
     {
         if (bp.IsArchived) return "Archived";
-        if (!bp.IsActive) return "Suspended";
+
+        var phase = PlanAccessPolicy.GetPhase(bp.EndDate, bp.Plan?.GracePeriodDays ?? 5, today);
+        if (phase == PlanAccessPhase.Blocked) return "Blocked";
+        if (phase == PlanAccessPhase.ReadOnly) return "ReadOnly";
+        if (phase == PlanAccessPhase.Grace) return "Expired";
+
         var days = (int)(bp.EndDate.Date - today).TotalDays;
-        if (days < 0) return "Expired";
-        if (days <= 7) return "ExpiringSoon";
-        return "Active";
+        return days <= 7 ? "ExpiringSoon" : "Active";
     }
+
+    // Dias que quedan antes del bloqueo total; null mientras el plan no esta vencido.
+    private static int? ComputeDaysUntilBlocked(BuildingPlan bp, DateTime today) =>
+        bp.IsArchived || bp.EndDate.Date >= today
+            ? null
+            : PlanAccessPolicy.DaysUntilBlocked(bp.EndDate, bp.Plan?.GracePeriodDays ?? 5, today);
 
     private static BuildingPlanDto ToDto(BuildingPlan bp, bool hasPendingPayment, DateTime today) => new()
     {
@@ -369,6 +379,7 @@ public class BuildingPlansController(
         CreatedAtUtc = bp.CreatedAtUtc,
         Status = ComputeStatus(bp, today),
         DaysUntilExpiry = Math.Max(0, (int)(bp.EndDate.Date - today).TotalDays),
+        DaysUntilBlocked = ComputeDaysUntilBlocked(bp, today),
         HasPendingPayment = hasPendingPayment
     };
 }

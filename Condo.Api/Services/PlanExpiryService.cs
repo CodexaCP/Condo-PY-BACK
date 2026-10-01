@@ -1,3 +1,6 @@
+using System.Net;
+using Condo.Application.Abstractions;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Condo.Infrastructure.Persistence;
@@ -6,17 +9,26 @@ using Microsoft.EntityFrameworkCore;
 namespace Condo.Api.Services;
 
 /// <summary>
-/// Runs daily to:
-///   • Send expiry alerts at -5d, -1d, 0d, +1d, +GracePeriodDays relative to EndDate.
-///   • Suspend (IsActive=false) plans that have exceeded the grace period.
-/// AlertLevel on BuildingPlan tracks which milestone was last processed:
-///   1 = -5d sent  |  2 = -1d sent  |  3 = 0d sent  |  4 = +1d sent  |  5 = suspended
+/// Corre cada 6 horas y avisa del vencimiento de los planes de edificio:
+///   • Por correo (Resend) y en la campanita del sistema, solo a Administrador de empresa, Operador y
+///     Encargado de edificio de la empresa y del edificio del plan. No se manda push.
+///   • Las restricciones (solo lectura / bloqueo total) NO las aplica este servicio: se calculan por fechas
+///     en <see cref="PlanAccessPolicy"/>. Aca solo se avisa cuando empieza cada etapa.
+/// AlertLevel en BuildingPlan guarda el ultimo aviso enviado del periodo actual:
+///   1 = faltan 5..2 dias | 2 = vence manana | 3 = vence hoy | 4 = vencido, en gracia
+///   5 = termino la gracia: solo lectura | 6 = bloqueo total
+/// Si hay varios hitos atrasados (servicio caido) solo se manda el mas reciente.
 /// </summary>
 public sealed class PlanExpiryService(
     IServiceScopeFactory scopeFactory,
     ILogger<PlanExpiryService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
+
+    private static readonly UserRole[] RecipientRoles =
+        [UserRole.CompanyAdmin, UserRole.CompanyOperator, UserRole.BuildingManager];
+
+    private sealed record Alert(byte Level, NotificationType Type, string Title, string Body);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -45,38 +57,50 @@ public sealed class PlanExpiryService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
-        var pushDispatcher = scope.ServiceProvider.GetRequiredService<PushDispatcher>();
+        var emailSender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
 
         var today = DateTime.UtcNow.Date;
 
-        // Only active, non-archived plans that haven't been fully processed (AlertLevel < 5)
+        // Planes vigentes que todavia no llegaron al ultimo aviso (bloqueo total).
         var plans = await db.BuildingPlans
             .Include(x => x.Plan)
             .Include(x => x.Building)
-            .Where(x => !x.IsDeleted && !x.IsArchived && x.IsActive && (x.AlertLevel == null || x.AlertLevel < 5))
+                .ThenInclude(b => b!.Condominium)
+            .Where(x => !x.IsDeleted && !x.IsArchived && (x.AlertLevel == null || x.AlertLevel < 6))
             .ToListAsync(ct);
 
         if (plans.Count == 0) return;
 
-        // Get all users that should receive alerts per building
-        var buildingIds = plans.Select(x => x.BuildingId).Distinct().ToList();
+        var pending = new List<(BuildingPlan Plan, Alert Alert)>();
+        foreach (var bp in plans)
+        {
+            var alert = NextAlert(bp, today);
+            if (alert is not null) pending.Add((bp, alert));
+        }
 
-        // CompanyAdmin and BuildingManager users for each building
-        var usersByBuilding = await db.UserBuildingAccesses
+        if (pending.Count == 0) return;
+
+        var buildingIds = pending.Select(x => x.Plan.BuildingId).Distinct().ToList();
+
+        // Operadores y encargados con acceso a cada edificio.
+        var buildingStaff = await db.UserBuildingAccesses
             .AsNoTracking()
             .Include(x => x.ApplicationUser)
             .Where(x => !x.IsDeleted && x.IsActive && buildingIds.Contains(x.BuildingId)
-                     && x.ApplicationUser != null && !x.ApplicationUser.IsDeleted && x.ApplicationUser.IsActive)
+                     && x.ApplicationUser != null && !x.ApplicationUser.IsDeleted && x.ApplicationUser.IsActive
+                     && RecipientRoles.Contains(x.ApplicationUser.Role))
+            .ToListAsync(ct);
+        var staffByBuilding = buildingStaff
             .GroupBy(x => x.BuildingId)
-            .ToDictionaryAsync(g => g.Key, g => g.Select(x => x.ApplicationUser!).ToList(), ct);
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ApplicationUser!).ToList());
 
-        // Also include CompanyAdmin users scoped to the company (not via building access)
-        var companyIds = plans
-            .Where(x => x.Building?.CompanyId != null)
-            .Select(x => x.Building!.CompanyId!.Value)
+        // Administradores de la empresa dueña de cada edificio.
+        var companyIds = pending
+            .Select(x => CompanyOf(x.Plan))
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
             .Distinct()
             .ToList();
-
         var companyAdmins = await db.ApplicationUsers
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.IsActive
@@ -85,138 +109,141 @@ public sealed class PlanExpiryService(
             .ToListAsync(ct);
 
         var notifications = new List<Notification>();
-        var changed = false;
+        var emails = new List<(string Email, string Subject, string Html)>();
 
-        foreach (var bp in plans)
+        foreach (var (bp, alert) in pending)
         {
-            var graceDays = bp.Plan?.GracePeriodDays ?? 5;
-            var daysRemaining = (int)(bp.EndDate.Date - today).TotalDays;
-            var currentLevel = bp.AlertLevel ?? 0;
+            var companyId = CompanyOf(bp);
+            var recipients = new Dictionary<Guid, ApplicationUser>();
 
-            // Determine which milestone to act on
-            if (daysRemaining >= 5 && currentLevel < 1)
+            if (staffByBuilding.TryGetValue(bp.BuildingId, out var staff))
+                foreach (var u in staff) recipients[u.Id] = u;
+
+            if (companyId.HasValue)
+                foreach (var u in companyAdmins.Where(u => u.CompanyId == companyId))
+                    recipients[u.Id] = u;
+
+            foreach (var user in recipients.Values)
             {
-                // Not yet at -5d window — nothing to do
-                continue;
+                notifications.Add(new Notification
+                {
+                    RecipientId = user.Id,
+                    CompanyId = companyId ?? Guid.Empty,
+                    Type = alert.Type,
+                    Title = alert.Title,
+                    Body = alert.Body,
+                    IsRead = false,
+                    EntityType = "BuildingPlan",
+                    EntityId = bp.Id
+                });
+
+                if (!string.IsNullOrWhiteSpace(user.Email))
+                    emails.Add((user.Email, alert.Title, BuildEmailHtml(user, bp, alert)));
             }
 
-            if (daysRemaining >= 1 && daysRemaining < 5 && currentLevel < 1)
-            {
-                // Between -5d and -2d — send the -5d alert (slightly late, still relevant)
-                await SendAlertAsync(db, bp, 1, NotificationType.PlanExpiringSoon,
-                    "Plan próximo a vencer",
-                    $"El plan \"{bp.Plan?.Name}\" del edificio \"{bp.Building?.Name}\" vence en {daysRemaining} día(s).",
-                    usersByBuilding, companyAdmins, notifications, ct);
-                bp.AlertLevel = 1;
-                changed = true;
-                continue;
-            }
-
-            if (daysRemaining == 1 && currentLevel < 2)
-            {
-                await SendAlertAsync(db, bp, 2, NotificationType.PlanExpiringSoon,
-                    "Plan vence mañana",
-                    $"El plan \"{bp.Plan?.Name}\" del edificio \"{bp.Building?.Name}\" vence mañana. Asegúrese de tener el comprobante listo.",
-                    usersByBuilding, companyAdmins, notifications, ct);
-                bp.AlertLevel = 2;
-                changed = true;
-                continue;
-            }
-
-            if (daysRemaining == 0 && currentLevel < 3)
-            {
-                await SendAlertAsync(db, bp, 3, NotificationType.PlanExpired,
-                    "Plan vence hoy",
-                    $"El plan \"{bp.Plan?.Name}\" del edificio \"{bp.Building?.Name}\" vence hoy. Dispone de {graceDays} día(s) de gracia.",
-                    usersByBuilding, companyAdmins, notifications, ct);
-                bp.AlertLevel = 3;
-                changed = true;
-                continue;
-            }
-
-            if (daysRemaining == -1 && currentLevel < 4)
-            {
-                await SendAlertAsync(db, bp, 4, NotificationType.PlanExpired,
-                    "Plan vencido — período de gracia activo",
-                    $"El plan \"{bp.Plan?.Name}\" del edificio \"{bp.Building?.Name}\" está vencido. Restan {graceDays - 1} día(s) de gracia antes de la suspensión.",
-                    usersByBuilding, companyAdmins, notifications, ct);
-                bp.AlertLevel = 4;
-                changed = true;
-                continue;
-            }
-
-            if (daysRemaining <= -graceDays && currentLevel < 5)
-            {
-                // Suspend the plan
-                bp.IsActive = false;
-                bp.AlertLevel = 5;
-
-                await SendAlertAsync(db, bp, 5, NotificationType.PlanSuspended,
-                    "Acceso suspendido — plan vencido",
-                    $"El plan \"{bp.Plan?.Name}\" del edificio \"{bp.Building?.Name}\" ha sido suspendido por falta de pago. Contacte al administrador.",
-                    usersByBuilding, companyAdmins, notifications, ct);
-                changed = true;
-
-                logger.LogWarning(
-                    "BuildingPlan {Id} suspendido — edificio {Building}, plan {Plan}.",
-                    bp.Id, bp.Building?.Name, bp.Plan?.Name);
-            }
+            bp.AlertLevel = alert.Level;
         }
 
         if (notifications.Count > 0)
             db.Notifications.AddRange(notifications);
 
-        if (changed || notifications.Count > 0)
-        {
-            await db.SaveChangesAsync(ct);
-            logger.LogInformation(
-                "PlanExpiryService: {Notif} notificaciones enviadas, {Plans} planes actualizados.",
-                notifications.Count, plans.Count(x => x.AlertLevel.HasValue));
+        await db.SaveChangesAsync(ct);
 
-            foreach (var notification in notifications)
-                await pushDispatcher.NotifyUserAsync(notification.RecipientId, notification.Title, notification.Body, notification.EntityType, notification.EntityId, ct);
+        logger.LogInformation(
+            "PlanExpiryService: {Plans} planes con aviso nuevo, {Notif} notificaciones, {Mails} correos.",
+            pending.Count, notifications.Count, emails.Count);
+
+        // Los correos van despues de guardar para no avisar dos veces si el guardado falla; un correo que
+        // falle no frena a los demas.
+        foreach (var (email, subject, html) in emails)
+        {
+            try
+            {
+                await emailSender.SendAsync(email, subject, html, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "No se pudo enviar el aviso de plan a {Email}.", email);
+            }
         }
     }
 
-    private static Task SendAlertAsync(
-        CondoDbContext db,
-        BuildingPlan bp,
-        byte level,
-        NotificationType type,
-        string title,
-        string body,
-        Dictionary<Guid, List<ApplicationUser>> usersByBuilding,
-        List<ApplicationUser> companyAdmins,
-        List<Notification> notifications,
-        CancellationToken ct)
+    private static Guid? CompanyOf(BuildingPlan bp) =>
+        bp.Building?.CompanyId ?? bp.Building?.Condominium?.CompanyId;
+
+    /// <summary>Aviso que corresponde enviar hoy para el plan, o null si ya se mando o todavia no toca.</summary>
+    private static Alert? NextAlert(BuildingPlan bp, DateTime today)
     {
-        var companyId = bp.Building?.CompanyId ?? bp.Building?.Condominium?.CompanyId;
+        var plan = bp.Plan?.Name ?? "—";
+        var building = bp.Building?.Name ?? "—";
+        var graceDays = bp.Plan?.GracePeriodDays ?? 5;
+        var daysRemaining = (int)(bp.EndDate.Date - today).TotalDays;
+        var current = bp.AlertLevel ?? 0;
 
-        // Recipients = building-level users + company-level admins for this building's company
-        var recipients = new HashSet<Guid>();
+        Alert? alert;
 
-        if (usersByBuilding.TryGetValue(bp.BuildingId, out var buildingUsers))
-            foreach (var u in buildingUsers) recipients.Add(u.Id);
-
-        if (companyId.HasValue)
-            foreach (var u in companyAdmins.Where(u => u.CompanyId == companyId))
-                recipients.Add(u.Id);
-
-        foreach (var userId in recipients)
+        if (daysRemaining > 5)
         {
-            notifications.Add(new Notification
+            alert = null;
+        }
+        else if (daysRemaining > 1)
+        {
+            alert = new Alert(1, NotificationType.PlanExpiringSoon, "Plan próximo a vencer",
+                $"El plan \"{plan}\" del edificio \"{building}\" vence en {daysRemaining} días. Envíe el comprobante de pago desde \"Mi plan\".");
+        }
+        else if (daysRemaining == 1)
+        {
+            alert = new Alert(2, NotificationType.PlanExpiringSoon, "Plan vence mañana",
+                $"El plan \"{plan}\" del edificio \"{building}\" vence mañana. Asegúrese de tener el comprobante listo.");
+        }
+        else if (daysRemaining == 0)
+        {
+            alert = new Alert(3, NotificationType.PlanExpired, "Plan vence hoy",
+                $"El plan \"{plan}\" del edificio \"{building}\" vence hoy. Dispone de {graceDays} día(s) de gracia.");
+        }
+        else
+        {
+            var overdue = -daysRemaining;
+            var untilBlocked = PlanAccessPolicy.DaysUntilBlocked(bp.EndDate, graceDays, today);
+
+            alert = PlanAccessPolicy.GetPhase(bp.EndDate, graceDays, today) switch
             {
-                RecipientId = userId,
-                CompanyId = companyId ?? Guid.Empty,
-                Type = type,
-                Title = title,
-                Body = body,
-                IsRead = false,
-                EntityType = "BuildingPlan",
-                EntityId = bp.Id
-            });
+                PlanAccessPhase.Grace => new Alert(4, NotificationType.PlanExpired,
+                    "Plan vencido — período de gracia",
+                    $"El plan \"{plan}\" del edificio \"{building}\" está vencido. Quedan {PlanAccessPolicy.ReadOnlyStartsAtDay(graceDays) - overdue} día(s) de gracia antes de que el sistema pase a solo lectura."),
+                PlanAccessPhase.ReadOnly => new Alert(5, NotificationType.PlanSuspended,
+                    "Sistema en solo lectura — plan vencido",
+                    $"Terminó el período de gracia del plan \"{plan}\" del edificio \"{building}\". El sistema quedó en modo consulta: solo puede enviar el comprobante de pago desde \"Mi plan\". En {untilBlocked} día(s) se bloqueará todo el acceso."),
+                _ => new Alert(6, NotificationType.PlanSuspended,
+                    "Acceso bloqueado — plan vencido",
+                    $"El acceso al edificio \"{building}\" está bloqueado por plan vencido (\"{plan}\"). Se habilita cuando se apruebe el pago: envíe el comprobante desde \"Mi plan\".")
+            };
         }
 
-        return Task.CompletedTask;
+        return alert is not null && alert.Level > current ? alert : null;
+    }
+
+    private static string BuildEmailHtml(ApplicationUser user, BuildingPlan bp, Alert alert)
+    {
+        string E(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
+
+        return $"""
+            <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1f2937">
+              <h2 style="color:#1385b6;margin:0 0 12px">{E(alert.Title)}</h2>
+              <p>Hola {E(user.FirstName ?? user.FullName)},</p>
+              <p>{E(alert.Body)}</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Edificio</td><td><strong>{E(bp.Building?.Name)}</strong></td></tr>
+                <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Plan</td><td><strong>{E(bp.Plan?.Name)}</strong></td></tr>
+                <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Vencimiento</td><td><strong>{bp.EndDate:dd/MM/yyyy}</strong></td></tr>
+              </table>
+              <p>Para regularizarlo ingrese a CONDOPY, sección <strong>Mi plan</strong>, y envíe el comprobante de pago.</p>
+              <p style="color:#6b7280;font-size:12px;margin-top:24px">Este es un aviso automático de CONDOPY.</p>
+            </div>
+            """;
     }
 }

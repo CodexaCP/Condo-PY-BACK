@@ -86,6 +86,7 @@ app.UseCors("frontend");
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<PlanRestrictionMiddleware>();
 app.MapControllers();
 
 using (var scope = app.Services.CreateScope())

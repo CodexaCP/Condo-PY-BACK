@@ -33,7 +33,7 @@ public class BuildingPlanPaymentsController(
 
         if (!tenantContext.IsSuperAdmin)
         {
-            var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+            var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
             if (accessibleIds.Count == 0) return Ok(Array.Empty<BuildingPlanPaymentDto>());
             query = query.Where(x => x.BuildingPlan != null && accessibleIds.Contains(x.BuildingPlan.BuildingId));
         }
@@ -64,7 +64,7 @@ public class BuildingPlanPaymentsController(
 
         if (!tenantContext.IsSuperAdmin)
         {
-            var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+            var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
             if (payment.BuildingPlan is null || !accessibleIds.Contains(payment.BuildingPlan.BuildingId))
                 return Forbid();
         }
@@ -95,11 +95,11 @@ public class BuildingPlanPaymentsController(
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.BuildingPlanId, ct);
 
         if (bp is null) return BadRequest("Asignación de plan no encontrada.");
+        // Con el plan en solo lectura o bloqueado el pago es justamente lo unico que se puede hacer.
         if (bp.IsArchived) return BadRequest("No se puede realizar un pago sobre un plan archivado.");
-        if (!bp.IsActive) return BadRequest("No se puede realizar un pago sobre un plan suspendido.");
 
         // Check access
-        var accessibleIds = await accessScopeService.GetAccessibleBuildingIdsAsync(ct);
+        var accessibleIds = await accessScopeService.GetAllAccessibleBuildingIdsAsync(ct);
         if (!accessibleIds.Contains(bp.BuildingId))
             return Forbid();
 
@@ -152,11 +152,13 @@ public class BuildingPlanPaymentsController(
             return BadRequest("Solo se pueden aprobar pagos en estado Pendiente.");
 
         var bp = await dbContext.BuildingPlans
+            .Include(x => x.Plan)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == payment.BuildingPlanId, ct);
 
         if (bp is null) return BadRequest("Asignación de plan no encontrada.");
 
         var now = DateTime.UtcNow;
+        var wasExpired = bp.EndDate.Date < now.Date;
 
         // Approve payment
         payment.Status = BuildingPlanPaymentStatus.Approved;
@@ -169,12 +171,30 @@ public class BuildingPlanPaymentsController(
         bp.PaidById = payment.SubmittedById;
 
         // If renewal dates are set, activate them (swap dates, clear renewal fields)
+        var periodMoved = false;
         if (bp.RenewalStartDate.HasValue && bp.RenewalEndDate.HasValue)
         {
             bp.StartDate = bp.RenewalStartDate.Value;
             bp.EndDate = bp.RenewalEndDate.Value;
             bp.RenewalStartDate = null;
             bp.RenewalEndDate = null;
+            periodMoved = true;
+        }
+        else if (wasExpired && bp.Plan is { IsDefault: false })
+        {
+            // Plan pago vencido y sin renovacion programada: el pago lo rehabilita por un ciclo de cobro completo
+            // contado desde hoy. El plan gratuito no se renueva solo: hay que asignarle uno pago.
+            bp.StartDate = now.Date;
+            bp.EndDate = now.Date.AddMonths((int)bp.Plan.BillingCycle);
+            periodMoved = true;
+        }
+
+        // Al mover el periodo se levanta la restriccion (la etapa se calcula por fechas) y arrancan de cero
+        // los avisos de vencimiento del periodo nuevo.
+        if (periodMoved)
+        {
+            bp.IsActive = true;
+            bp.AlertLevel = null;
         }
 
         await dbContext.SaveChangesAsync(ct);

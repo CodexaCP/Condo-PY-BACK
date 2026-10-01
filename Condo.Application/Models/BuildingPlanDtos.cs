@@ -65,6 +65,9 @@ public class BuildingPlanDto
     public string Status { get; set; } = string.Empty;
     public int DaysUntilExpiry { get; set; }
 
+    // Dias que quedan antes del bloqueo total (solo con el plan vencido); null si el plan esta vigente.
+    public int? DaysUntilBlocked { get; set; }
+
     public bool HasPendingPayment { get; set; }
 }
 
@@ -81,4 +84,7 @@ public class BuildingPlanSummaryDto
     public bool IsActive { get; set; }
     public string Status { get; set; } = string.Empty;
     public int DaysUntilExpiry { get; set; }
+
+    // Dias que quedan antes del bloqueo total (solo con el plan vencido); null si el plan esta vigente.
+    public int? DaysUntilBlocked { get; set; }
 }
