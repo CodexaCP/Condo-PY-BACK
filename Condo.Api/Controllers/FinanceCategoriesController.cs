@@ -121,8 +121,14 @@ public class FinanceCategoriesController(
                 return BadRequest("Este rubro tiene subrubros: no se le puede asignar un rubro padre ni cambiar su tipo.");
             }
 
+            var newType = parent?.Type ?? request.Type;
+            if (newType != entity.Type && await HasBudgetAsync(entity.Id, cancellationToken))
+            {
+                return BadRequest("Este rubro tiene presupuesto cargado: no se le puede cambiar el tipo.");
+            }
+
             entity.ParentId = parent?.Id;
-            entity.Type = parent?.Type ?? request.Type;
+            entity.Type = newType;
         }
 
         entity.Code = request.Code.Trim();
@@ -159,7 +165,13 @@ public class FinanceCategoriesController(
             return BadRequest("El rubro tiene subrubros. Eliminá o movés primero sus subrubros.");
         }
 
-        // Todavia no hay movimientos ni presupuesto que lo usen. Desde las fases 2 y 3 un rubro usado solo se podra desactivar.
+        // Un rubro con presupuesto cargado solo se puede desactivar. (Los gastos y cobros no se enlazan al rubro: el libro los
+        // clasifica por la clave de la plantilla, asi que borrar un rubro propio no deja movimientos huerfanos.)
+        if (await HasBudgetAsync(entity.Id, cancellationToken))
+        {
+            return BadRequest("El rubro tiene presupuesto cargado: pasalo a cero o desactivalo.");
+        }
+
         entity.IsDeleted = true;
         await Db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -225,6 +237,12 @@ public class FinanceCategoriesController(
             {
                 return (BadRequest("El rubro padre está desactivado."), null);
             }
+
+            // Un rubro con presupuesto no puede pasar a ser un grupo: el presupuesto se carga en los subrubros.
+            if ((current is null || current.ParentId != parent.Id) && await HasBudgetAsync(parent.Id, cancellationToken))
+            {
+                return (BadRequest("El rubro padre tiene presupuesto cargado: pasalo a cero antes de agregarle subrubros."), null);
+            }
         }
 
         var upperCode = code.ToUpper();
@@ -239,6 +257,9 @@ public class FinanceCategoriesController(
 
         return (null, parent);
     }
+
+    private Task<bool> HasBudgetAsync(Guid categoryId, CancellationToken cancellationToken) =>
+        Db.BudgetLines.AnyAsync(x => !x.IsDeleted && x.CategoryId == categoryId && x.Amount != 0m, cancellationToken);
 
     private static string? NormalizeExternalCode(string? value)
     {

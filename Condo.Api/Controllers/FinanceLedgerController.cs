@@ -8,9 +8,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Condo.Api.Controllers;
 
 /// <summary>
-/// Libro del modulo "Finanzas del edificio" (fase 2): saldos por cuenta, movimientos, flujo de caja y tablero. Todo es de
-/// consulta (lo ven los cuatro roles administrativos con acceso al edificio) y se arma al vuelo con los cobros, gastos e
-/// ingresos existentes, hasta hoy y desde la fecha de arranque. Exige la configuracion inicial completa.
+/// Libro del modulo "Finanzas del edificio" (fases 2 y 3): saldos por cuenta, movimientos, flujo de caja, tablero y libro del
+/// fondo de reserva. Todo es de consulta (lo ven los cuatro roles administrativos con acceso al edificio) y se arma al vuelo con
+/// los cobros, gastos e ingresos existentes, hasta hoy y desde la fecha de arranque. Exige la configuracion inicial completa.
 /// </summary>
 [Route("api/finance")]
 public class FinanceLedgerController(
@@ -18,10 +18,9 @@ public class FinanceLedgerController(
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
     FinanceModuleGate gate,
-    FinanceLedgerService ledger) : FinanceControllerBase(dbContext, accessScope, tenantContext, gate)
+    FinanceLedgerService ledgerService,
+    FinanceBudgetService budgets) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
-    public const string SetupIncompleteCode = "finance_setup_incomplete";
-
     [HttpGet("balances")]
     public async Task<ActionResult<FinanceBalancesDto>> GetBalances(
         [FromQuery] Guid buildingId, [FromQuery] DateOnly? asOf, CancellationToken cancellationToken)
@@ -34,7 +33,7 @@ public class FinanceLedgerController(
 
         var today = FinancePeriods.Today();
         var cutoff = asOf is null || asOf.Value > today ? today : asOf.Value;
-        var buckets = await ledger.GetBucketsAsync(ctx!, ctx!.StartDate, cutoff, cancellationToken);
+        var buckets = await Ledger.GetBucketsAsync(ctx!, ctx!.StartDate, cutoff, cancellationToken);
 
         return Ok(FinanceReportBuilder.BuildBalances(ctx, buckets, cutoff, ctx.Resolved.DefaultId));
     }
@@ -87,14 +86,14 @@ public class FinanceLedgerController(
             return BadRequest("El rubro no existe en este edificio.");
         }
 
-        var rows = await ledger.GetRowsAsync(ctx, begin, end, cancellationToken);
+        var rows = await Ledger.GetRowsAsync(ctx, begin, end, cancellationToken);
 
         // Saldo del alcance filtrado al comienzo del rango (solo cuando no se filtra por rubro ni por sentido).
         decimal? opening = null;
         if (!categoryId.HasValue && !direction.HasValue)
         {
             var before = begin > ctx.StartDate
-                ? await ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken)
+                ? await Ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken)
                 : [];
 
             decimal Net(IEnumerable<LedgerBucket> b) => b.Sum(x => x.Direction == LedgerDirection.In ? x.Amount : -x.Amount);
@@ -131,7 +130,7 @@ public class FinanceLedgerController(
         var monthStart = ResolveMonth(year, month, today, ctx!.StartDate, out var error);
         if (error is not null)
         {
-            return error;
+            return BadRequest(error);
         }
 
         var asOf = FinancePeriods.EndOfMonth(monthStart.Year, monthStart.Month);
@@ -140,12 +139,22 @@ public class FinanceLedgerController(
             asOf = today;
         }
 
-        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken);
+        var buckets = await Ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken);
         var monthBuckets = buckets.Where(b => b.Year == monthStart.Year && b.Month == monthStart.Month).ToList();
 
         var fiscalYear = FinancePeriods.FiscalYearOf(monthStart, ctx.FiscalYearStartMonth);
         var (fiscalStart, _) = FinancePeriods.FiscalYearRange(fiscalYear, ctx.FiscalYearStartMonth);
         var ytd = buckets.Where(b => new DateOnly(b.Year, b.Month, 1) >= fiscalStart).ToList();
+
+        // Fase 3: presupuesto del mes contra lo real (gastos cargados e ingresos cobrados) y fondo de reserva.
+        var actuals = await budgets.GetExpenseActualsAsync(ctx, fiscalStart, asOf, cancellationToken);
+        foreach (var kv in FinanceBudgetService.IncomeActuals(ctx, buckets.Where(b => new DateOnly(b.Year, b.Month, 1) >= fiscalStart)))
+        {
+            actuals[kv.Key] = actuals.GetValueOrDefault(kv.Key) + kv.Value;
+        }
+
+        var cells = await budgets.GetCellsAsync(buildingId, fiscalStart, monthStart, cancellationToken);
+        var vsActual = FinanceBudgetCalculator.BuildVsActual(ctx, monthStart.Year, monthStart.Month, asOf, cells, actuals);
 
         return Ok(new FinanceDashboardDto
         {
@@ -162,7 +171,9 @@ public class FinanceLedgerController(
             FiscalYear = fiscalYear,
             FiscalYearStart = fiscalStart,
             FiscalYearToDate = FinanceReportBuilder.Flow(ytd),
-            Series = FinanceReportBuilder.Series(ctx, buckets, monthStart.Year, monthStart.Month)
+            Series = FinanceReportBuilder.Series(ctx, buckets, monthStart.Year, monthStart.Month),
+            Budget = FinanceBudgetCalculator.Summarize(vsActual, cells.Any(c => c.Amount != 0m)),
+            ReserveFund = FinanceReportBuilder.ReserveSummary(ctx, buckets, monthStart.Year, monthStart.Month)
         });
     }
 
@@ -186,51 +197,60 @@ public class FinanceLedgerController(
         var (_, fiscalEnd) = FinancePeriods.FiscalYearRange(fy, ctx!.FiscalYearStartMonth);
         var asOf = fiscalEnd > today ? today : fiscalEnd;
 
-        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken);
+        var buckets = await Ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken);
         return Ok(FinanceReportBuilder.CashFlow(ctx, buckets, fy, asOf));
     }
 
-    // ─── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────────
-
-    // Modulo disponible + configuracion inicial completa. Si falta la configuracion responde 409 con un mensaje claro.
-    private async Task<(ActionResult? Denied, LedgerContext? Context)> RequireLedgerAsync(Guid buildingId, CancellationToken cancellationToken)
+    // Libro del fondo de reserva: aportes y usos mes a mes desde el arranque, y los movimientos del rango (por defecto, el ultimo ano).
+    [HttpGet("reserve-fund")]
+    public async Task<ActionResult<FinanceReserveFundDto>> GetReserveFund(
+        [FromQuery] Guid buildingId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken cancellationToken)
     {
-        var denied = await RequireModuleAsync(buildingId, write: false, cancellationToken);
+        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
         if (denied is not null)
         {
-            return (denied, null);
+            return denied;
         }
 
-        var ctx = await ledger.LoadContextAsync(buildingId, cancellationToken);
-        if (ctx is null)
+        var today = FinancePeriods.Today();
+        var end = to is null || to.Value > today ? today : to.Value;
+        var begin = from ?? end.AddDays(-364);
+        if (begin < ctx!.StartDate)
         {
-            return (StatusCode(StatusCodes.Status409Conflict, new
-            {
-                error = SetupIncompleteCode,
-                message = "Completá la configuración inicial de Finanzas del edificio (fecha de arranque, cuentas y plan de cuentas) para ver los saldos y movimientos."
-            }), null);
+            begin = ctx.StartDate;
         }
 
-        return (null, ctx);
-    }
-
-    // Mes pedido (por defecto, el actual), acotado entre el mes de arranque y el mes actual.
-    private ActionResult? ResolveMonthError(int? year, int? month) =>
-        year is < 2000 or > 2100 || month is < 1 or > 12 ? BadRequest("El año o el mes no son válidos.") : null;
-
-    private DateOnly ResolveMonth(int? year, int? month, DateOnly today, DateOnly start, out ActionResult? error)
-    {
-        error = ResolveMonthError(year, month);
-        if (error is not null)
+        if (begin > end)
         {
-            return today;
+            return BadRequest("La fecha desde no puede ser posterior a la fecha hasta (y el libro empieza en la fecha de arranque).");
         }
 
-        var requested = new DateOnly(year ?? today.Year, month ?? today.Month, 1);
-        var current = new DateOnly(today.Year, today.Month, 1);
-        var first = new DateOnly(start.Year, start.Month, 1);
-        if (requested > current) requested = current;
-        if (requested < first) requested = first;
-        return requested;
+        if (end.DayNumber - begin.DayNumber > FinanceLedgerService.MaxRowsRangeDays)
+        {
+            return BadRequest($"El rango no puede superar los {FinanceLedgerService.MaxRowsRangeDays} días.");
+        }
+
+        var percentage = await Db.Buildings.AsNoTracking()
+            .Where(x => x.Id == buildingId)
+            .Select(x => x.ReserveFundPercentage)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var buckets = await Ledger.GetBucketsAsync(ctx, ctx.StartDate, today, cancellationToken);
+        var fund = FinanceReportBuilder.FundAccountOf(ctx);
+
+        var movements = new FinanceMovementsPageDto { From = begin, To = end, Page = 1, PageSize = 500 };
+        if (fund is not null)
+        {
+            var rows = await Ledger.GetRowsAsync(ctx, begin, end, cancellationToken);
+            var before = begin > ctx.StartDate
+                ? await Ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken)
+                : [];
+            var opening = fund.OpeningBalance + before.Where(b => b.AccountId == fund.Id)
+                .Sum(b => b.Direction == LedgerDirection.In ? b.Amount : -b.Amount);
+
+            movements = FinanceReportBuilder.MovementsPage(ctx, rows, begin, end, fund.Id, false, null, null, true, 1, 500, opening);
+        }
+
+        return Ok(FinanceReportBuilder.ReserveFund(ctx, buckets, today, percentage, movements));
     }
 }

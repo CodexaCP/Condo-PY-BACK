@@ -52,6 +52,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<FinanceSettings> FinanceSettings => Set<FinanceSettings>();
     public DbSet<FinancialAccount> FinancialAccounts => Set<FinancialAccount>();
     public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
+    public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -923,6 +924,19 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<LedgerCategory>()
             .HasOne(x => x.Parent).WithMany(x => x.Children)
             .HasForeignKey(x => x.ParentId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BudgetLine>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BudgetLine>().HasIndex(x => new { x.BuildingId, x.CategoryId, x.Year, x.Month }).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<BudgetLine>().HasIndex(x => new { x.BuildingId, x.Year, x.Month });
+        modelBuilder.Entity<BudgetLine>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BudgetLine>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BudgetLine>()
+            .HasOne(x => x.Category).WithMany()
+            .HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }

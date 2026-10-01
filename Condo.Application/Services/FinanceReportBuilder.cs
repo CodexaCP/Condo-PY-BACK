@@ -200,6 +200,91 @@ public static class FinanceReportBuilder
         };
     }
 
+    // ── Fondo de reserva ──────────────────────────────────────────────────────
+
+    // Cuenta del fondo: la activa o, si no hay, cualquiera de ese tipo.
+    public static FinancialAccount? FundAccountOf(LedgerContext ctx) =>
+        ctx.Accounts.FirstOrDefault(a => a.Type == FinancialAccountType.ReserveFund && a.IsActive)
+        ?? ctx.Accounts.FirstOrDefault(a => a.Type == FinancialAccountType.ReserveFund);
+
+    /// <summary>
+    /// Libro del fondo de reserva: aportes (cobrados a los propietarios y, si el edificio los manda al fondo, los ingresos propios) y
+    /// usos (gastos pagados por el fondo), mes a mes desde la fecha de arranque, con el saldo de apertura de su cuenta.
+    /// <paramref name="buckets"/> debe cubrir desde la fecha de arranque hasta <paramref name="asOf"/>.
+    /// </summary>
+    public static FinanceReserveFundDto ReserveFund(
+        LedgerContext ctx, IReadOnlyCollection<LedgerBucket> buckets, DateOnly asOf, decimal? reservePercentage, FinanceMovementsPageDto movements)
+    {
+        var fund = FundAccountOf(ctx);
+        var dto = new FinanceReserveFundDto
+        {
+            BuildingId = ctx.BuildingId,
+            BuildingName = ctx.BuildingName,
+            HasFundAccount = fund is not null,
+            AccountId = fund?.Id,
+            AccountName = fund?.Name ?? string.Empty,
+            FinanceStartDate = ctx.StartDate,
+            AsOf = asOf,
+            ReserveFundPercentage = reservePercentage,
+            Movements = movements
+        };
+
+        if (fund is null)
+        {
+            return dto;
+        }
+
+        var own = buckets.Where(b => b.AccountId == fund.Id).ToList();
+        var months = new List<FinanceReserveMonthDto>();
+        var running = fund.OpeningBalance;
+        var cursor = new DateOnly(ctx.StartDate.Year, ctx.StartDate.Month, 1);
+        var last = new DateOnly(asOf.Year, asOf.Month, 1);
+
+        while (cursor <= last)
+        {
+            var inMonth = own.Where(b => b.Year == cursor.Year && b.Month == cursor.Month).ToList();
+            var contributions = inMonth.Where(b => b.Direction == LedgerDirection.In).Sum(b => b.Amount);
+            var uses = inMonth.Where(b => b.Direction == LedgerDirection.Out).Sum(b => b.Amount);
+            months.Add(new FinanceReserveMonthDto
+            {
+                Year = cursor.Year,
+                Month = cursor.Month,
+                Opening = running,
+                Contributions = contributions,
+                Uses = uses,
+                Closing = running + contributions - uses
+            });
+            running += contributions - uses;
+            cursor = cursor.AddMonths(1);
+        }
+
+        dto.OpeningBalance = fund.OpeningBalance;
+        dto.Contributions = own.Where(b => b.Direction == LedgerDirection.In).Sum(b => b.Amount);
+        dto.Uses = own.Where(b => b.Direction == LedgerDirection.Out).Sum(b => b.Amount);
+        dto.Balance = fund.OpeningBalance + dto.Contributions - dto.Uses;
+        dto.Months = months;
+        return dto;
+    }
+
+    public static FinanceReserveSummaryDto ReserveSummary(LedgerContext ctx, IReadOnlyCollection<LedgerBucket> buckets, int year, int month)
+    {
+        var fund = FundAccountOf(ctx);
+        if (fund is null)
+        {
+            return new FinanceReserveSummaryDto();
+        }
+
+        var own = buckets.Where(b => b.AccountId == fund.Id).ToList();
+        var inMonth = own.Where(b => b.Year == year && b.Month == month).ToList();
+        return new FinanceReserveSummaryDto
+        {
+            HasFundAccount = true,
+            Balance = fund.OpeningBalance + own.Where(b => b.Direction == LedgerDirection.In).Sum(b => b.Amount) - own.Where(b => b.Direction == LedgerDirection.Out).Sum(b => b.Amount),
+            MonthContributions = inMonth.Where(b => b.Direction == LedgerDirection.In).Sum(b => b.Amount),
+            MonthUses = inMonth.Where(b => b.Direction == LedgerDirection.Out).Sum(b => b.Amount)
+        };
+    }
+
     // ── Listado de movimientos ────────────────────────────────────────────────
 
     /// <summary>

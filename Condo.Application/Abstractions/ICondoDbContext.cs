@@ -53,6 +53,7 @@ public interface ICondoDbContext
     DbSet<FinanceSettings> FinanceSettings { get; }
     DbSet<FinancialAccount> FinancialAccounts { get; }
     DbSet<LedgerCategory> LedgerCategories { get; }
+    DbSet<BudgetLine> BudgetLines { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

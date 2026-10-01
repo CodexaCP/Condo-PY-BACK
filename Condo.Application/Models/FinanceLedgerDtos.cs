@@ -119,6 +119,9 @@ public class FinanceDashboardDto
     public DateOnly FiscalYearStart { get; set; }
     public FinanceFlowDto FiscalYearToDate { get; set; } = new();
     public IReadOnlyList<FinanceMonthPointDto> Series { get; set; } = [];
+    // Fase 3: presupuesto del mes contra lo real y fondo de reserva.
+    public FinanceBudgetSummaryDto Budget { get; set; } = new();
+    public FinanceReserveSummaryDto ReserveFund { get; set; } = new();
 }
 
 public class FinanceCashFlowLineDto
