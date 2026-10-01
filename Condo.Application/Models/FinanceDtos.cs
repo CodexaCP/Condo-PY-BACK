@@ -39,6 +39,7 @@ public class FinanceSettingsDto
     public string BuildingName { get; set; } = string.Empty;
     public DateOnly? FinanceStartDate { get; set; }
     public int FiscalYearStartMonth { get; set; }
+    public Guid? DefaultAccountId { get; set; }
     public bool SetupCompleted { get; set; }
     public DateTime? SetupCompletedAtUtc { get; set; }
 

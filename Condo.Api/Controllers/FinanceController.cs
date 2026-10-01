@@ -212,6 +212,54 @@ public class FinanceController(
         return Ok(await BuildSettingsDtoAsync(buildingId, settings, cancellationToken));
     }
 
+    // Cuenta por defecto del libro (fase 2): donde se asientan los cobros que no son en efectivo, los ingresos y los gastos.
+    [HttpPut("settings/default-account")]
+    public async Task<ActionResult<FinanceSettingsDto>> SetDefaultAccount(
+        [FromQuery] Guid buildingId, [FromBody] FinanceDefaultAccountRequest request, CancellationToken cancellationToken)
+    {
+        var denied = await RequireModuleAsync(buildingId, write: true, cancellationToken);
+        if (denied is not null)
+        {
+            return denied;
+        }
+
+        if (request.AccountId.HasValue)
+        {
+            var account = await Db.FinancialAccounts.AsNoTracking().FirstOrDefaultAsync(
+                x => !x.IsDeleted && x.Id == request.AccountId.Value && x.BuildingId == buildingId, cancellationToken);
+            if (account is null)
+            {
+                return BadRequest("La cuenta no existe en este edificio.");
+            }
+
+            if (!account.IsActive)
+            {
+                return BadRequest("La cuenta por defecto debe estar activa.");
+            }
+
+            if (account.Type == FinancialAccountType.ReserveFund)
+            {
+                return BadRequest("La cuenta por defecto es una caja o un banco; el fondo de reserva tiene su propia cuenta.");
+            }
+        }
+
+        var settings = await GetOrCreateSettingsAsync(buildingId, cancellationToken);
+        if (settings is null)
+        {
+            return BadRequest(NoCompanyMessage);
+        }
+
+        settings.DefaultAccountId = request.AccountId;
+
+        var conflict = await SaveOrConflictAsync(cancellationToken);
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        return Ok(await BuildSettingsDtoAsync(buildingId, settings, cancellationToken));
+    }
+
     // Marca el asistente como completo. Pide fecha de arranque, al menos una caja o banco activa y un plan de cuentas.
     [HttpPost("settings/complete")]
     public async Task<ActionResult<FinanceSettingsDto>> CompleteSetup([FromQuery] Guid buildingId, CancellationToken cancellationToken)
@@ -315,6 +363,7 @@ public class FinanceController(
             BuildingName = building.Name,
             FinanceStartDate = settings?.FinanceStartDate,
             FiscalYearStartMonth = settings?.FiscalYearStartMonth ?? 1,
+            DefaultAccountId = settings?.DefaultAccountId,
             SetupCompleted = settings?.SetupCompleted ?? false,
             SetupCompletedAtUtc = settings?.SetupCompletedAtUtc,
             ReserveFundPercentage = building.ReserveFundPercentage,

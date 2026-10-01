@@ -15,6 +15,10 @@ public class FinanceSettings : CompanyScopedEntity
     // Mes (1-12) en que empieza el ejercicio.
     public int FiscalYearStartMonth { get; set; } = 1;
 
+    // Cuenta (caja o banco) donde el libro asienta lo que no trae cuenta propia: cobros que no son en efectivo, ingresos y gastos
+    // del edificio. Nula = el libro usa el unico banco activo, si hay uno solo.
+    public Guid? DefaultAccountId { get; set; }
+
     public bool SetupCompleted { get; set; }
     public DateTime? SetupCompletedAtUtc { get; set; }
     public Guid? SetupCompletedByUserId { get; set; }
