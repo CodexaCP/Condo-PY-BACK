@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fases 1 y 2 — **hechas y desplegadas** · Fases 3, 4, 5 y 6 — **hechas y commiteadas, sin desplegar** (publicar; explorar y reservar; pago y revisión; acreditación al saldo, extracto de la cuenta aparte con Excel, ajustes y reversa: API con 354 pruebas verdes en `dotnet test Condo.Tests`, app, web). **Solo la fase 5 trae migración (`MarketplacePaymentAlerts`); la 6 no.** · **Paso previo a la 7 (menús según el acceso real): hecho** (ver 2.1 abajo; sin migración) · Fases 7 a 9 — pendientes.
+> Fases 1 y 2 — **hechas y desplegadas** · Fases 3, 4, 5, 6 y 7 — **hechas y commiteadas, sin desplegar** (publicar; explorar y reservar; pago y revisión; acreditación al saldo, extracto de la cuenta aparte con Excel, ajustes y reversa: API con 462 pruebas verdes en `dotnet test Condo.Tests`, app, web). **Traen migración la 5 (`MarketplacePaymentAlerts`) y la 7 (`MarketplaceCancellationsAndClaims`, con su `.sql`); la 6 no.** · **Paso previo a la 7 (menús según el acceso real): hecho** (ver 2.1 abajo; sin migración) · Fases 8 y 9 — pendientes.
 
 ---
 
@@ -117,7 +117,19 @@ Cada fase indica: objetivo, trabajo por repo, migración, pruebas, **criterio de
 - **Pruebas:** 7 nuevas en `MarketplaceScopeTests` (alcance, módulo apagado, plan sin marketplace, rol sin cuenta, SuperAdmin, otra empresa, usuario final).
 - **Pendiente conocido (no del marketplace):** las rutas de la web no tienen guard por rol/módulo; ocultar el menú no impide abrir la URL a mano (el backend igual responde 403 y las pantallas del marketplace muestran el aviso).
 
-### Fase 7 — Cancelaciones, reembolsos, reclamos y aviso de inicio  *(BACK + APP + WEB)*
+### Fase 7 — Cancelaciones, reembolsos, reclamos y aviso de inicio  *(BACK + APP + WEB)* — **HECHA (2026-10-02)**
+**Lo construido** (migración `MarketplaceCancellationsAndClaims` + `.sql`; entidades `MarketplaceRefund`, `MarketplaceClaim`, `MarketplaceOwnerDebt`; 4 campos de aviso de inicio en la reserva):
+- **Cancelar una reserva pagada:** el comprador solo antes del inicio (se devuelve la base; la comisión no); el propietario con motivo obligatorio (se devuelve todo y asume la comisión: de su saldo a favor, consumiendo lotes, y lo que falte queda como **deuda por gestión**, que se descuenta de su próxima acreditación **en el mismo edificio**). Libera el horario, no acredita nada. `GET …/cancel-preview` calcula en el servidor lo que se avisa antes de confirmar. Cancelar sin pagar sigue igual (sin reembolso).
+- **Reembolso pendiente** (único por reserva): lista del Encargado, "marcar devuelto" (una sola vez; asienta `RefundOut` en la cuenta), alerta única a las 72 h. El comprador ve "te lo devuelven hasta…".
+- **Reclamo** ("Reportar un problema"): comprador o propietario, desde que empieza la reserva hasta 24 h después de su fin, mientras no se haya acreditado; retiene la acreditación (`Held`); un reclamo abierto por reserva. El Encargado resuelve **a favor del propietario** (se libera y se acredita) o **a favor del comprador** (decisión de Tony 2026-10-02: se devuelve todo, el propietario asume la comisión como si hubiera cancelado; una reserva en curso pasa a Cancelada).
+- **Aviso de inicio:** el proceso de fondo avisa al comprador al empezar; "Sí, voy" / "No la voy a usar" (con motivo) solo se registra. El Encargado lo ve al resolver un reclamo.
+- **Reservas recibidas:** el propietario ve quién reservó (nombre y unidad), lo que va a recibir y puede cancelar o reportar (`GET reservations/on-my-listings`).
+- **Cuenta aparte:** nuevo movimiento `CancellationFee` (comisión descontada del saldo del propietario), y el resumen suma `PendingRefunds` (se resta de la ganancia de la gestión), `OwnerDebtsPending` y `TotalCancellationFees`; el Excel los incluye.
+- **WEB:** pantalla «Reembolsos y reclamos» (reembolsos, reclamos, deudas por gestión) en el menú solo donde el módulo está disponible. **APP:** botones y avisos en «Mis reservas», solapa «Recibidas», y en la sección del Encargado las solapas Pagos / Reembolsos / Reclamos; los avisos abren la lista correcta.
+- **Pruebas:** 108 nuevas (462 en total) sobre reglas puras, cancelaciones, reembolsos, reclamos, deudas, aviso de inicio, aislamiento y garantías de la base.
+- **Límites conocidos:** solo cancela el propietario que figuraba al crear la reserva (si dejó de ser el principal, la vía es el reclamo); un propietario/Encargado no cancela una reserva "en revisión" (se confirma o rechaza); el Operador revisa y devuelve pero no ve la cuenta.
+
+**Plan original de la fase:**
 - Cancelación del comprador (antes del inicio; comisión no se devuelve; aviso previo), del propietario (motivo; devolución total; deuda por gestión), registro de **reembolso pendiente** con lista del Encargado, marca "devuelto" y alerta a 72 h; movimiento `RefundOut`.
 - **Reclamo** ("Reportar un problema", 24 h tras el fin) que retiene la acreditación y avisa al Encargado, que lo resuelve.
 - **Aviso de inicio** ("Sí, voy" / "No la voy a usar" con motivo, sin devolución automática).
