@@ -55,3 +55,12 @@ public class MarketplaceListingDto
     public int ActiveReservations { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
+
+// Edificio del usuario con el marketplace efectivamente disponible (habilitado y con plan que lo incluye).
+public class MarketplaceBuildingDto
+{
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    // Es propietario principal de al menos una unidad del edificio: puede publicar.
+    public bool CanPublish { get; set; }
+}

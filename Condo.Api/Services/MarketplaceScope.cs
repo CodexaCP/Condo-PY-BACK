@@ -16,6 +16,8 @@ public sealed record MarketplaceAccess(MarketplaceBuildingContext? Context, stri
 
 public sealed record MarketplaceOwnedUnit(Guid UnitId, string Code, string Floor);
 
+public sealed record MarketplaceAvailableBuilding(Guid BuildingId, string BuildingName, bool CanPublish);
+
 /// <summary>
 /// Aislamiento del marketplace: de que edificios puede ver o publicar el usuario. NUNCA se confia en el edificio que
 /// manda el cliente: se valida contra la relacion real del usuario (propietario o residente de una unidad del edificio, o
@@ -62,6 +64,53 @@ public class MarketplaceScope(
             .ToListAsync(cancellationToken));
 
         return result;
+    }
+
+    /// <summary>
+    /// Edificios del usuario con el marketplace disponible (habilitado y con plan que lo incluye), dentro de su empresa.
+    /// Sirve para mostrar u ocultar el acceso y para elegir el edificio: se opera con uno a la vez.
+    /// </summary>
+    public async Task<List<MarketplaceAvailableBuilding>> GetAvailableBuildingsAsync(CancellationToken cancellationToken)
+    {
+        var memberIds = (await GetMemberBuildingIdsAsync(cancellationToken)).ToList();
+        if (memberIds.Count == 0)
+        {
+            return [];
+        }
+
+        var withPlan = await gate.PlansIncludingModuleAsync(memberIds, cancellationToken);
+        if (withPlan.Count == 0)
+        {
+            return [];
+        }
+
+        var buildings = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.MarketplaceEnabled && withPlan.Contains(x.Id))
+            .OrderBy(x => x.Name)
+            .Select(x => new
+            {
+                x.Id,
+                x.Name,
+                CompanyId = x.CompanyId ?? (x.Condominium != null ? x.Condominium.CompanyId : null)
+            })
+            .ToListAsync(cancellationToken);
+
+        var companyId = tenantContext.CompanyId;
+        if (!tenantContext.IsSuperAdmin && companyId.HasValue)
+        {
+            buildings = buildings.Where(x => x.CompanyId == companyId.Value).ToList();
+        }
+
+        var publishable = (await dbContext.UnitOwners
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsPrimary && x.OwnerId == tenantContext.UserId
+                            && x.Unit != null && !x.Unit.IsDeleted)
+                .Select(x => x.Unit!.BuildingId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        return buildings.Select(x => new MarketplaceAvailableBuilding(x.Id, x.Name, publishable.Contains(x.Id))).ToList();
     }
 
     /// <summary>

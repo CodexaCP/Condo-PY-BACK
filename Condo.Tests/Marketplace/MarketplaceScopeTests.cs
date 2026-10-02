@@ -320,4 +320,75 @@ public class MarketplaceScopeTests : IDisposable
 
         Assert.Equal(new HashSet<Guid> { _buildingA.Id, _buildingB.Id }, ids);
     }
+
+    // ── Edificios con el marketplace disponible (acceso en la app) ───────────
+
+    [Fact]
+    public async Task El_acceso_lista_solo_los_edificios_del_usuario_con_el_modulo_disponible()
+    {
+        var user = Login(_t.AddUser(_companyX), "Owner");
+        _t.AddOwner(_unitA, user, primary: true);
+        _t.AddResident(_unitB, user);
+        _t.EnableMarketplace(_buildingB, enabled: false);
+
+        var buildings = await Scope().GetAvailableBuildingsAsync(CancellationToken.None);
+
+        var only = Assert.Single(buildings);
+        Assert.Equal(_buildingA.Id, only.BuildingId);
+        Assert.Equal("Edificio A", only.BuildingName);
+        Assert.True(only.CanPublish);
+    }
+
+    [Fact]
+    public async Task Un_residente_ve_el_edificio_pero_no_puede_publicar()
+    {
+        var resident = Login(_t.AddUser(_companyX, UserRole.Resident), "Resident");
+        _t.AddResident(_unitA, resident);
+
+        var only = Assert.Single(await Scope().GetAvailableBuildingsAsync(CancellationToken.None));
+
+        Assert.False(only.CanPublish);
+    }
+
+    [Fact]
+    public async Task Un_copropietario_no_principal_no_puede_publicar()
+    {
+        Login(_t.AddUser(_companyX), "Owner");
+        var user = _t.Db.ApplicationUsers.OrderByDescending(x => x.CreatedAtUtc).First();
+        _t.AddOwner(_unitA, user, primary: false);
+
+        Assert.False(Assert.Single(await Scope().GetAvailableBuildingsAsync(CancellationToken.None)).CanPublish);
+    }
+
+    [Fact]
+    public async Task Sin_relacion_con_ningun_edificio_el_acceso_queda_vacio()
+    {
+        Login(_t.AddUser(_companyX), "Owner");
+
+        Assert.Empty(await Scope().GetAvailableBuildingsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Un_edificio_con_plan_sin_marketplace_no_aparece_en_el_acceso()
+    {
+        var companyZ = _t.AddCompany("Empresa Z");
+        var buildingZ = _t.AddBuilding(companyZ);
+        var unitZ = _t.AddUnit(buildingZ);
+        _t.AssignPlan(buildingZ, _t.AddUser(companyZ, UserRole.CompanyAdmin), includesMarketplace: false);
+        _t.EnableMarketplace(buildingZ);
+        var owner = Login(_t.AddUser(companyZ), "Owner");
+        _t.AddOwner(unitZ, owner);
+
+        Assert.Empty(await Scope().GetAvailableBuildingsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Si_el_token_dice_otra_empresa_el_acceso_queda_vacio()
+    {
+        var companyY = _t.AddCompany("Empresa Y");
+        var owner = Login(_t.AddUser(_companyX), "Owner", companyY);
+        _t.AddOwner(_unitA, owner);
+
+        Assert.Empty(await Scope().GetAvailableBuildingsAsync(CancellationToken.None));
+    }
 }
