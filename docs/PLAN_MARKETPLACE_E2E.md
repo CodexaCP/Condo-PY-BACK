@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fase 1 — en curso · Fases 2 a 9 — pendientes.
+> Fase 1 — **hecha y commiteada** (BACK `d38ae1e`, WEB `233c2ff`, migración `20261002172053_MarketplaceModuleBase`) · Fases 2 a 9 — pendientes.
 
 ---
 
