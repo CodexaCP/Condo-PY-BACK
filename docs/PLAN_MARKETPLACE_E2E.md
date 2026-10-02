@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fase 1 — **hecha y commiteada** (BACK `d38ae1e`, WEB `233c2ff`, migración `20261002172053_MarketplaceModuleBase`) · Fases 2 a 9 — pendientes.
+> Fase 1 — **hecha** (BACK `d38ae1e`, WEB `233c2ff`, migración `20261002172053_MarketplaceModuleBase`, ya desplegada) · Fase 2 — **hecha** (migración `20261002174215_MarketplaceCore`, 130 pruebas verdes con `dotnet test Condo.Tests`; falta aplicarla en el VPS) · Fases 3 a 9 — pendientes.
 
 ---
 
@@ -75,7 +75,7 @@ Cada fase indica: objetivo, trabajo por repo, migración, pruebas, **criterio de
 ### Fase 2 — Núcleo de dominio, reglas puras y pruebas  *(BACK)*
 **Objetivo:** el corazón del negocio, **sin pantallas**, con pruebas.
 - Proyecto **`Condo.Tests`** (xUnit; SQLite en memoria para índices únicos e idempotencia; arnés opcional contra SQL Server real por variable de entorno para concurrencia `Serializable`).
-- Entidades de la sección 1.1, enums de estados, configuración EF, migración `MarketplaceCore` + `.sql`.
+- Entidades del núcleo hasta la fase 6 (`MarketplaceListing`, `MarketplaceReservation`, `MarketplaceReservationSlot`, `MarketplacePayment`, `MarketplaceAccountMovement`, `MarketplaceEvent` y el campo `MarketplaceReservationId` en `OwnerCreditMovement`), enums de estados, configuración EF, migración `MarketplaceCore` + `.sql`. **`MarketplaceRefund`, `MarketplaceClaim` y `MarketplaceOwnerDebt` se crean en la fase 7, y `MarketplaceHandoverNote` en la fase 8**, cada una con su migración, para no diseñar tablas por adelantado.
 - Clases puras y probadas: `MarketplacePricing` (base = precio/hora × horas enteras; comisión sobre el total, **redondeo hacia arriba al guaraní**; neto propietario), `MarketplaceWindowRules` (desde/hasta en `:00`/`:30`, mismos minutos, horas enteras, futuro, cruce de medianoche), `MarketplaceStateMachine` (transiciones permitidas), generador de bloques de 30 min y solapamientos con límites semiabiertos (`19–22` no choca con `22–23`).
 - `MarketplaceScope` (visibilidad por edificio/empresa) y `MarketplaceAudit` (escritura en `MarketplaceEvent`).
 - **Pruebas:** cálculo (incl. redondeo), ventana, solapamientos, transiciones válidas/ inválidas, unicidad de bloques, aislamiento por empresa/edificio.
