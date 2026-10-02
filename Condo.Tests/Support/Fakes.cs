@@ -34,3 +34,10 @@ internal sealed class FakeAccessScope(FakeTenantContext tenant) : IAccessScopeSe
     public Task<bool> CanManageCompanyAsync(Guid companyId, CancellationToken cancellationToken) =>
         Task.FromResult(tenant.IsSuperAdmin || tenant.CompanyId == companyId);
 }
+
+// Envio de push de mentira: no manda nada, solo permite armar el PushDispatcher en las pruebas.
+internal sealed class NoopPushSender : IPushNotificationSender
+{
+    public Task SendAsync(string deviceToken, string title, string body, IDictionary<string, string>? data, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
+}

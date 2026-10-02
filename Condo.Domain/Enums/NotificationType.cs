@@ -23,5 +23,6 @@ public enum NotificationType
     SettlementPendingPresidentReview = 19,
     SettlementRejectedByPresident = 20,
     SettlementApprovedByPresident = 21,
-    ExpensePeriodUnpublished = 22
+    ExpensePeriodUnpublished = 22,
+    MarketplaceReservationExpired = 23
 }

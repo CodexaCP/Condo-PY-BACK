@@ -84,3 +84,15 @@ public static class MarketplaceStateMachine
         }
     }
 }
+
+/// <summary>Conjuntos de estados que usan varias partes del marketplace.</summary>
+public static class MarketplaceStatusSets
+{
+    // Reservas "vivas": ocupan horario. Las finales (vencida, cancelada, rechazada, completada) ya no.
+    public static readonly MarketplaceReservationStatus[] LiveReservations =
+    [
+        MarketplaceReservationStatus.PendingPayment,
+        MarketplaceReservationStatus.InReview,
+        MarketplaceReservationStatus.Confirmed
+    ];
+}

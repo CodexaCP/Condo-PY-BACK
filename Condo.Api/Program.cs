@@ -40,6 +40,8 @@ builder.Services.AddScoped<Condo.Api.Services.MarketplaceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceScope>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceAudit>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceListingService>();
+builder.Services.AddScoped<Condo.Api.Services.MarketplaceReservationService>();
+builder.Services.Configure<Condo.Api.Services.MarketplaceOptions>(builder.Configuration.GetSection("Marketplace"));
 builder.Services.AddScoped<Condo.Api.Services.FinanceLedgerService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceBudgetService>();
 builder.Services.AddScoped<Condo.Api.Services.MovementRubroResolver>();
@@ -48,6 +50,7 @@ builder.Services.AddScoped<Condo.Api.Services.FinancePlanCopier>();
 builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();
+builder.Services.AddHostedService<MarketplaceMaintenanceService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

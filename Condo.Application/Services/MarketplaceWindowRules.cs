@@ -24,6 +24,19 @@ public static class MarketplaceWindowRules
         return utc.Minute % SlotMinutes == 0 && utc.Ticks % TimeSpan.TicksPerMinute == 0;
     }
 
+    /// <summary>Primer bloque (en punto o y media) que empieza estrictamente despues del instante dado.</summary>
+    public static DateTime NextSlotAfter(DateTime value)
+    {
+        var utc = ToUtc(value);
+        var next = new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, DateTimeKind.Utc);
+        while (next <= utc)
+        {
+            next = next.AddMinutes(SlotMinutes);
+        }
+
+        return next;
+    }
+
     /// <summary>Intervalos semiabiertos [inicio, fin): se tocan en un extremo pero no se solapan.</summary>
     public static bool Overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) =>
         ToUtc(aStart) < ToUtc(bEnd) && ToUtc(bStart) < ToUtc(aEnd);

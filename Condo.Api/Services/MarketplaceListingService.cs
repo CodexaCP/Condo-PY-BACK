@@ -25,12 +25,7 @@ public class MarketplaceListingService(
     private const int ReasonMaxLength = 500;
 
     // Reservas "vivas": las que ocupan horario. Las finales (vencida, cancelada, rechazada, completada) ya no.
-    private static readonly MarketplaceReservationStatus[] LiveReservationStatuses =
-    [
-        MarketplaceReservationStatus.PendingPayment,
-        MarketplaceReservationStatus.InReview,
-        MarketplaceReservationStatus.Confirmed
-    ];
+    private static readonly MarketplaceReservationStatus[] LiveReservationStatuses = MarketplaceStatusSets.LiveReservations;
 
     // ── Consultas ────────────────────────────────────────────────────────────
 

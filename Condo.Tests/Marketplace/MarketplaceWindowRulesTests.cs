@@ -172,6 +172,22 @@ public class MarketplaceWindowRulesTests
         Assert.Equal([U(3, 21, 30)], a.Intersect(b).ToList());
     }
 
+    [Theory]
+    [InlineData(12, 0, 0, 12, 30)]    // justo en punto: el siguiente bloque es y media
+    [InlineData(12, 10, 0, 12, 30)]
+    [InlineData(12, 29, 59, 12, 30)]
+    [InlineData(12, 30, 0, 13, 0)]    // justo y media: el siguiente es en punto
+    [InlineData(12, 45, 0, 13, 0)]
+    [InlineData(23, 45, 0, 0, 0)]     // pasa al dia siguiente
+    public void El_siguiente_bloque_empieza_estrictamente_despues_del_instante(int h, int m, int s, int expectedHour, int expectedMinute)
+    {
+        var next = MarketplaceWindowRules.NextSlotAfter(U(3, h, m, s));
+
+        var expectedDay = h == 23 && expectedHour == 0 ? 4 : 3;
+        Assert.Equal(U(expectedDay, expectedHour, expectedMinute), next);
+        Assert.True(next > U(3, h, m, s));
+    }
+
     [Fact]
     public void Una_fecha_sin_tipo_se_toma_como_utc()
     {
