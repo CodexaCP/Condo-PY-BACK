@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fases 1 y 2 — **hechas y desplegadas** · Fase 3 — **hecha** (publicaciones; falta desplegar el BACK y publicar la app) · Fase 4 — **hecha** (explorar y reservar: API con 238 pruebas verdes en `dotnet test Condo.Tests` + pantallas de la app; sin migración; falta desplegar) · Fases 5 a 9 — pendientes.
+> Fases 1 y 2 — **hechas y desplegadas** · Fases 3, 4 y 5 — **hechas y commiteadas, sin desplegar** (publicar; explorar y reservar; pago con comprobante y revisión: API con 295 pruebas verdes en `dotnet test Condo.Tests`, app del propietario y del Encargado, pantalla web de revisión). **La fase 5 trae una migración nueva (`MarketplacePaymentAlerts`, 2 columnas).** · Fases 6 a 9 — pendientes.
 
 ---
 
