@@ -317,7 +317,10 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
             .GroupBy(x => x.Reference)
             .Select(g => g.Key is null
                 ? $"saldo a favor anterior (Gs. {FormatGs(g.Sum(x => x.Amount))})"
-                : $"comprobante de pago {g.Key} (Gs. {FormatGs(g.Sum(x => x.Amount))})")
+                : g.Key.StartsWith("MP-", StringComparison.Ordinal)
+                    // Saldo que viene de una reserva del Marketplace (su numero de operacion empieza con MP-).
+                    ? $"reserva del Marketplace {g.Key} (Gs. {FormatGs(g.Sum(x => x.Amount))})"
+                    : $"comprobante de pago {g.Key} (Gs. {FormatGs(g.Sum(x => x.Amount))})")
             .ToList();
 
         var origin = sources.Count == 0 ? "Saldo a favor" : "Saldo a favor de " + string.Join(" y ", sources);

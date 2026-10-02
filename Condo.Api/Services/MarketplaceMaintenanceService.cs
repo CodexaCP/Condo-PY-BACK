@@ -46,6 +46,14 @@ public sealed class MarketplaceMaintenanceService(
             logger.LogInformation("Marketplace: {Count} reservas vencidas por falta de pago.", expired);
         }
 
+        // Reservas terminadas -> finalizadas, y acreditacion al saldo del propietario pasadas 24 h sin reclamo.
+        var credits = scope.ServiceProvider.GetRequiredService<MarketplaceCreditService>();
+        var (completed, credited) = await credits.ProcessDueAsync(ct);
+        if (completed > 0 || credited > 0)
+        {
+            logger.LogInformation("Marketplace: {Completed} reservas finalizadas, {Credited} acreditaciones al saldo.", completed, credited);
+        }
+
         // Alertas al revisor: pagos que siguen sin revisar (a los 15 minutos y luego cada hora).
         var payments = scope.ServiceProvider.GetRequiredService<MarketplacePaymentService>();
         var alerted = await payments.SendReviewAlertsAsync(ct);

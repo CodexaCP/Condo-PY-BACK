@@ -28,5 +28,7 @@ public enum NotificationType
     MarketplacePaymentPending = 24,
     MarketplaceReservationConfirmed = 25,
     MarketplaceReservationRejected = 26,
-    MarketplaceNewReservation = 27
+    MarketplaceNewReservation = 27,
+    MarketplaceCreditApplied = 28,
+    MarketplaceCreditReversed = 29
 }
