@@ -17,6 +17,8 @@ public class OwnerCreditMovement : CompanyScopedEntity
     public string? SourceReference { get; set; }
     public Guid? OwnerPaymentId { get; set; }
     public Guid? CreditNoteId { get; set; }
+    // Reserva del marketplace de la que sale este lote de saldo (un solo lote por reserva).
+    public Guid? MarketplaceReservationId { get; set; }
     public CreditApplyMode? ApplyMode { get; set; }
     public Guid? PaymentId { get; set; }
     public Guid? ExpenseChargeId { get; set; }

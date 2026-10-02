@@ -54,6 +54,12 @@ public interface ICondoDbContext
     DbSet<FinancialAccount> FinancialAccounts { get; }
     DbSet<LedgerCategory> LedgerCategories { get; }
     DbSet<BudgetLine> BudgetLines { get; }
+    DbSet<MarketplaceListing> MarketplaceListings { get; }
+    DbSet<MarketplaceReservation> MarketplaceReservations { get; }
+    DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }
+    DbSet<MarketplacePayment> MarketplacePayments { get; }
+    DbSet<MarketplaceAccountMovement> MarketplaceAccountMovements { get; }
+    DbSet<MarketplaceEvent> MarketplaceEvents { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

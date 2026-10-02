@@ -53,6 +53,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<FinancialAccount> FinancialAccounts => Set<FinancialAccount>();
     public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
     public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
+    public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
+    public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
+    public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
+    public DbSet<MarketplacePayment> MarketplacePayments => Set<MarketplacePayment>();
+    public DbSet<MarketplaceAccountMovement> MarketplaceAccountMovements => Set<MarketplaceAccountMovement>();
+    public DbSet<MarketplaceEvent> MarketplaceEvents => Set<MarketplaceEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -959,12 +965,33 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Category).WithMany()
             .HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
 
+        MarketplaceModelConfiguration.Configure(modelBuilder, Database.IsSqlServer());
+
         SeedCatalog(modelBuilder);
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        PrepareChangesForSave();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        PrepareChangesForSave();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    // Sellos de fecha y reglas previas al guardado: valen igual para el guardado sincrono y el asincrono.
+    private void PrepareChangesForSave()
+    {
         var utcNow = DateTime.UtcNow;
+
+        // La auditoria del marketplace es de solo insercion: nunca se modifica ni se borra un evento ya registrado.
+        if (ChangeTracker.Entries<MarketplaceEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Los eventos de auditoría del marketplace no se pueden modificar ni eliminar.");
+        }
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
@@ -978,8 +1005,6 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
                 entry.Entity.UpdatedAtUtc = utcNow;
             }
         }
-
-        return base.SaveChangesAsync(cancellationToken);
     }
 
     private static void SeedCatalog(ModelBuilder modelBuilder)
