@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fase 1 — **hecha** (BACK `d38ae1e`, WEB `233c2ff`, migración `20261002172053_MarketplaceModuleBase`, ya desplegada) · Fase 2 — **hecha** (migración `20261002174215_MarketplaceCore`, 130 pruebas verdes con `dotnet test Condo.Tests`; falta aplicarla en el VPS) · Fases 3 a 9 — pendientes.
+> Fase 1 — **hecha** (ya desplegada) · Fase 2 — **hecha** (desplegada, 6 tablas verificadas en el VPS) · Fase 3 — **hecha** (API de publicaciones + pantalla del propietario en la app; 185 pruebas verdes con `dotnet test Condo.Tests`; falta desplegar el BACK y publicar la app) · Fases 4 a 9 — pendientes.
 
 ---
 
