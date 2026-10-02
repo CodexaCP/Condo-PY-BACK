@@ -34,6 +34,11 @@ public class OwnerPaymentDto
     public DateTime? ReviewedAt { get; set; }
     public DateTime? ResolvedAt { get; set; }
     public DateTime CreatedAtUtc { get; set; }
+    public string Channel { get; set; } = "App";
+    public string Method { get; set; } = "BankTransfer";
+    public string ExternalReference { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public DateTime? ReversedAt { get; set; }
     public List<OwnerPaymentUnitDto> Units { get; set; } = [];
     public List<OwnerPaymentApplicationDto> Applications { get; set; } = [];
 
@@ -110,4 +115,65 @@ public class ApplyCreditResultDto
     public decimal SettledAmount { get; set; }
     public decimal RemainingCredit { get; set; }
     public int ChargesSettled { get; set; }
+}
+
+// ─── Pago registrado por el sistema (canal Web) ──────────────────────────────
+
+public class OwnerPaymentRegisterRequest
+{
+    public Guid OwnerId { get; set; }
+    public DateOnly PaymentDate { get; set; }
+    // Lo realmente recibido; el sistema lo valida contra los comprobantes completos (mas antiguo primero).
+    public decimal Amount { get; set; }
+    public Condo.Domain.Enums.PaymentMethod Method { get; set; } = Condo.Domain.Enums.PaymentMethod.BankTransfer;
+    public string? ExternalReference { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class OwnerPaymentReverseRequest
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
+public class RegisterPreviewDto
+{
+    public Guid OwnerId { get; set; }
+    public string OwnerFullName { get; set; } = string.Empty;
+    public decimal AvailableCredit { get; set; }
+    // Pagos que el propietario envio desde la app y siguen sin resolver: bloquean el registro manual.
+    public List<RegisterPreviewPendingPaymentDto> PendingOwnerPayments { get; set; } = [];
+    public List<RegisterComprobanteDto> Comprobantes { get; set; } = [];
+}
+
+public class RegisterPreviewPendingPaymentDto
+{
+    public Guid Id { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public decimal DeclaredAmount { get; set; }
+}
+
+public class RegisterComprobanteDto
+{
+    public Guid UnitId { get; set; }
+    public string UnitCode { get; set; } = string.Empty;
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public Guid ExpensePeriodId { get; set; }
+    public int PeriodYear { get; set; }
+    public int PeriodMonth { get; set; }
+    public decimal Total { get; set; }
+    // Suma de este comprobante y todos los anteriores (del mas antiguo al mas nuevo).
+    public decimal CumulativeTotal { get; set; }
+    // Lo que hay que recibir para cubrir hasta este comprobante, ya descontado el saldo a favor.
+    public decimal AmountToReceive { get; set; }
+    // false: el edificio no esta en el alcance del usuario (no puede cubrirse este ni los siguientes).
+    public bool InScope { get; set; } = true;
+    public List<RegisterComprobanteLineDto> Lines { get; set; } = [];
+}
+
+public class RegisterComprobanteLineDto
+{
+    public string Concept { get; set; } = string.Empty;
+    public decimal Pending { get; set; }
 }

@@ -192,6 +192,7 @@ public class OwnerPaymentsController(
         [FromQuery] string? status,
         [FromQuery] Guid? ownerId,
         [FromQuery] Guid? buildingId,
+        [FromQuery] string? channel,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         CancellationToken ct)
@@ -222,6 +223,10 @@ public class OwnerPaymentsController(
 
             if (ownerId.HasValue)
                 query = query.Where(x => x.OwnerId == ownerId.Value);
+
+            // channel = App (declarados por el propietario) o Web (registrados por el personal); otro valor se ignora.
+            if (Enum.TryParse<OwnerPaymentChannel>(channel, true, out var parsedChannel))
+                query = query.Where(x => x.Channel == parsedChannel);
 
             // Solo los pagos que tocan este edificio (que ademas tiene que estar en el alcance del usuario).
             if (buildingId.HasValue)
@@ -630,6 +635,309 @@ public class OwnerPaymentsController(
         return Ok(ToDto(payment));
     }
 
+    // ─── REGISTRO POR EL SISTEMA (canal Web) ─────────────────────────────────
+    // Para el propietario que no usa la app: el personal registra el cobro y el pago sigue EXACTAMENTE el
+    // mismo camino que uno aprobado desde la app (mismos comprobantes completos del mas antiguo al mas
+    // nuevo, mismo saldo a favor, misma referencia PAY-, mismo borrador de factura y mismos avisos).
+    // Solo cambia que nace ya aprobado.
+
+    [HttpGet("register-preview/{ownerId:guid}")]
+    public async Task<ActionResult<RegisterPreviewDto>> GetRegisterPreview(Guid ownerId, CancellationToken ct)
+    {
+        if (!CanManagePayments()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        var owner = await LoadOwnerAsync(ownerId, companyId.Value, ct);
+        if (owner is null) return NotFound();
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        if (!await OwnerInScopeAsync(ownerId, companyId.Value, requireAll: false, ct)) return NotFound();
+
+        var unitIds = await credits.LoadLinkedUnitIdsAsync(ownerId, companyId.Value, ct);
+        var open = unitIds.Count == 0
+            ? new List<Comprobante>()
+            : await comprobantes.LoadAsync(unitIds, companyId.Value, false, ct);
+        var credit = await GetAvailableCreditAsync(ownerId, companyId.Value, ct);
+
+        var pending = await dbContext.OwnerPayments
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value && x.OwnerId == ownerId
+                        && (x.Status == OwnerPaymentStatus.Pending || x.Status == OwnerPaymentStatus.UnderReview))
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => new RegisterPreviewPendingPaymentDto
+            {
+                Id = x.Id, Reference = x.Reference, Status = x.Status.ToString(), DeclaredAmount = x.DeclaredAmount
+            })
+            .ToListAsync(ct);
+
+        var preview = new RegisterPreviewDto
+        {
+            OwnerId = owner.Id,
+            OwnerFullName = owner.FullName,
+            AvailableCredit = credit,
+            PendingOwnerPayments = pending
+        };
+
+        var running = 0m;
+        foreach (var c in open)
+        {
+            running += c.Total;
+            preview.Comprobantes.Add(new RegisterComprobanteDto
+            {
+                UnitId = c.UnitId,
+                UnitCode = c.UnitCode,
+                BuildingId = c.BuildingId,
+                BuildingName = c.BuildingName,
+                ExpensePeriodId = c.ExpensePeriodId,
+                PeriodYear = c.Year,
+                PeriodMonth = c.Month,
+                Total = c.Total,
+                CumulativeTotal = running,
+                AmountToReceive = Math.Max(0m, running - credit),
+                InScope = scope.Contains(c.BuildingId),
+                Lines = c.Lines.Select(l => new RegisterComprobanteLineDto { Concept = l.Charge.Concept, Pending = l.Pending }).ToList()
+            });
+        }
+
+        return Ok(preview);
+    }
+
+    [HttpPost("register")]
+    public async Task<ActionResult<OwnerPaymentDto>> Register([FromBody] OwnerPaymentRegisterRequest request, CancellationToken ct)
+    {
+        if (!CanManagePayments()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        var externalReference = request.ExternalReference?.Trim() ?? string.Empty;
+        var notes = request.Notes?.Trim() ?? string.Empty;
+
+        if (request.OwnerId == Guid.Empty) return BadRequest("El propietario es obligatorio.");
+        if (request.Amount <= 0) return BadRequest("El monto debe ser mayor a cero.");
+        if (request.PaymentDate == default) return BadRequest("La fecha de pago es obligatoria.");
+        if (request.PaymentDate > DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            return BadRequest("La fecha de pago no puede ser futura.");
+        if (!Enum.IsDefined(request.Method)) return BadRequest("El método de pago no es válido.");
+        if (externalReference.Length > 100) return BadRequest("El número de transferencia/documento no puede superar los 100 caracteres.");
+        if (notes.Length > 500) return BadRequest("Las notas no pueden superar los 500 caracteres.");
+
+        var owner = await LoadOwnerAsync(request.OwnerId, companyId.Value, ct);
+        if (owner is null) return NotFound();
+        if (!await OwnerInScopeAsync(owner.Id, companyId.Value, requireAll: false, ct)) return NotFound();
+
+        // Si el propietario ya mando un pago desde la app que sigue sin resolver, se resuelve primero (si no,
+        // los dos pagarian los mismos comprobantes y el segundo en aprobarse fallaria).
+        var unresolved = await dbContext.OwnerPayments
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value && x.OwnerId == owner.Id
+                        && (x.Status == OwnerPaymentStatus.Pending || x.Status == OwnerPaymentStatus.UnderReview))
+            .Select(x => x.Reference)
+            .FirstOrDefaultAsync(ct);
+        if (unresolved is not null)
+            return Conflict($"El propietario tiene el pago {unresolved} pendiente de revisión desde la app. " +
+                            "Apruébelo o rechácelo antes de registrar otro pago.");
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        var unitIds = await credits.LoadLinkedUnitIdsAsync(owner.Id, companyId.Value, ct);
+        var open = unitIds.Count == 0
+            ? new List<Comprobante>()
+            : await comprobantes.LoadAsync(unitIds, companyId.Value, false, ct);
+        var availableCredit = await GetAvailableCreditAsync(owner.Id, companyId.Value, ct);
+
+        var (coverage, _) = CoverWithCredit(request.Amount, availableCredit, open);
+        if (!coverage.Exact)
+            return BadRequest(ComprobanteService.MismatchMessage(request.Amount + availableCredit, open));
+        if (!CoverageInScope(coverage, scope))
+            return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
+
+        var now = DateTime.UtcNow;
+        var year = now.Year;
+        var ownerPayment = new OwnerPayment
+        {
+            CompanyId = companyId.Value,
+            OwnerId = owner.Id,
+            PaymentDate = request.PaymentDate,
+            DeclaredAmount = request.Amount,
+            ReviewedAmount = request.Amount,
+            Status = OwnerPaymentStatus.UnderReview,
+            Channel = OwnerPaymentChannel.Web,
+            Method = request.Method,
+            ExternalReference = externalReference,
+            Notes = notes,
+            ReviewedByUserId = tenantContext.UserId,
+            ReviewedAt = now,
+            Reference = await NextReferenceAsync(companyId.Value, year, ct)
+        };
+        dbContext.OwnerPayments.Add(ownerPayment);
+
+        // Misma proteccion que Create: dos pagos a la vez pueden calcular la misma referencia.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync(ct);
+                break;
+            }
+            catch (DbUpdateException exception) when (attempt < 5 && IsReferenceCollision(exception))
+            {
+                ownerPayment.Reference = await NextReferenceAsync(companyId.Value, year, ct);
+            }
+        }
+
+        try
+        {
+            await SettlePaymentAsync(ownerPayment, companyId.Value, scope, ct);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // Algo cambio entre la validacion y la liquidacion (otro usuario cobro al mismo tiempo): no queda un
+            // pago a medias.
+            ownerPayment.Status = OwnerPaymentStatus.Rejected;
+            ownerPayment.RejectionReason = "No se pudo registrar: " + exception.Message;
+            ownerPayment.IsDeleted = true;
+            await dbContext.SaveChangesAsync(ct);
+            return exception is OutOfScopeException
+                ? StatusCode(StatusCodes.Status403Forbidden, exception.Message)
+                : BadRequest(exception.Message);
+        }
+
+        ownerPayment.Status = OwnerPaymentStatus.Approved;
+        ownerPayment.ResolvedAt = now;
+
+        var title = "Registramos tu pago";
+        var body = $"Se registró tu pago {ownerPayment.Reference} por Gs. {ComprobanteService.Gs(request.Amount)}. Toca para ver más detalles.";
+        dbContext.Notifications.Add(new Notification
+        {
+            CompanyId = companyId.Value,
+            RecipientId = owner.Id,
+            Type = NotificationType.PaymentApproved,
+            Title = title,
+            Body = body,
+            EntityType = "OwnerPayment",
+            EntityId = ownerPayment.Id
+        });
+
+        await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(owner.Id, title, body, "OwnerPayment", ownerPayment.Id, ct);
+        await invoiceDrafts.CreateDraftsFromOwnerPaymentAsync(ownerPayment, tenantContext.UserId, ct);
+
+        var saved = await dbContext.OwnerPayments
+            .AsNoTracking()
+            .Include(x => x.Owner)
+            .Include(x => x.ReviewedByUser)
+            .Include(x => x.Units.Where(u => !u.IsDeleted))
+                .ThenInclude(u => u.Unit).ThenInclude(u => u!.Building)
+            .FirstAsync(x => x.Id == ownerPayment.Id, ct);
+
+        return Ok(ToDto(saved));
+    }
+
+    // ─── REVERSE (solo pagos registrados por el sistema) ─────────────────────
+    [HttpPut("{id:guid}/reverse")]
+    public async Task<ActionResult<OwnerPaymentDto>> Reverse(
+        Guid id, [FromBody] OwnerPaymentReverseRequest request, CancellationToken ct)
+    {
+        if (!CanManagePayments()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        var payment = await dbContext.OwnerPayments
+            .Include(x => x.Owner)
+            .Include(x => x.ReviewedByUser)
+            .Include(x => x.Units.Where(u => !u.IsDeleted))
+                .ThenInclude(u => u.Unit).ThenInclude(u => u!.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id && x.CompanyId == companyId.Value, ct);
+        if (payment is null) return NotFound();
+
+        var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
+        if (!TouchesScope(payment, scope)) return NotFound();
+        if (!FullyInScope(payment, scope)) return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
+
+        if (payment.Channel != OwnerPaymentChannel.Web)
+            return BadRequest("Solo se pueden revertir pagos registrados por el sistema. Un pago declarado desde la app se corrige con una nota de crédito.");
+        if (payment.Status != OwnerPaymentStatus.Approved)
+            return BadRequest("Solo se puede revertir un pago aprobado que no haya sido revertido.");
+
+        var reason = request.Reason?.Trim() ?? string.Empty;
+        if (reason.Length == 0) return BadRequest("El motivo de la reversa es obligatorio.");
+        if (reason.Length > 400) return BadRequest("El motivo no puede superar los 400 caracteres.");
+
+        var settlements = await dbContext.Payments
+            .Include(x => x.Allocations.Where(a => !a.IsDeleted))
+            .Where(x => !x.IsDeleted && !x.IsReversed && x.CompanyId == companyId.Value && x.Reference == payment.Reference)
+            .ToListAsync(ct);
+        var paymentIds = settlements.Select(x => x.Id).ToList();
+
+        // Si el pago uso saldo a favor, devolverlo exige reconstruir los lotes: se hace con un ajuste manual.
+        var usedCredit = await dbContext.OwnerCreditMovements
+            .AnyAsync(x => !x.IsDeleted && x.Kind == OwnerCreditMovementKind.Applied && x.PaymentId != null && paymentIds.Contains(x.PaymentId.Value), ct);
+        if (usedCredit)
+            return Conflict("Este pago usó saldo a favor del propietario, por lo que no se puede revertir desde aquí. Consulte con el administrador del sistema.");
+
+        var invoices = await dbContext.Invoices
+            .Where(i => !i.IsDeleted && i.Status != InvoiceStatus.Voided
+                        && (i.OwnerPaymentId == payment.Id || paymentIds.Contains(i.PaymentId)))
+            .ToListAsync(ct);
+        if (invoices.Any(i => i.Status == InvoiceStatus.Issued))
+            return Conflict("Este pago ya tiene una factura emitida. Anule la factura primero (Facturación › Facturas) y luego revierta el pago.");
+
+        var now = DateTime.UtcNow;
+
+        // Los borradores todavia no tienen numero ni timbrado: se descartan.
+        foreach (var draft in invoices)
+        {
+            draft.Status = InvoiceStatus.Voided;
+            draft.FechaAnulacionUtc = now;
+            draft.MotivoAnulacion = $"Pago {payment.Reference} revertido: {reason}";
+            dbContext.InvoiceAuditLogs.Add(new InvoiceAuditLog
+            {
+                CompanyId = draft.CompanyId,
+                InvoiceId = draft.Id,
+                Action = InvoiceAuditAction.Voided,
+                UserId = tenantContext.UserId,
+                TimestampUtc = now,
+                DatosAntesJson = System.Text.Json.JsonSerializer.Serialize(new { Status = InvoiceStatus.Draft }),
+                DatosDespuesJson = System.Text.Json.JsonSerializer.Serialize(new { draft.Status, draft.MotivoAnulacion }),
+                Detalle = $"Borrador descartado: se revirtió el pago {payment.Reference}. Motivo: {reason}."
+            });
+        }
+
+        // Se conserva el rastro (el Payment queda marcado como revertido) y se liberan los cargos.
+        foreach (var settlement in settlements)
+        {
+            settlement.IsReversed = true;
+            settlement.ReversedAt = now;
+            foreach (var allocation in settlement.Allocations) allocation.IsDeleted = true;
+        }
+
+        payment.Status = OwnerPaymentStatus.Rejected;
+        payment.RejectionReason = $"PAGO REVERTIDO: {reason}";
+        payment.ReversedAt = now;
+        payment.ResolvedAt = now;
+
+        var title = "Un pago registrado fue revertido";
+        var body = $"El pago {payment.Reference} fue revertido por la administración. Motivo: {reason}. Toca para ver más detalles.";
+        dbContext.Notifications.Add(new Notification
+        {
+            CompanyId = companyId.Value,
+            RecipientId = payment.OwnerId,
+            Type = NotificationType.PaymentRejected,
+            Title = title,
+            Body = body,
+            EntityType = "OwnerPayment",
+            EntityId = payment.Id
+        });
+
+        await dbContext.SaveChangesAsync(ct);
+        await pushDispatcher.NotifyUserAsync(payment.OwnerId, title, body, "OwnerPayment", payment.Id, ct);
+        return Ok(ToDto(payment));
+    }
+
+    private async Task<ApplicationUser?> LoadOwnerAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
+        await dbContext.ApplicationUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == ownerId && x.CompanyId == companyId && x.Role == UserRole.Owner, ct);
+
     // ─── RECEIPT PDF ─────────────────────────────────────────────────────────
     [HttpGet("{id:guid}/receipt-pdf")]
     [AllowAnonymous]
@@ -796,9 +1104,12 @@ public class OwnerPaymentsController(
                 UnitId = comprobante.UnitId,
                 PaymentDate = ownerPayment.PaymentDate,
                 Amount = comprobante.Total,
-                Method = PaymentMethod.BankTransfer,
+                Method = ownerPayment.Method,
                 Reference = ownerPayment.Reference,
-                Notes = $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
+                Notes = ownerPayment.Channel == OwnerPaymentChannel.Web
+                    ? $"Pago registrado por el sistema. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}" +
+                      (string.IsNullOrWhiteSpace(ownerPayment.ExternalReference) ? "" : $". Doc.: {ownerPayment.ExternalReference}")
+                    : $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
             };
             dbContext.Payments.Add(paymentRecord);
             createdPayments.Add((comprobante, paymentRecord));
@@ -980,6 +1291,11 @@ public class OwnerPaymentsController(
         ReviewedAt = p.ReviewedAt,
         ResolvedAt = p.ResolvedAt,
         CreatedAtUtc = p.CreatedAtUtc,
+        Channel = p.Channel.ToString(),
+        Method = p.Method.ToString(),
+        ExternalReference = p.ExternalReference,
+        Notes = p.Notes,
+        ReversedAt = p.ReversedAt,
         Units = p.Units
             .Where(u => !u.IsDeleted)
             .Select(u => new OwnerPaymentUnitDto

@@ -589,6 +589,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<OwnerPayment>().Property(x => x.Reference).HasMaxLength(50);
         modelBuilder.Entity<OwnerPayment>().Property(x => x.ComprobanteUrl).HasMaxLength(500);
         modelBuilder.Entity<OwnerPayment>().Property(x => x.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.Channel).HasConversion<string>().HasMaxLength(10).HasDefaultValue(OwnerPaymentChannel.App).HasSentinel((OwnerPaymentChannel)0);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.Method).HasConversion<string>().HasMaxLength(30).HasDefaultValue(PaymentMethod.BankTransfer).HasSentinel((PaymentMethod)0);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.ExternalReference).HasMaxLength(100);
+        modelBuilder.Entity<OwnerPayment>().Property(x => x.Notes).HasMaxLength(500);
         // La referencia (PAY-año-n) se numera por empresa, asi que es unica por empresa (antes era global y la
         // segunda empresa chocaba con la primera).
         modelBuilder.Entity<OwnerPayment>().HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique().HasFilter("[IsDeleted] = 0");
