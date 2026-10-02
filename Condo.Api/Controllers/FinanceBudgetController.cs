@@ -49,7 +49,7 @@ public class FinanceBudgetController(
     public async Task<ActionResult<FinanceBudgetDto>> UpdateBudget(
         [FromQuery] Guid buildingId, [FromQuery] int fiscalYear, [FromBody] FinanceBudgetUpdateRequest request, CancellationToken cancellationToken)
     {
-        var denied = await RequireModuleAsync(buildingId, write: true, cancellationToken);
+        var denied = await RequireModuleAsync(buildingId, write: true, cancellationToken, budget: true);
         if (denied is not null)
         {
             return denied;
@@ -134,7 +134,7 @@ public class FinanceBudgetController(
     public async Task<ActionResult<FinanceBudgetDto>> CopyPrevious(
         [FromQuery] Guid buildingId, [FromQuery] int fiscalYear, [FromQuery] bool overwrite = false, CancellationToken cancellationToken = default)
     {
-        var denied = await RequireModuleAsync(buildingId, write: true, cancellationToken);
+        var denied = await RequireModuleAsync(buildingId, write: true, cancellationToken, budget: true);
         if (denied is not null)
         {
             return denied;
@@ -200,7 +200,7 @@ public class FinanceBudgetController(
         [FromQuery] bool overwrite = false,
         CancellationToken cancellationToken = default)
     {
-        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken, write: true);
+        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken, write: true, budget: true);
         if (denied is not null)
         {
             return denied;
@@ -237,9 +237,9 @@ public class FinanceBudgetController(
         var existing = await LoadLinesAsync(buildingId, fiscalYear, ctx.FiscalYearStartMonth, cancellationToken);
 
         var affected = 0;
-        foreach (var category in FinanceBudgetCalculator.BudgetableCategories(ctx.Categories.ToList()).Where(c => c.IsActive && c.SystemKey != null))
+        foreach (var category in FinanceBudgetCalculator.BudgetableCategories(ctx.Categories.ToList()).Where(c => c.IsActive))
         {
-            var total = window.Sum(d => actuals.GetValueOrDefault((d.Year, d.Month, category.SystemKey!)));
+            var total = window.Sum(d => actuals.GetValueOrDefault((d.Year, d.Month, category.RubroKey)));
             var average = decimal.Round(total / window.Count, 0, MidpointRounding.AwayFromZero);
             if (average <= 0m)
             {

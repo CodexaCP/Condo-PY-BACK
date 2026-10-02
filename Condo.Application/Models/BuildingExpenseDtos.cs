@@ -15,6 +15,8 @@ public class BuildingExpenseUpsertRequest
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public bool PaidByReserveFund { get; set; }
+    // Rubro del plan de cuentas de Finanzas del edificio (opcional). Con rubro, la categoria se toma del rubro.
+    public Guid? LedgerCategoryId { get; set; }
 }
 
 public class BuildingExpenseDto
@@ -37,4 +39,7 @@ public class BuildingExpenseDto
     public bool PaidByReserveFund { get; set; }
     public bool HasReceipt { get; set; }
     public string? ReceiptFileName { get; set; }
+    public Guid? LedgerCategoryId { get; set; }
+    public string? LedgerCategoryCode { get; set; }
+    public string? LedgerCategoryName { get; set; }
 }

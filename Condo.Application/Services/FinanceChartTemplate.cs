@@ -23,6 +23,79 @@ public static class FinanceChartTemplate
     public static string ExpenseKey(BuildingExpenseCategory category) => $"Expense.{category}";
     public static string IncomeKey(BuildingIncomeCategory category) => $"Income.{category}";
 
+    /// <summary>
+    /// Categoria de gasto con la que cuenta en la liquidacion un gasto cargado en el rubro: la guardada en los rubros propios o,
+    /// en los de la plantilla, la que dice su clave. Nula si el rubro no es de gastos. Un rubro propio sin categoria cuenta como "Otro".
+    /// </summary>
+    public static BuildingExpenseCategory? ExpenseCategoryOf(LedgerCategory category)
+    {
+        if (category.Type != LedgerCategoryType.Expense)
+        {
+            return null;
+        }
+
+        if (category.ExpenseCategory.HasValue)
+        {
+            return category.ExpenseCategory;
+        }
+
+        const string prefix = "Expense.";
+        if (category.SystemKey is not null)
+        {
+            return category.SystemKey.StartsWith(prefix, StringComparison.Ordinal)
+                && Enum.TryParse<BuildingExpenseCategory>(category.SystemKey[prefix.Length..], out var parsed) && Enum.IsDefined(parsed)
+                    ? parsed
+                    : null;
+        }
+
+        return BuildingExpenseCategory.Other;
+    }
+
+    /// <summary>Lo mismo para los ingresos: la categoria de ingreso con la que cuenta un ingreso cargado en el rubro.</summary>
+    public static BuildingIncomeCategory? IncomeCategoryOf(LedgerCategory category)
+    {
+        if (category.Type != LedgerCategoryType.Income)
+        {
+            return null;
+        }
+
+        if (category.IncomeCategory.HasValue)
+        {
+            return category.IncomeCategory;
+        }
+
+        const string prefix = "Income.";
+        if (category.SystemKey is not null)
+        {
+            // Los rubros de cobranza de expensas (Collection.*) no son ingresos del edificio: salen de los pagos de los propietarios.
+            return category.SystemKey.StartsWith(prefix, StringComparison.Ordinal)
+                && Enum.TryParse<BuildingIncomeCategory>(category.SystemKey[prefix.Length..], out var parsed) && Enum.IsDefined(parsed)
+                    ? parsed
+                    : null;
+        }
+
+        return BuildingIncomeCategory.Other;
+    }
+
+    /// <summary>
+    /// Rubros en los que se pueden cargar gastos o ingresos del edificio: los subrubros (hojas) activos de tipo gasto o ingreso que
+    /// tienen categoria de liquidacion. Un rubro principal solo agrupa, el fondo de reserva tiene su propia cuenta y la cobranza de
+    /// expensas sale de los pagos de los propietarios: ninguno recibe gastos ni ingresos cargados a mano.
+    /// </summary>
+    public static List<LedgerCategory> AssignableCategories(IReadOnlyCollection<LedgerCategory> categories, LedgerCategoryType type)
+    {
+        var parentIds = categories.Where(c => c.ParentId.HasValue).Select(c => c.ParentId!.Value).ToHashSet();
+        return categories
+            .Where(c => c.Type == type && c.IsActive && c.ParentId.HasValue && !parentIds.Contains(c.Id) && CanReceiveMovements(c))
+            .OrderBy(c => c.Code, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>El subrubro tiene categoria de liquidacion, o sea que se le pueden cargar gastos (si es de gastos) o ingresos (si es de ingresos).</summary>
+    public static bool CanReceiveMovements(LedgerCategory category) =>
+        category.Type == LedgerCategoryType.Expense ? ExpenseCategoryOf(category) is not null
+        : category.Type == LedgerCategoryType.Income && IncomeCategoryOf(category) is not null;
+
     private static Node Group(string code, string name, LedgerCategoryType type) => new(code, name, type, null, null);
     private static Node Leaf(string code, string name, LedgerCategoryType type, string parentCode, string key) => new(code, name, type, parentCode, key);
 

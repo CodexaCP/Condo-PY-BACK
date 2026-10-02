@@ -17,10 +17,18 @@ public class LedgerCategory : CompanyScopedEntity
     public string? ExternalCode { get; set; }
 
     // Clave estable de los rubros de la plantilla (por ejemplo "Expense.Ande"): el libro derivado la usa para mapear
-    // las categorias actuales de gastos e ingresos sin tocar esas entidades. Nula en los rubros creados a mano.
+    // las categorias actuales de gastos e ingresos de los movimientos que no eligieron rubro. Nula en los rubros creados a mano.
     public string? SystemKey { get; set; }
 
+    // Rubros creados a mano: con que categoria cuentan en la liquidacion los gastos o ingresos que se cargan en el rubro
+    // (la liquidacion sigue agrupando por categoria). En los rubros de la plantilla se deduce de la SystemKey.
+    public BuildingExpenseCategory? ExpenseCategory { get; set; }
+    public BuildingIncomeCategory? IncomeCategory { get; set; }
+
     public bool IsActive { get; set; } = true;
+
+    // Clave con la que el libro identifica al rubro: la de la plantilla o, en los rubros propios, una derivada de su id.
+    public string RubroKey => SystemKey ?? $"Rubro.{Id:N}";
 
     public Company? Company { get; set; }
     public Building? Building { get; set; }

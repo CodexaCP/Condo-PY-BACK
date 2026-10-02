@@ -2173,7 +2173,8 @@ public class ExpensePeriodsController(
             DistributionType = e.DistributionType,
             TargetUnitId = e.TargetUnitId,
             Notes = e.Notes,
-            PaidByReserveFund = e.PaidByReserveFund
+            PaidByReserveFund = e.PaidByReserveFund,
+            LedgerCategoryId = e.LedgerCategoryId
         }).ToList();
 
         if (copiedExpenses.Count > 0)
@@ -2197,7 +2198,8 @@ public class ExpensePeriodsController(
             Description = i.Description,
             IncomeDate = startDate,
             Amount = i.Amount,
-            Notes = i.Notes
+            Notes = i.Notes,
+            LedgerCategoryId = i.LedgerCategoryId
         }).ToList();
 
         var accumulatedBalance = 0m;

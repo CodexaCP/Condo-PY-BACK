@@ -56,8 +56,11 @@ public class FinanceSettingsDto
     // Lo que falta para poder completar el asistente (vacio = listo para completar).
     public IReadOnlyList<string> MissingForSetup { get; set; } = [];
 
-    // El usuario actual puede modificar la configuracion (SuperAdmin y Administrador de empresa).
+    // El usuario actual puede modificar la configuracion (fecha de arranque, cuentas y plan de cuentas): solo SuperAdmin.
     public bool CanEdit { get; set; }
+
+    // El usuario actual puede modificar el presupuesto (SuperAdmin y Administrador de empresa).
+    public bool CanEditBudget { get; set; }
 }
 
 public class FinanceSettingsUpdateRequest
@@ -104,6 +107,12 @@ public class LedgerCategoryDto
     // Rubro de la plantilla estandar: se puede renombrar, recodificar y desactivar, pero no mover ni eliminar.
     public bool IsTemplate { get; set; }
     public bool HasChildren { get; set; }
+    // Subrubro de gastos o ingresos (hoja): con que categoria cuenta en la liquidacion lo que se carga en el. Se deduce de la
+    // plantilla o la fija quien crea el rubro. Nulas en los rubros principales y en los de fondo.
+    public BuildingExpenseCategory? ExpenseCategory { get; set; }
+    public BuildingIncomeCategory? IncomeCategory { get; set; }
+    // Ya tiene gastos o ingresos cargados: no se elimina ni se le cambia el tipo o la categoria; solo se desactiva.
+    public bool HasMovements { get; set; }
 }
 
 public class LedgerCategoryUpsertRequest
@@ -117,4 +126,22 @@ public class LedgerCategoryUpsertRequest
     public LedgerCategoryType Type { get; set; } = LedgerCategoryType.Expense;
     public string? ExternalCode { get; set; }
     public bool IsActive { get; set; } = true;
+    // Solo en los subrubros creados a mano de gastos o ingresos: categoria de la liquidacion (sin dato, "Otro").
+    public BuildingExpenseCategory? ExpenseCategory { get; set; }
+    public BuildingIncomeCategory? IncomeCategory { get; set; }
+}
+
+public class LedgerCategoryCopyRequest
+{
+    public Guid SourceBuildingId { get; set; }
+    public Guid TargetBuildingId { get; set; }
+}
+
+public class LedgerCategoryCopyResultDto
+{
+    public int Updated { get; set; }
+    public int Created { get; set; }
+    public int Skipped { get; set; }
+    // Lo que no se pudo copiar y por que (codigos repetidos, tipos distintos).
+    public List<string> Messages { get; set; } = new();
 }

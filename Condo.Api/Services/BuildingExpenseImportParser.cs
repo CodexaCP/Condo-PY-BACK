@@ -3,23 +3,29 @@ using System.Text;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Condo.Api.Documents;
+using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 
 namespace Condo.Api.Services;
 
 /// <summary>
-/// Lee el Excel de carga masiva de gastos del edificio: cuatro columnas obligatorias (Categoria, Proveedor,
-/// Descripcion y Monto), una fila por gasto. Solo interpreta el archivo; las validaciones contra el periodo las
-/// hace el controlador.
+/// Lee el Excel de carga masiva de gastos del edificio: columnas obligatorias Proveedor, Descripcion y Monto, mas la Categoria o
+/// el Rubro (con Finanzas del edificio la plantilla trae las dos y alcanza con una), una fila por gasto. Solo interpreta el
+/// archivo; las validaciones contra el periodo y los rubros las hace el controlador.
 /// </summary>
 public static class BuildingExpenseImportParser
 {
     public const int MaxRows = 500;
 
     public sealed record ParsedRow(
-        int RowNumber, string Category, string Supplier, string Description, decimal? Amount, string? AmountError, bool PaidByReserveFund);
+        int RowNumber, string Category, string Rubro, string Supplier, string Description, decimal? Amount, string? AmountError, bool PaidByReserveFund);
 
-    private static readonly string[] RequiredHeaders = ["categoria", "proveedor", "descripcion", "monto"];
+    private static readonly string[] RequiredHeaders = ["proveedor", "descripcion", "monto"];
+
+    private const string CategoryHeader = "categoria";
+
+    // Columna opcional (plantillas de edificios con Finanzas): rubro del plan de cuentas, por codigo o por nombre.
+    private const string RubroHeader = "rubro";
 
     // Columna opcional: si la fila trae monto aca, el gasto se crea marcado como pagado por el fondo de reserva.
     private const string ReserveFundHeader = "monto por fondo de reserva";
@@ -57,10 +63,10 @@ public static class BuildingExpenseImportParser
                 for (var column = 1; column <= lastColumn; column++)
                 {
                     var header = Normalize(sheet.Cell(row, column).GetString());
-                    if ((RequiredHeaders.Contains(header) || header == ReserveFundHeader) && !found.ContainsKey(header)) found[header] = column;
+                    if ((RequiredHeaders.Contains(header) || header is CategoryHeader or RubroHeader or ReserveFundHeader) && !found.ContainsKey(header)) found[header] = column;
                 }
 
-                if (RequiredHeaders.All(found.ContainsKey))
+                if (RequiredHeaders.All(found.ContainsKey) && (found.ContainsKey(CategoryHeader) || found.ContainsKey(RubroHeader)))
                 {
                     headerRow = row;
                     columns = found;
@@ -75,14 +81,15 @@ public static class BuildingExpenseImportParser
             var rows = new List<ParsedRow>();
             for (var row = headerRow + 1; row <= lastRow; row++)
             {
-                var category = sheet.Cell(row, columns["categoria"]).GetString().Trim();
+                var category = columns.TryGetValue(CategoryHeader, out var categoryColumn) ? sheet.Cell(row, categoryColumn).GetString().Trim() : string.Empty;
+                var rubro = columns.TryGetValue(RubroHeader, out var rubroColumn) ? sheet.Cell(row, rubroColumn).GetString().Trim() : string.Empty;
                 var supplier = sheet.Cell(row, columns["proveedor"]).GetString().Trim();
                 var description = sheet.Cell(row, columns["descripcion"]).GetString().Trim();
                 var amountCell = sheet.Cell(row, columns["monto"]);
                 var fundCell = columns.TryGetValue(ReserveFundHeader, out var fundColumn) ? sheet.Cell(row, fundColumn) : null;
                 var hasFundAmount = fundCell is not null && !fundCell.IsEmpty();
 
-                if (category.Length == 0 && supplier.Length == 0 && description.Length == 0 && amountCell.IsEmpty() && !hasFundAmount) continue;
+                if (category.Length == 0 && rubro.Length == 0 && supplier.Length == 0 && description.Length == 0 && amountCell.IsEmpty() && !hasFundAmount) continue;
 
                 if (rows.Count >= MaxRows)
                 {
@@ -101,7 +108,7 @@ public static class BuildingExpenseImportParser
                     (amount, amountError) = ReadAmount(hasFundAmount ? fundCell! : amountCell);
                 }
 
-                rows.Add(new ParsedRow(row, category, supplier, description, amount, amountError, hasFundAmount));
+                rows.Add(new ParsedRow(row, category, rubro, supplier, description, amount, amountError, hasFundAmount));
             }
 
             if (rows.Count == 0)
@@ -118,6 +125,32 @@ public static class BuildingExpenseImportParser
 
     public static bool TryResolveCategory(string text, out BuildingExpenseCategory category) =>
         CategoryLookup.TryGetValue(Normalize(text), out category);
+
+    /// <summary>
+    /// Rubro que nombra el texto de la celda entre los rubros de gastos del edificio: acepta lo que ofrece la lista desplegable
+    /// ("5.2.03 Aguinaldo"), solo el codigo ("5.2.03") o solo el nombre ("Aguinaldo"). Si el nombre esta en dos rubros pide el codigo.
+    /// </summary>
+    public static (LedgerCategory? Rubro, string? Error) ResolveRubro(string text, IReadOnlyList<LedgerCategory> options)
+    {
+        var wanted = Normalize(text);
+
+        var byLabel = options.Where(r => Normalize($"{r.Code} {r.Name}") == wanted).ToList();
+        if (byLabel.Count == 1) return (byLabel[0], null);
+
+        var byCode = options.Where(r => Normalize(r.Code) == wanted).ToList();
+        if (byCode.Count == 1) return (byCode[0], null);
+
+        var byName = options.Where(r => Normalize(r.Name) == wanted).ToList();
+        if (byName.Count == 1) return (byName[0], null);
+        if (byName.Count > 1) return (null, $"Hay mas de un rubro llamado \"{text}\": usa su codigo (hoja Rubros).");
+
+        // Codigo seguido de otro texto ("5.2.03 - Aguinaldo", "5.2.03 Aguinaldo viejo"): vale el primer termino.
+        var firstToken = wanted.Split(' ', 2)[0];
+        var byLeadingCode = options.Where(r => Normalize(r.Code) == firstToken).ToList();
+        if (byLeadingCode.Count == 1) return (byLeadingCode[0], null);
+
+        return (null, $"Rubro desconocido: \"{text}\". Ver la hoja Rubros de la plantilla.");
+    }
 
     private static (decimal? Amount, string? Error) ReadAmount(IXLCell cell)
     {

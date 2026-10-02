@@ -19,10 +19,14 @@ public class BuildingExpense : CompanyScopedEntity
     public bool PaidByReserveFund { get; set; }
     public string? ReceiptFileName { get; set; }
     public string? ReceiptStoredName { get; set; }
+    // Rubro del plan de cuentas de Finanzas del edificio (opcional). Con rubro, Category sale del rubro; sin rubro, el
+    // libro usa la categoria como siempre.
+    public Guid? LedgerCategoryId { get; set; }
 
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
     public Unit? TargetUnit { get; set; }
+    public LedgerCategory? LedgerCategory { get; set; }
     public ICollection<ExpenseCharge> ExpenseCharges { get; set; } = new List<ExpenseCharge>();
 }

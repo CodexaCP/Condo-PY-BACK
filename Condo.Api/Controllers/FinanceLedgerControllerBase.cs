@@ -19,9 +19,9 @@ public abstract class FinanceLedgerControllerBase(
 
     // Modulo disponible + configuracion inicial completa. Si falta la configuracion responde 409 con un mensaje claro.
     protected async Task<(ActionResult? Denied, LedgerContext? Context)> RequireLedgerAsync(
-        Guid buildingId, CancellationToken cancellationToken, bool write = false)
+        Guid buildingId, CancellationToken cancellationToken, bool write = false, bool budget = false)
     {
-        var denied = await RequireModuleAsync(buildingId, write, cancellationToken);
+        var denied = await RequireModuleAsync(buildingId, write, cancellationToken, budget: budget);
         if (denied is not null)
         {
             return (denied, null);

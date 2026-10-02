@@ -110,22 +110,24 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
 
         var incomeTotals = await dbContext.BuildingIncomes.AsNoTracking()
             .Where(i => !i.IsDeleted && i.BuildingId == buildingId && i.IncomeDate >= from && i.IncomeDate <= to)
-            .GroupBy(i => new { i.IncomeDate.Year, i.IncomeDate.Month, i.Category })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, Amount = g.Sum(x => x.Amount) })
+            .GroupBy(i => new { i.IncomeDate.Year, i.IncomeDate.Month, i.Category, i.LedgerCategoryId })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.LedgerCategoryId, Amount = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
         foreach (var it in incomeTotals)
         {
-            AddBucket(raw, it.Year, it.Month, FinanceLedgerRules.ForIncome(it.Category, ctx.IncomeTreatment, ctx.Resolved), it.Amount);
+            AddBucket(raw, it.Year, it.Month,
+                FinanceLedgerRules.ForIncome(it.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.RubroKeyOf(it.LedgerCategoryId)), it.Amount);
         }
 
         var expenseTotals = await dbContext.BuildingExpenses.AsNoTracking()
             .Where(e => !e.IsDeleted && e.BuildingId == buildingId && e.ExpenseDate >= from && e.ExpenseDate <= to)
-            .GroupBy(e => new { e.ExpenseDate.Year, e.ExpenseDate.Month, e.Category, e.PaidByReserveFund })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, Amount = g.Sum(x => x.Amount) })
+            .GroupBy(e => new { e.ExpenseDate.Year, e.ExpenseDate.Month, e.Category, e.PaidByReserveFund, e.LedgerCategoryId })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, g.Key.LedgerCategoryId, Amount = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
         foreach (var et in expenseTotals)
         {
-            AddBucket(raw, et.Year, et.Month, FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved), et.Amount);
+            AddBucket(raw, et.Year, et.Month,
+                FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.RubroKeyOf(et.LedgerCategoryId)), et.Amount);
         }
 
         return raw
@@ -184,11 +186,11 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
 
         var incomes = await dbContext.BuildingIncomes.AsNoTracking()
             .Where(i => !i.IsDeleted && i.BuildingId == buildingId && i.IncomeDate >= from && i.IncomeDate <= to)
-            .Select(i => new { i.Id, i.IncomeDate, i.Amount, i.Category, i.Description })
+            .Select(i => new { i.Id, i.IncomeDate, i.Amount, i.Category, i.LedgerCategoryId, i.Description })
             .ToListAsync(cancellationToken);
         foreach (var i in incomes)
         {
-            var rule = FinanceLedgerRules.ForIncome(i.Category, ctx.IncomeTreatment, ctx.Resolved);
+            var rule = FinanceLedgerRules.ForIncome(i.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.RubroKeyOf(i.LedgerCategoryId));
             if (rule is null)
             {
                 continue;
@@ -200,11 +202,11 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
 
         var expenses = await dbContext.BuildingExpenses.AsNoTracking()
             .Where(e => !e.IsDeleted && e.BuildingId == buildingId && e.ExpenseDate >= from && e.ExpenseDate <= to)
-            .Select(e => new { e.Id, e.ExpenseDate, e.Amount, e.Category, e.PaidByReserveFund, e.Description, e.SupplierName })
+            .Select(e => new { e.Id, e.ExpenseDate, e.Amount, e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.Description, e.SupplierName })
             .ToListAsync(cancellationToken);
         foreach (var e in expenses)
         {
-            var rule = FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved);
+            var rule = FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.RubroKeyOf(e.LedgerCategoryId));
             if (rule is null)
             {
                 continue;

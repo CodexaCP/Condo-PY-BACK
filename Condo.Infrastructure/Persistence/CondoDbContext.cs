@@ -221,6 +221,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.BuildingExpenses)
             .HasForeignKey(x => x.TargetUnitId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpense>()
+            .HasOne(x => x.LedgerCategory).WithMany()
+            .HasForeignKey(x => x.LedgerCategoryId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpense>().HasIndex(x => x.LedgerCategoryId);
 
         // ── RecurringBuildingExpense ───────────────────────────────────────────
         modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
@@ -266,6 +270,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .WithMany(x => x.BuildingIncomes)
             .HasForeignKey(x => x.ExpensePeriodId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingIncome>()
+            .HasOne(x => x.LedgerCategory).WithMany()
+            .HasForeignKey(x => x.LedgerCategoryId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingIncome>().HasIndex(x => x.LedgerCategoryId);
 
         // ── ExpenseSettlement ──────────────────────────────────────────────────
         modelBuilder.Entity<ExpenseSettlement>().Property(x => x.TotalBuildingExpenses).HasColumnType("decimal(18,2)");
@@ -912,6 +920,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<LedgerCategory>().Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
         modelBuilder.Entity<LedgerCategory>().Property(x => x.ExternalCode).HasMaxLength(50);
         modelBuilder.Entity<LedgerCategory>().Property(x => x.SystemKey).HasMaxLength(60);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.ExpenseCategory).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.IncomeCategory).HasConversion<string>().HasMaxLength(50);
+        modelBuilder.Entity<LedgerCategory>().Ignore(x => x.RubroKey);
         modelBuilder.Entity<LedgerCategory>().HasIndex(x => new { x.BuildingId, x.Code }).IsUnique().HasFilter("[IsDeleted] = 0");
         modelBuilder.Entity<LedgerCategory>().HasIndex(x => new { x.BuildingId, x.SystemKey }).IsUnique()
             .HasFilter("[IsDeleted] = 0 AND [SystemKey] IS NOT NULL");

@@ -38,6 +38,8 @@ builder.Services.AddScoped<Condo.Api.Services.PushDispatcher>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceLedgerService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceBudgetService>();
+builder.Services.AddScoped<Condo.Api.Services.MovementRubroResolver>();
+builder.Services.AddScoped<Condo.Api.Services.FinancePlanCopier>();
 builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();

@@ -40,13 +40,14 @@ public class FinanceBudgetService(ICondoDbContext dbContext, FinanceLedgerServic
         var buildingId = ctx.BuildingId;
         var totals = await dbContext.BuildingExpenses.AsNoTracking()
             .Where(e => !e.IsDeleted && e.BuildingId == buildingId && e.ExpenseDate >= from && e.ExpenseDate <= to)
-            .GroupBy(e => new { e.ExpenseDate.Year, e.ExpenseDate.Month, e.Category })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, Amount = g.Sum(x => x.Amount) })
+            .GroupBy(e => new { e.ExpenseDate.Year, e.ExpenseDate.Month, e.Category, e.LedgerCategoryId })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.LedgerCategoryId, Amount = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
 
         foreach (var t in totals)
         {
-            var key = (t.Year, t.Month, FinanceChartTemplate.ExpenseKey(t.Category));
+            // El gasto que eligio rubro cuenta en ese rubro; el que no, en el de su categoria.
+            var key = (t.Year, t.Month, ctx.RubroKeyOf(t.LedgerCategoryId) ?? FinanceChartTemplate.ExpenseKey(t.Category));
             result[key] = result.GetValueOrDefault(key) + t.Amount;
         }
 

@@ -31,8 +31,12 @@ public abstract class FinanceControllerBase(
     protected bool IsFinanceRole =>
         FinanceRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase);
 
-    // Configurar (cuentas, plan de cuentas, fecha de arranque): SuperAdmin y Administrador de empresa.
-    protected bool CanConfigure => tenantContext.IsSuperAdmin || tenantContext.IsCompanyAdmin;
+    // Configurar (fecha de arranque, cuentas y plan de cuentas): solo SuperAdmin, porque la configuracion inicial de cada edificio
+    // es un servicio de CondoPY. Los demas roles ven la configuracion en solo lectura.
+    protected bool CanConfigure => tenantContext.IsSuperAdmin;
+
+    // Presupuesto: SuperAdmin y Administrador de empresa.
+    protected bool CanEditBudget => tenantContext.IsSuperAdmin || tenantContext.IsCompanyAdmin;
 
     protected ObjectResult FinanceForbidden(string code, string message) =>
         StatusCode(StatusCodes.Status403Forbidden, new { error = code, message });
@@ -43,7 +47,7 @@ public abstract class FinanceControllerBase(
     /// inexistente) para no revelar que existe.
     /// </summary>
     protected async Task<ActionResult?> RequireModuleAsync(
-        Guid buildingId, bool write, CancellationToken cancellationToken, bool hideMissingAccess = false)
+        Guid buildingId, bool write, CancellationToken cancellationToken, bool hideMissingAccess = false, bool budget = false)
     {
         if (!IsFinanceRole)
         {
@@ -76,9 +80,11 @@ public abstract class FinanceControllerBase(
             return FinanceForbidden(FinanceModuleGate.PlanNotIncludedCode, FinanceModuleGate.PlanNotIncludedMessage);
         }
 
-        if (write && !CanConfigure)
+        if (write && !(budget ? CanEditBudget : CanConfigure))
         {
-            return FinanceForbidden(FinanceModuleGate.ForbiddenCode, FinanceModuleGate.ReadOnlyRoleMessage);
+            return FinanceForbidden(
+                FinanceModuleGate.ForbiddenCode,
+                budget ? FinanceModuleGate.BudgetReadOnlyRoleMessage : FinanceModuleGate.ReadOnlyRoleMessage);
         }
 
         return null;

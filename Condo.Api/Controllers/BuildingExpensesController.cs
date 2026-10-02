@@ -2,6 +2,7 @@ using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +19,8 @@ public class BuildingExpensesController(
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
     IWebHostEnvironment env,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    MovementRubroResolver rubros) : ControllerBase
 {
     private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
     private const long MaxReceiptSizeBytes = 10 * 1024 * 1024; // 10 MB
@@ -82,7 +84,10 @@ public class BuildingExpensesController(
                 Notes = x.Notes,
                 PaidByReserveFund = x.PaidByReserveFund,
                 HasReceipt = x.ReceiptStoredName != null,
-                ReceiptFileName = x.ReceiptFileName
+                ReceiptFileName = x.ReceiptFileName,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .ToListAsync(cancellationToken);
 
@@ -114,7 +119,10 @@ public class BuildingExpensesController(
                 Notes = x.Notes,
                 PaidByReserveFund = x.PaidByReserveFund,
                 HasReceipt = x.ReceiptStoredName != null,
-                ReceiptFileName = x.ReceiptFileName
+                ReceiptFileName = x.ReceiptFileName,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -151,12 +159,20 @@ public class BuildingExpensesController(
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
         }
 
+        // Con rubro elegido, la categoria de la liquidacion sale del rubro.
+        var rubro = await rubros.ResolveAsync(request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Expense, null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         var entity = new BuildingExpense
         {
             CompanyId = effectiveCompanyId.Value,
             BuildingId = request.BuildingId,
             ExpensePeriodId = request.ExpensePeriodId,
-            Category = request.Category,
+            Category = rubro.ExpenseCategory ?? request.Category,
+            LedgerCategoryId = rubro.Rubro?.Id,
             SupplierName = request.SupplierName.Trim(),
             Description = request.Description.Trim(),
             ExpenseDate = request.ExpenseDate,
@@ -170,7 +186,7 @@ public class BuildingExpensesController(
         dbContext.BuildingExpenses.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, context.Building!, context.Period!, context.TargetUnit));
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, context.Building!, context.Period!, context.TargetUnit, rubro.Rubro));
     }
 
     [HttpPut("{id:guid}")]
@@ -226,10 +242,20 @@ public class BuildingExpensesController(
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
         }
 
+        // Conservar el rubro que ya tenia no exige que siga activo; cambiarlo a otro si.
+        var rubro = await rubros.ResolveAsync(
+            request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Expense,
+            entity.BuildingId == request.BuildingId ? entity.LedgerCategoryId : null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         entity.CompanyId = effectiveCompanyId.Value;
         entity.BuildingId = request.BuildingId;
         entity.ExpensePeriodId = request.ExpensePeriodId;
-        entity.Category = request.Category;
+        entity.Category = rubro.ExpenseCategory ?? request.Category;
+        entity.LedgerCategoryId = rubro.Rubro?.Id;
         entity.SupplierName = request.SupplierName.Trim();
         entity.Description = request.Description.Trim();
         entity.ExpenseDate = request.ExpenseDate;
@@ -240,7 +266,7 @@ public class BuildingExpensesController(
         entity.PaidByReserveFund = request.PaidByReserveFund;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ToDto(entity, context.Building!, context.Period!, context.TargetUnit));
+        return Ok(ToDto(entity, context.Building!, context.Period!, context.TargetUnit, rubro.Rubro));
     }
 
     private const long MaxImportSizeBytes = 2 * 1024 * 1024; // 2 MB
@@ -273,10 +299,17 @@ public class BuildingExpensesController(
             .Select(x => x.Name)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
+        // Con Finanzas del edificio disponible la plantilla trae la columna Rubro y la hoja con los rubros de gastos de este edificio.
+        var assignable = await rubros.AssignableAsync(buildingId, LedgerCategoryType.Expense, cancellationToken);
+        var rubroOptions = assignable?.Rubros
+            .Select(r => new BuildingExpenseImportTemplateBuilder.RubroOption(
+                r.Code, r.Name, assignable.GroupOf(r), CategoryLabels.ExpenseLabel(FinanceChartTemplate.ExpenseCategoryOf(r) ?? BuildingExpenseCategory.Other)))
+            .ToList();
+
         var token = ExpenseImportTemplateToken.Create(ImportTemplateSecret, companyId.Value, building.Id);
         var fileName = $"plantilla-gastos-{new string(building.Name.Where(char.IsLetterOrDigit).ToArray())}.xlsx";
         return File(
-            BuildingExpenseImportTemplateBuilder.Build(building.Name, companyName, token),
+            BuildingExpenseImportTemplateBuilder.Build(building.Name, companyName, token, rubroOptions),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             fileName);
     }
@@ -362,12 +395,16 @@ public class BuildingExpensesController(
         var result = new BuildingExpenseImportResultDto { ExistingCount = existing.Count };
         var toCreate = new List<BuildingExpense>();
 
+        // Rubros de gastos del edificio (nulo si no tiene Finanzas del edificio disponible).
+        var assignable = await rubros.AssignableAsync(buildingId, LedgerCategoryType.Expense, cancellationToken);
+
         foreach (var row in parsed)
         {
             var dto = new BuildingExpenseImportRowDto
             {
                 RowNumber = row.RowNumber,
                 Category = row.Category,
+                Rubro = row.Rubro,
                 Supplier = row.Supplier,
                 Description = row.Description,
                 Amount = row.Amount,
@@ -375,14 +412,49 @@ public class BuildingExpensesController(
             };
 
             string? error = null;
+            string? warning = null;
             BuildingExpenseCategory category = default;
-            if (row.Category.Length == 0) error = "La categoria es obligatoria.";
-            else if (!BuildingExpenseImportParser.TryResolveCategory(row.Category, out category)) error = $"Categoria desconocida: \"{row.Category}\". Ver la hoja Categorias de la plantilla.";
-            else if (row.Description.Length == 0) error = "La descripcion es obligatoria.";
-            else if (row.Description.Length > 200) error = "La descripcion no puede superar los 200 caracteres.";
-            else if (row.Supplier.Length > 160) error = "El proveedor no puede superar los 160 caracteres.";
-            else if (row.AmountError is not null) error = row.AmountError;
-            else if (row.Amount is not > 0) error = "El monto debe ser mayor que cero.";
+            LedgerCategory? rubro = null;
+
+            if (row.Rubro.Length > 0)
+            {
+                if (assignable is null)
+                {
+                    error = "Este edificio no tiene Finanzas del edificio habilitado: dejá la columna Rubro vacía.";
+                }
+                else
+                {
+                    var (resolved, rubroError) = BuildingExpenseImportParser.ResolveRubro(row.Rubro, assignable.Rubros);
+                    error = rubroError;
+                    rubro = resolved;
+                }
+            }
+
+            if (error is null && rubro is not null)
+            {
+                // Con rubro, la categoria de la liquidacion sale del rubro; si ademas se escribio otra, se avisa.
+                category = FinanceChartTemplate.ExpenseCategoryOf(rubro) ?? BuildingExpenseCategory.Other;
+                dto.Rubro = $"{rubro.Code} {rubro.Name}";
+                if (row.Category.Length > 0
+                    && (!BuildingExpenseImportParser.TryResolveCategory(row.Category, out var typed) || typed != category))
+                {
+                    warning = $"La categoria se toma del rubro: {CategoryLabels.ExpenseLabel(category)}.";
+                }
+            }
+            else if (error is null)
+            {
+                if (row.Category.Length == 0) error = "La categoria es obligatoria (o elegi un rubro).";
+                else if (!BuildingExpenseImportParser.TryResolveCategory(row.Category, out category)) error = $"Categoria desconocida: \"{row.Category}\". Ver la hoja Categorias de la plantilla.";
+            }
+
+            if (error is null)
+            {
+                if (row.Description.Length == 0) error = "La descripcion es obligatoria.";
+                else if (row.Description.Length > 200) error = "La descripcion no puede superar los 200 caracteres.";
+                else if (row.Supplier.Length > 160) error = "El proveedor no puede superar los 160 caracteres.";
+                else if (row.AmountError is not null) error = row.AmountError;
+                else if (row.Amount is not > 0) error = "El monto debe ser mayor que cero.";
+            }
 
             if (error is not null)
             {
@@ -409,6 +481,12 @@ public class BuildingExpensesController(
                     dto.Message = "Fila repetida en el archivo (mismo proveedor, descripcion y monto): se importa igual.";
                     result.WarningCount++;
                 }
+                else if (warning is not null)
+                {
+                    dto.Status = "Warning";
+                    dto.Message = warning;
+                    result.WarningCount++;
+                }
                 else
                 {
                     result.OkCount++;
@@ -420,6 +498,7 @@ public class BuildingExpensesController(
                     BuildingId = buildingId,
                     ExpensePeriodId = expensePeriodId,
                     Category = category,
+                    LedgerCategoryId = rubro?.Id,
                     SupplierName = row.Supplier,
                     Description = row.Description,
                     ExpenseDate = period.StartDate,
@@ -643,6 +722,7 @@ public class BuildingExpensesController(
             .Include(x => x.Building).ThenInclude(b => b!.Condominium)
             .Include(x => x.ExpensePeriod)
             .Include(x => x.TargetUnit)
+            .Include(x => x.LedgerCategory)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
         if (entity is null)
@@ -679,7 +759,7 @@ public class BuildingExpensesController(
         entity.ReceiptStoredName = storedName;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(ToDto(entity, entity.Building!, entity.ExpensePeriod!, entity.TargetUnit));
+        return Ok(ToDto(entity, entity.Building!, entity.ExpensePeriod!, entity.TargetUnit, entity.LedgerCategory));
     }
 
     [HttpGet("{id:guid}/receipt")]
@@ -774,7 +854,7 @@ public class BuildingExpensesController(
                 cancellationToken);
     }
 
-    private static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit) =>
+    private static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit, LedgerCategory? rubro = null) =>
         new()
         {
             Id = entity.Id,
@@ -794,6 +874,9 @@ public class BuildingExpensesController(
             Notes = entity.Notes,
             PaidByReserveFund = entity.PaidByReserveFund,
             HasReceipt = entity.ReceiptStoredName != null,
-            ReceiptFileName = entity.ReceiptFileName
+            ReceiptFileName = entity.ReceiptFileName,
+            LedgerCategoryId = entity.LedgerCategoryId,
+            LedgerCategoryCode = rubro?.Code,
+            LedgerCategoryName = rubro?.Name
         };
 }

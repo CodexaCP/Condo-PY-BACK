@@ -1,6 +1,7 @@
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -11,14 +12,16 @@ namespace Condo.Api.Controllers;
 /// <summary>
 /// Plan de cuentas del edificio: arbol de dos niveles (rubro y subrubro) con codigos editables. Nace de la plantilla
 /// estandar al habilitar el modulo; los rubros de la plantilla se pueden renombrar, recodificar y desactivar, pero no
-/// mover ni eliminar (el libro derivado los usa para mapear las categorias de gastos e ingresos).
+/// mover ni eliminar. Los gastos e ingresos pueden elegir un subrubro; el libro derivado usa ese rubro y, si no eligieron
+/// ninguno, mapea su categoria con la clave de la plantilla. Solo el SuperAdmin modifica el plan (servicio de configuracion).
 /// </summary>
 [Route("api/finance/categories")]
 public class FinanceCategoriesController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,
     ITenantContext tenantContext,
-    FinanceModuleGate gate) : FinanceControllerBase(dbContext, accessScope, tenantContext, gate)
+    FinanceModuleGate gate,
+    FinancePlanCopier copier) : FinanceControllerBase(dbContext, accessScope, tenantContext, gate)
 {
     private const int MaxCodeLength = 30;
     private const int MaxNameLength = 200;
@@ -38,10 +41,11 @@ public class FinanceCategoriesController(
             .ToListAsync(cancellationToken);
 
         var parentIds = items.Where(x => x.ParentId.HasValue).Select(x => x.ParentId!.Value).ToHashSet();
+        var withMovements = await MovementCategoryIdsAsync(buildingId, cancellationToken);
 
         return Ok(items
             .OrderBy(x => x.Code, StringComparer.Ordinal)
-            .Select(x => ToDto(x, parentIds.Contains(x.Id)))
+            .Select(x => ToDto(x, parentIds.Contains(x.Id), withMovements.Contains(x.Id)))
             .ToList());
     }
 
@@ -66,6 +70,13 @@ public class FinanceCategoriesController(
             return error;
         }
 
+        var type = parent?.Type ?? request.Type;
+        var (categoryError, expenseCategory, incomeCategory) = ResolveSettlementCategory(request, type, parent is not null, null, null);
+        if (categoryError is not null)
+        {
+            return BadRequest(categoryError);
+        }
+
         var entity = new LedgerCategory
         {
             CompanyId = companyId.Value,
@@ -73,14 +84,16 @@ public class FinanceCategoriesController(
             ParentId = parent?.Id,
             Code = request.Code.Trim(),
             Name = request.Name.Trim(),
-            Type = parent?.Type ?? request.Type,
+            Type = type,
             ExternalCode = NormalizeExternalCode(request.ExternalCode),
+            ExpenseCategory = expenseCategory,
+            IncomeCategory = incomeCategory,
             IsActive = request.IsActive
         };
 
         Db.LedgerCategories.Add(entity);
         var conflict = await SaveOrConflictAsync(cancellationToken);
-        return conflict ?? Ok(ToDto(entity, false));
+        return conflict ?? Ok(ToDto(entity, false, false));
     }
 
     [HttpPut("{id:guid}")]
@@ -99,6 +112,7 @@ public class FinanceCategoriesController(
         }
 
         var hasChildren = await Db.LedgerCategories.AnyAsync(x => !x.IsDeleted && x.ParentId == entity.Id, cancellationToken);
+        var hasMovements = await HasMovementsAsync(entity.Id, cancellationToken);
 
         var (error, parent) = await ValidateAsync(request, entity.BuildingId, entity, cancellationToken);
         if (error is not null)
@@ -127,8 +141,29 @@ public class FinanceCategoriesController(
                 return BadRequest("Este rubro tiene presupuesto cargado: no se le puede cambiar el tipo.");
             }
 
+            if (hasMovements && (newType != entity.Type || parent is null))
+            {
+                return BadRequest("Este rubro ya tiene gastos o ingresos cargados: no se le puede cambiar el tipo ni pasarlo a rubro principal. Si ya no lo usás, desactivalo.");
+            }
+
+            // Sin dato en el pedido se conserva la categoria que ya tenia.
+            var currentExpense = FinanceChartTemplate.ExpenseCategoryOf(entity);
+            var currentIncome = FinanceChartTemplate.IncomeCategoryOf(entity);
+            var (categoryError, expenseCategory, incomeCategory) = ResolveSettlementCategory(request, newType, parent is not null, currentExpense, currentIncome);
+            if (categoryError is not null)
+            {
+                return BadRequest(categoryError);
+            }
+
+            if (hasMovements && (expenseCategory != currentExpense || incomeCategory != currentIncome))
+            {
+                return BadRequest("Este rubro ya tiene gastos o ingresos cargados: no se le puede cambiar la categoría de la liquidación, porque esos movimientos ya cuentan con la actual.");
+            }
+
             entity.ParentId = parent?.Id;
             entity.Type = newType;
+            entity.ExpenseCategory = expenseCategory;
+            entity.IncomeCategory = incomeCategory;
         }
 
         entity.Code = request.Code.Trim();
@@ -137,7 +172,7 @@ public class FinanceCategoriesController(
         entity.IsActive = request.IsActive;
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
-        return conflict ?? Ok(ToDto(entity, hasChildren));
+        return conflict ?? Ok(ToDto(entity, hasChildren, hasMovements));
     }
 
     [HttpDelete("{id:guid}")]
@@ -165,8 +200,12 @@ public class FinanceCategoriesController(
             return BadRequest("El rubro tiene subrubros. Eliminá o movés primero sus subrubros.");
         }
 
-        // Un rubro con presupuesto cargado solo se puede desactivar. (Los gastos y cobros no se enlazan al rubro: el libro los
-        // clasifica por la clave de la plantilla, asi que borrar un rubro propio no deja movimientos huerfanos.)
+        // Un rubro con gastos o ingresos cargados, o con presupuesto, solo se puede desactivar.
+        if (await HasMovementsAsync(entity.Id, cancellationToken))
+        {
+            return BadRequest("El rubro tiene gastos o ingresos cargados: no se puede eliminar. Si ya no lo usás, desactivalo.");
+        }
+
         if (await HasBudgetAsync(entity.Id, cancellationToken))
         {
             return BadRequest("El rubro tiene presupuesto cargado: pasalo a cero o desactivalo.");
@@ -175,6 +214,41 @@ public class FinanceCategoriesController(
         entity.IsDeleted = true;
         await Db.SaveChangesAsync(cancellationToken);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Copia el plan de cuentas de otro edificio (nombres, codigos del contador, rubros activos y rubros propios) sin tocar
+    /// los movimientos ni el presupuesto del edificio destino. Hay que poder operar en los dos edificios.
+    /// </summary>
+    [HttpPost("copy-from")]
+    public async Task<ActionResult<LedgerCategoryCopyResultDto>> CopyFrom([FromBody] LedgerCategoryCopyRequest request, CancellationToken cancellationToken)
+    {
+        if (request.SourceBuildingId == request.TargetBuildingId)
+        {
+            return BadRequest("Elegí un edificio de origen distinto del edificio que estás configurando.");
+        }
+
+        var denied = await RequireModuleAsync(request.TargetBuildingId, write: true, cancellationToken);
+        if (denied is not null)
+        {
+            return denied;
+        }
+
+        var deniedSource = await RequireModuleAsync(request.SourceBuildingId, write: false, cancellationToken, hideMissingAccess: true);
+        if (deniedSource is not null)
+        {
+            return deniedSource;
+        }
+
+        var companyId = await ResolveCompanyIdAsync(request.TargetBuildingId, cancellationToken);
+        if (!companyId.HasValue)
+        {
+            return BadRequest(NoCompanyMessage);
+        }
+
+        var result = await copier.CopyAsync(request.SourceBuildingId, request.TargetBuildingId, companyId.Value, cancellationToken);
+        var conflict = await SaveOrConflictAsync(cancellationToken);
+        return conflict ?? Ok(result);
     }
 
     // Valida el pedido y resuelve el rubro padre. `current` es el rubro que se edita (null al crear).
@@ -258,8 +332,74 @@ public class FinanceCategoriesController(
         return (null, parent);
     }
 
+    // Categoria de la liquidacion de un subrubro propio de gastos o ingresos. Sin dato en el pedido: la que ya tenia o "Otro".
+    // El aporte al fondo de reserva y el saldo acumulado / fondo operativo tienen un trato especial en el libro y no se eligen.
+    private static (string? Error, BuildingExpenseCategory? Expense, BuildingIncomeCategory? Income) ResolveSettlementCategory(
+        LedgerCategoryUpsertRequest request, LedgerCategoryType type, bool isLeaf,
+        BuildingExpenseCategory? currentExpense, BuildingIncomeCategory? currentIncome)
+    {
+        if (!isLeaf)
+        {
+            return (null, null, null);
+        }
+
+        if (type == LedgerCategoryType.Expense)
+        {
+            var category = request.ExpenseCategory ?? currentExpense ?? BuildingExpenseCategory.Other;
+            if (!Enum.IsDefined(category))
+            {
+                return ("La categoría de la liquidación no es válida.", null, null);
+            }
+
+            if (category == BuildingExpenseCategory.ReserveFund)
+            {
+                return ("El aporte al fondo de reserva ya tiene su propio rubro en la plantilla: elegí otra categoría para este rubro.", null, null);
+            }
+
+            return (null, category, null);
+        }
+
+        if (type == LedgerCategoryType.Income)
+        {
+            var category = request.IncomeCategory ?? currentIncome ?? BuildingIncomeCategory.Other;
+            if (!Enum.IsDefined(category))
+            {
+                return ("La categoría de la liquidación no es válida.", null, null);
+            }
+
+            if (category is BuildingIncomeCategory.AccumulatedBalance or BuildingIncomeCategory.OperationalFund)
+            {
+                return ("El saldo acumulado y el fondo operativo no son ingresos nuevos: elegí otra categoría para este rubro.", null, null);
+            }
+
+            return (null, null, category);
+        }
+
+        return (null, null, null);
+    }
+
     private Task<bool> HasBudgetAsync(Guid categoryId, CancellationToken cancellationToken) =>
         Db.BudgetLines.AnyAsync(x => !x.IsDeleted && x.CategoryId == categoryId && x.Amount != 0m, cancellationToken);
+
+    private async Task<bool> HasMovementsAsync(Guid categoryId, CancellationToken cancellationToken) =>
+        await Db.BuildingExpenses.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken)
+        || await Db.BuildingIncomes.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken);
+
+    // Rubros del edificio que ya tienen gastos o ingresos cargados.
+    private async Task<HashSet<Guid>> MovementCategoryIdsAsync(Guid buildingId, CancellationToken cancellationToken)
+    {
+        var fromExpenses = await Db.BuildingExpenses.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.LedgerCategoryId != null)
+            .Select(x => x.LedgerCategoryId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var fromIncomes = await Db.BuildingIncomes.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.LedgerCategoryId != null)
+            .Select(x => x.LedgerCategoryId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        return fromExpenses.Concat(fromIncomes).ToHashSet();
+    }
 
     private static string? NormalizeExternalCode(string? value)
     {
@@ -267,18 +407,25 @@ public class FinanceCategoriesController(
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
-    private static LedgerCategoryDto ToDto(LedgerCategory x, bool hasChildren) => new()
+    private static LedgerCategoryDto ToDto(LedgerCategory x, bool hasChildren, bool hasMovements)
     {
-        Id = x.Id,
-        BuildingId = x.BuildingId,
-        ParentId = x.ParentId,
-        Code = x.Code,
-        Name = x.Name,
-        Type = x.Type,
-        ExternalCode = x.ExternalCode,
-        SystemKey = x.SystemKey,
-        IsActive = x.IsActive,
-        IsTemplate = x.SystemKey is not null,
-        HasChildren = hasChildren
-    };
+        var isLeaf = x.ParentId.HasValue && !hasChildren;
+        return new LedgerCategoryDto
+        {
+            Id = x.Id,
+            BuildingId = x.BuildingId,
+            ParentId = x.ParentId,
+            Code = x.Code,
+            Name = x.Name,
+            Type = x.Type,
+            ExternalCode = x.ExternalCode,
+            SystemKey = x.SystemKey,
+            IsActive = x.IsActive,
+            IsTemplate = x.SystemKey is not null,
+            HasChildren = hasChildren,
+            ExpenseCategory = isLeaf ? FinanceChartTemplate.ExpenseCategoryOf(x) : null,
+            IncomeCategory = isLeaf ? FinanceChartTemplate.IncomeCategoryOf(x) : null,
+            HasMovements = hasMovements
+        };
+    }
 }

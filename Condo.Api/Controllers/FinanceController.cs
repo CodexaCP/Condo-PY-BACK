@@ -370,7 +370,8 @@ public class FinanceController(
             AccountCount = accountCount,
             CategoryCount = categoryCount,
             MissingForSetup = await ComputeMissingAsync(buildingId, settings, cancellationToken),
-            CanEdit = CanConfigure
+            CanEdit = CanConfigure,
+            CanEditBudget = CanEditBudget
         };
     }
 

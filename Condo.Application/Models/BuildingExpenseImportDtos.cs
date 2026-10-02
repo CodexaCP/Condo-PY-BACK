@@ -19,6 +19,8 @@ public class BuildingExpenseImportRowDto
 {
     public int RowNumber { get; set; }
     public string Category { get; set; } = string.Empty;
+    // Rubro del plan de cuentas (solo edificios con Finanzas): "codigo nombre" una vez resuelto, o lo escrito si no se reconoce.
+    public string Rubro { get; set; } = string.Empty;
     public string Supplier { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal? Amount { get; set; }

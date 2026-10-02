@@ -320,7 +320,7 @@ public static class FinanceReportBuilder
         {
             // Un rubro principal incluye a sus subrubros.
             var ids = ctx.Categories.Where(c => c.Id == categoryId.Value || c.ParentId == categoryId.Value).Select(c => c.Id).ToHashSet();
-            var keys = ctx.Categories.Where(c => ids.Contains(c.Id) && c.SystemKey != null).Select(c => c.SystemKey!).ToHashSet();
+            var keys = ctx.Categories.Where(c => ids.Contains(c.Id)).Select(c => c.RubroKey).ToHashSet();
             filtered = filtered.Where(r => keys.Contains(r.RubroKey));
         }
 

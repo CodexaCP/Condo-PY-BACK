@@ -12,7 +12,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/building-incomes")]
-public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
+public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeService accessScope, MovementRubroResolver rubros) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingIncomeDto>>> GetAll(
@@ -66,7 +66,10 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
                 Description = x.Description,
                 IncomeDate = x.IncomeDate,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .ToListAsync(cancellationToken);
 
@@ -91,7 +94,10 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
                 Description = x.Description,
                 IncomeDate = x.IncomeDate,
                 Amount = x.Amount,
-                Notes = x.Notes
+                Notes = x.Notes,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -128,12 +134,20 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar ingresos.");
         }
 
+        // Con rubro elegido, la categoria de la liquidacion sale del rubro.
+        var rubro = await rubros.ResolveAsync(request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Income, null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         var entity = new BuildingIncome
         {
             CompanyId = effectiveCompanyId.Value,
             BuildingId = request.BuildingId,
             ExpensePeriodId = request.ExpensePeriodId,
-            Category = request.Category,
+            Category = rubro.IncomeCategory ?? request.Category,
+            LedgerCategoryId = rubro.Rubro?.Id,
             Description = request.Description.Trim(),
             IncomeDate = request.IncomeDate,
             Amount = request.Amount,
@@ -143,7 +157,7 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
         dbContext.BuildingIncomes.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, context.Building!, context.Period!));
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, context.Building!, context.Period!, rubro.Rubro));
     }
 
     [HttpPut("{id:guid}")]
@@ -199,17 +213,27 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar ingresos.");
         }
 
+        // Conservar el rubro que ya tenia no exige que siga activo; cambiarlo a otro si.
+        var rubro = await rubros.ResolveAsync(
+            request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Income,
+            entity.BuildingId == request.BuildingId ? entity.LedgerCategoryId : null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         entity.CompanyId = effectiveCompanyId.Value;
         entity.BuildingId = request.BuildingId;
         entity.ExpensePeriodId = request.ExpensePeriodId;
-        entity.Category = request.Category;
+        entity.Category = rubro.IncomeCategory ?? request.Category;
+        entity.LedgerCategoryId = rubro.Rubro?.Id;
         entity.Description = request.Description.Trim();
         entity.IncomeDate = request.IncomeDate;
         entity.Amount = request.Amount;
         entity.Notes = request.Notes.Trim();
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ToDto(entity, context.Building!, context.Period!));
+        return Ok(ToDto(entity, context.Building!, context.Period!, rubro.Rubro));
     }
 
     [HttpDelete("{id:guid}")]
@@ -422,7 +446,7 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
         return true;
     }
 
-    private static BuildingIncomeDto ToDto(BuildingIncome entity, Building building, ExpensePeriod period) =>
+    private static BuildingIncomeDto ToDto(BuildingIncome entity, Building building, ExpensePeriod period, LedgerCategory? rubro = null) =>
         new()
         {
             Id = entity.Id,
@@ -435,6 +459,9 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             Description = entity.Description,
             IncomeDate = entity.IncomeDate,
             Amount = entity.Amount,
-            Notes = entity.Notes
+            Notes = entity.Notes,
+            LedgerCategoryId = entity.LedgerCategoryId,
+            LedgerCategoryCode = rubro?.Code,
+            LedgerCategoryName = rubro?.Name
         };
 }

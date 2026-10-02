@@ -149,7 +149,7 @@ public static class FinanceBudgetCalculator
             months.Sum(m => cells.Where(c => c.CategoryId == id && c.Year == m.Year && c.Month == m.Month).Sum(c => c.Amount));
 
         decimal Actual(LedgerCategory c, IEnumerable<(int Year, int Month)> months) =>
-            c.SystemKey is null ? 0m : months.Sum(m => actuals.GetValueOrDefault((m.Year, m.Month, c.SystemKey)));
+            months.Sum(m => actuals.GetValueOrDefault((m.Year, m.Month, c.RubroKey)));
 
         var lines = new List<FinanceBudgetVsActualLineDto>();
         foreach (var c in BudgetableCategories(ctx.Categories.ToList()))

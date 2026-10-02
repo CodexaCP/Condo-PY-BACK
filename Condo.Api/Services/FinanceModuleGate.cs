@@ -27,7 +27,9 @@ public class FinanceModuleGate(ICondoDbContext dbContext)
     public const string RoleNotAllowedMessage =
         "Tu rol no tiene acceso al módulo Finanzas del edificio.";
     public const string ReadOnlyRoleMessage =
-        "Solo el Administrador de empresa o el SuperAdmin pueden modificar la configuración financiera.";
+        "La configuración financiera del edificio (fecha de arranque, cuentas y plan de cuentas) la realiza CondoPY. Pedí los cambios que necesites a tu administrador de CondoPY.";
+    public const string BudgetReadOnlyRoleMessage =
+        "Solo el Administrador de empresa o el SuperAdmin pueden modificar el presupuesto.";
 
     public async Task<FinanceModuleState> GetStateAsync(Guid buildingId, CancellationToken cancellationToken)
     {

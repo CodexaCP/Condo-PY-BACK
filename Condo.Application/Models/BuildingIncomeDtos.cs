@@ -29,6 +29,8 @@ public class BuildingIncomeUpsertRequest
     public DateOnly IncomeDate { get; set; }
     public decimal Amount { get; set; }
     public string Notes { get; set; } = string.Empty;
+    // Rubro del plan de cuentas de Finanzas del edificio (opcional). Con rubro, la categoria se toma del rubro.
+    public Guid? LedgerCategoryId { get; set; }
 }
 
 public class BuildingIncomeDto
@@ -44,4 +46,7 @@ public class BuildingIncomeDto
     public DateOnly IncomeDate { get; set; }
     public decimal Amount { get; set; }
     public string Notes { get; set; } = string.Empty;
+    public Guid? LedgerCategoryId { get; set; }
+    public string? LedgerCategoryCode { get; set; }
+    public string? LedgerCategoryName { get; set; }
 }

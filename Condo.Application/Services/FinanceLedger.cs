@@ -128,7 +128,8 @@ public static class FinanceLedgerRules
     /// operativo (informativo: la liquidacion tampoco lo cuenta). Si el edificio manda los ingresos al fondo de reserva, entran
     /// a su cuenta; si no, a la cuenta por defecto.
     /// </summary>
-    public static LedgerClassification? ForIncome(BuildingIncomeCategory category, IncomeTreatment treatment, LedgerAccounts accounts)
+    public static LedgerClassification? ForIncome(
+        BuildingIncomeCategory category, IncomeTreatment treatment, LedgerAccounts accounts, string? rubroKey = null)
     {
         if (category is BuildingIncomeCategory.AccumulatedBalance or BuildingIncomeCategory.OperationalFund)
         {
@@ -136,7 +137,7 @@ public static class FinanceLedgerRules
         }
 
         var account = treatment == IncomeTreatment.ToReserveFund ? accounts.FundId ?? accounts.DefaultId : accounts.DefaultId;
-        return new LedgerClassification(account, FinanceChartTemplate.IncomeKey(category), LedgerDirection.In);
+        return new LedgerClassification(account, rubroKey ?? FinanceChartTemplate.IncomeKey(category), LedgerDirection.In);
     }
 
     /// <summary>
@@ -144,7 +145,8 @@ public static class FinanceLedgerRules
     /// fondo sale de su cuenta. Un gasto de categoria Fondo de reserva es el aporte que se cobra a las unidades, no un egreso:
     /// el dinero se ve del lado de los cobros, por eso queda afuera.
     /// </summary>
-    public static LedgerClassification? ForExpense(BuildingExpenseCategory category, bool paidByReserveFund, LedgerAccounts accounts)
+    public static LedgerClassification? ForExpense(
+        BuildingExpenseCategory category, bool paidByReserveFund, LedgerAccounts accounts, string? rubroKey = null)
     {
         if (category == BuildingExpenseCategory.ReserveFund && !paidByReserveFund)
         {
@@ -152,7 +154,7 @@ public static class FinanceLedgerRules
         }
 
         var account = paidByReserveFund ? accounts.FundId ?? accounts.DefaultId : accounts.DefaultId;
-        return new LedgerClassification(account, FinanceChartTemplate.ExpenseKey(category), LedgerDirection.Out);
+        return new LedgerClassification(account, rubroKey ?? FinanceChartTemplate.ExpenseKey(category), LedgerDirection.Out);
     }
 }
 
@@ -215,13 +217,21 @@ public sealed class LedgerContext
     private IReadOnlyDictionary<string, LedgerCategory>? _byKey;
     private IReadOnlyDictionary<Guid, LedgerCategory>? _byId;
 
+    // Todos los rubros por su clave: la de la plantilla o, en los rubros propios, la derivada de su id.
     public IReadOnlyDictionary<string, LedgerCategory> ByKey =>
-        _byKey ??= Categories.Where(x => x.SystemKey != null).ToDictionary(x => x.SystemKey!);
+        _byKey ??= Categories.ToDictionary(x => x.RubroKey);
 
     public IReadOnlyDictionary<Guid, LedgerCategory> ById =>
         _byId ??= Categories.ToDictionary(x => x.Id);
 
     public LedgerCategory? CategoryFor(string rubroKey) => ByKey.TryGetValue(rubroKey, out var c) ? c : null;
+
+    /// <summary>
+    /// Clave de rubro de un movimiento que eligio rubro; nula si no eligio ninguno (o si el rubro ya no existe), y entonces el
+    /// libro lo clasifica por su categoria como siempre.
+    /// </summary>
+    public string? RubroKeyOf(Guid? categoryId) =>
+        categoryId.HasValue && ById.TryGetValue(categoryId.Value, out var c) ? c.RubroKey : null;
 
     public decimal TotalOpening => Accounts.Sum(x => x.OpeningBalance);
 }
