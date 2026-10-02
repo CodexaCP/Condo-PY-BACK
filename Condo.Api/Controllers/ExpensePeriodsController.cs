@@ -25,8 +25,6 @@ public class ExpensePeriodsController(
     PushDispatcher pushDispatcher,
     ILogger<ExpensePeriodsController> logger) : ControllerBase
 {
-    private const decimal CoefficientDistributionExpectedTotal = 1.00m;
-    private const decimal CoefficientDistributionTolerance = 0.0001m;
     // Permisos de liquidacion: CompanyOperator solo calcula; BuildingManager aprueba; CompanyAdmin
     // (presidente) publica, y solo una liquidacion ya aprobada por el Encargado de edificio.
     private bool CanApproveSettlement() =>
@@ -324,81 +322,6 @@ public class ExpensePeriodsController(
         return NoContent();
     }
 
-    [HttpPost("{id:guid}/generate-charges")]
-    public async Task<ActionResult<GenerateExpenseChargesResultDto>> GenerateCharges(
-        Guid id,
-        [FromBody] GenerateExpenseChargesRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!IsValidGenerationRequest(request, out var generationError))
-        {
-            return BadRequest(generationError);
-        }
-
-        var period = await dbContext.ExpensePeriods
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-
-        if (period is null)
-        {
-            return NotFound();
-        }
-
-        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken))
-        {
-            return Forbid();
-        }
-
-        if (period.Status != ExpensePeriodStatus.Draft)
-        {
-            return BadRequest("Los cargos solo se pueden generar mientras el periodo este en borrador.");
-        }
-
-        var existingCharges = await dbContext.ExpenseCharges
-            .AnyAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
-
-        if (existingCharges)
-        {
-            return BadRequest("Este periodo ya tiene cargos. Debes eliminarlos antes de ejecutar una generacion masiva.");
-        }
-
-        var units = await dbContext.Units
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == period.BuildingId)
-            .OrderBy(x => x.Code)
-            .ToListAsync(cancellationToken);
-
-        if (units.Count == 0)
-        {
-            return BadRequest("No hay unidades activas disponibles para este edificio.");
-        }
-
-        if (request.Mode.Equals("ByCoefficient", StringComparison.OrdinalIgnoreCase))
-        {
-            var totalCoefficient = units.Sum(x => x.Coefficient);
-            if (!HasValidCoefficientBase(totalCoefficient))
-            {
-                return BadRequest($"No se puede generar por coeficiente porque la suma de coeficientes del edificio debe ser {CoefficientDistributionExpectedTotal:0.####} y actualmente es {totalCoefficient:0.####}.");
-            }
-        }
-
-        var charges = request.Mode.Equals("ByCoefficient", StringComparison.OrdinalIgnoreCase)
-            ? GenerateByCoefficient(period.CompanyId, id, units, request)
-            : GenerateFixedAmount(period.CompanyId, id, units, request);
-
-        dbContext.ExpenseCharges.AddRange(charges);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new GenerateExpenseChargesResultDto
-        {
-            ExpensePeriodId = period.Id,
-            ExpensePeriodName = period.Name,
-            UnitsAffected = charges.Count,
-            TotalGeneratedAmount = charges.Sum(x => x.Amount),
-            Mode = request.Mode
-        });
-    }
-
     [HttpGet("{id:guid}/settlement")]
     public async Task<ActionResult<ExpenseSettlementSummaryDto>> GetSettlement(Guid id, CancellationToken cancellationToken)
     {
@@ -502,6 +425,137 @@ public class ExpensePeriodsController(
         }
     }
 
+    // Vista previa de los cargos que saldrian de los gastos, ingresos y aportes actuales del periodo. No exige que la
+    // liquidacion este calculada: en borrador es lo que el usuario ve en la seccion Cargos.
+    [HttpGet("{id:guid}/charges-preview")]
+    public async Task<ActionResult<ExpenseSettlementChargePreviewDto>> GetChargesPreview(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken)) return Forbid();
+
+        try
+        {
+            return Ok(await distributionService.PreviewAsync(period, await ResolveSettlementForPreviewAsync(id, cancellationToken), cancellationToken));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(exception.Message);
+        }
+    }
+
+    // Conciliacion del periodo: gastos + aportes - ingresos acreditados = cargos. Compara lo que deberia repartirse
+    // hoy con lo que realmente se emitio, y resume la cobranza.
+    [HttpGet("{id:guid}/reconciliation")]
+    public async Task<ActionResult<ExpensePeriodReconciliationDto>> GetReconciliation(Guid id, CancellationToken cancellationToken)
+    {
+        var period = await dbContext.ExpensePeriods
+            .AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+
+        if (period is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken)) return Forbid();
+
+        var settlement = await dbContext.ExpenseSettlements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == id, cancellationToken);
+
+        var expenses = await dbContext.BuildingExpenses
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+            .Select(x => new { x.Amount, x.DistributionType, x.PaidByReserveFund })
+            .ToListAsync(cancellationToken);
+
+        var live = await BuildLiveSettlementSummaryAsync(period, cancellationToken);
+        var incomeTreatment = await dbContext.Buildings.AsNoTracking()
+            .Where(x => x.Id == period.BuildingId)
+            .Select(x => (IncomeTreatment?)x.IncomeTreatment)
+            .FirstOrDefaultAsync(cancellationToken);
+        var incomesCredited = incomeTreatment == IncomeTreatment.ToReserveFund ? 0m : live.TotalBuildingIncomes;
+
+        var charges = await dbContext.ExpenseCharges
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+            .Select(x => new
+            {
+                x.Amount, x.IsLateFee, x.IsReversal, x.SourceSettlementId, x.SourceCreditNoteId,
+                Allocated = x.Allocations.Where(a => !a.IsDeleted && a.Payment != null && !a.Payment.IsReversed)
+                    .Sum(a => (decimal?)a.AllocatedAmount) ?? 0m
+            })
+            .ToListAsync(cancellationToken);
+
+        var manual = charges.Where(c => c.SourceSettlementId == null && !c.IsLateFee && !c.IsReversal && c.SourceCreditNoteId == null).ToList();
+        var issued = charges.Where(c => c.SourceSettlementId != null).Sum(c => c.Amount);
+        var totalCharged = charges.Sum(c => c.Amount);
+        var collected = charges.Sum(c => c.Allocated);
+
+        var dto = new ExpensePeriodReconciliationDto
+        {
+            ExpensePeriodId = period.Id,
+            ExpensePeriodName = period.Name,
+            PeriodStatus = period.Status.ToString(),
+            SettlementStatus = settlement?.Status.ToString(),
+            TotalExpenses = live.TotalBuildingExpenses,
+            NonDistributedExpenses = expenses
+                .Where(x => x.DistributionType == BuildingExpenseDistributionType.NonDistributed && !x.PaidByReserveFund)
+                .Sum(x => x.Amount),
+            PaidByReserveFundExpenses = expenses.Where(x => x.PaidByReserveFund).Sum(x => x.Amount),
+            IncomesCredited = incomesCredited,
+            IssuedCharges = issued,
+            ManualChargeCount = manual.Count,
+            ManualChargeAmount = manual.Sum(c => c.Amount),
+            LateFeeAmount = charges.Where(c => c.IsLateFee).Sum(c => c.Amount),
+            TotalCharged = totalCharged,
+            Collected = collected,
+            Pending = totalCharged - collected
+        };
+
+        try
+        {
+            var preview = await distributionService.PreviewAsync(period, await ResolveSettlementForPreviewAsync(id, cancellationToken), cancellationToken);
+            dto.ExpectedCharges = preview.TotalGeneratedAmount;
+            dto.ReserveContribution = preview.Items
+                .Where(i => i.ChargeType == ExpenseChargeType.ReserveFund && i.SourceBuildingExpenseId == null).Sum(i => i.Amount);
+            dto.ExtraordinaryContribution = preview.Items
+                .Where(i => i.ChargeType == ExpenseChargeType.Extraordinary && i.SourceBuildingExpenseId == null).Sum(i => i.Amount);
+            dto.Difference = dto.ExpectedCharges - dto.IssuedCharges;
+
+            if (issued == 0m && period.Status == ExpensePeriodStatus.Draft)
+            {
+                dto.State = "Preview";
+                dto.Message = "Todavía no se emitieron cargos: lo de abajo es lo que saldría al aprobar la liquidación.";
+            }
+            else if (decimal.Abs(dto.Difference) <= 0.5m)
+            {
+                dto.State = "Reconciled";
+            }
+            else
+            {
+                dto.State = "Difference";
+                dto.Message = "Los cargos emitidos no coinciden con lo que resulta de los gastos, ingresos y aportes actuales.";
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            dto.State = "Error";
+            dto.Message = exception.Message;
+        }
+
+        return Ok(dto);
+    }
+
+    // La vista previa solo usa el Id de la liquidacion para marcar el origen de cada cargo: con liquidacion se usa la
+    // real, sin ella una transitoria (no se guarda).
+    private async Task<ExpenseSettlement> ResolveSettlementForPreviewAsync(Guid expensePeriodId, CancellationToken cancellationToken) =>
+        await dbContext.ExpenseSettlements.AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId, cancellationToken)
+        ?? new ExpenseSettlement { Id = Guid.Empty, ExpensePeriodId = expensePeriodId };
+
     [HttpPost("{id:guid}/generate-settlement-charges")]
     public Task<ActionResult<ExpenseSettlementChargePreviewDto>> GenerateSettlementCharges(Guid id, CancellationToken cancellationToken) =>
         Task.FromResult<ActionResult<ExpenseSettlementChargePreviewDto>>(BadRequest("La emision de cargos ahora ocurre al aprobar la liquidacion."));
@@ -559,6 +613,16 @@ public class ExpensePeriodsController(
         if (existingCharges)
         {
             return BadRequest("Este periodo ya tiene cargos emitidos desde una liquidacion previa. No se puede aprobar nuevamente.");
+        }
+
+        // Los cargos nacen solo de la liquidacion. Un cargo manual anterior (legacy) se sumaria encima y cobraria dos veces.
+        var legacyManualCharges = await dbContext.ExpenseCharges.CountAsync(
+            x => !x.IsDeleted && x.ExpensePeriodId == id && x.SourceSettlementId == null
+                 && !x.IsLateFee && !x.IsReversal && x.SourceCreditNoteId == null, cancellationToken);
+
+        if (legacyManualCharges > 0)
+        {
+            return BadRequest($"Este periodo tiene {legacyManualCharges} cargo(s) manual(es) anterior(es) (legacy) que no vienen de la liquidación. Elimínelos desde Gastos y cargos › Cargos antes de aprobar: los cargos ahora se generan solo desde los gastos.");
         }
 
         if (period.Building?.PresidentUserId is null)
@@ -1595,37 +1659,6 @@ public class ExpensePeriodsController(
         return true;
     }
 
-    private static bool IsValidGenerationRequest(GenerateExpenseChargesRequest request, out string error)
-    {
-        if (string.IsNullOrWhiteSpace(request.Mode))
-        {
-            error = "El modo de generacion es obligatorio.";
-            return false;
-        }
-
-        if (!request.Mode.Equals("FixedAmount", StringComparison.OrdinalIgnoreCase) &&
-            !request.Mode.Equals("ByCoefficient", StringComparison.OrdinalIgnoreCase))
-        {
-            error = "El modo debe ser FixedAmount o ByCoefficient.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Concept))
-        {
-            error = "El concepto es obligatorio.";
-            return false;
-        }
-
-        if (request.Amount <= 0)
-        {
-            error = "El monto debe ser mayor que cero.";
-            return false;
-        }
-
-        error = string.Empty;
-        return true;
-    }
-
     private async Task<ExpenseSettlementSummaryDto> BuildSettlementSummaryAsync(ExpensePeriod period, CancellationToken cancellationToken)
     {
         var settlement = await dbContext.ExpenseSettlements
@@ -1932,59 +1965,6 @@ public class ExpensePeriodsController(
             || await dbContext.Payments.AnyAsync(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId, cancellationToken)
             || await dbContext.ExpenseSettlements.AnyAsync(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId, cancellationToken);
     }
-
-    private static List<ExpenseCharge> GenerateFixedAmount(
-        Guid companyId,
-        Guid expensePeriodId,
-        IReadOnlyList<Unit> units,
-        GenerateExpenseChargesRequest request) =>
-        units.Select(unit => new ExpenseCharge
-            {
-                CompanyId = companyId,
-                ExpensePeriodId = expensePeriodId,
-                UnitId = unit.Id,
-                ChargeType = ExpenseChargeType.Ordinary,
-                Concept = request.Concept.Trim(),
-                Amount = decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero),
-                Notes = request.Notes.Trim()
-        }).ToList();
-
-    private static List<ExpenseCharge> GenerateByCoefficient(
-        Guid companyId,
-        Guid expensePeriodId,
-        IReadOnlyList<Unit> units,
-        GenerateExpenseChargesRequest request)
-    {
-        var generated = new List<ExpenseCharge>(units.Count);
-        var roundedTotal = decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero);
-        var distributed = 0m;
-
-        for (var index = 0; index < units.Count; index++)
-        {
-            var unit = units[index];
-            var amount = index == units.Count - 1
-                ? roundedTotal - distributed
-                : decimal.Round(roundedTotal * unit.Coefficient, 2, MidpointRounding.AwayFromZero);
-
-            distributed += amount;
-
-            generated.Add(new ExpenseCharge
-            {
-                CompanyId = companyId,
-                ExpensePeriodId = expensePeriodId,
-                UnitId = unit.Id,
-                ChargeType = ExpenseChargeType.Ordinary,
-                Concept = request.Concept.Trim(),
-                Amount = amount,
-                Notes = request.Notes.Trim()
-            });
-        }
-
-        return generated;
-    }
-
-    private static bool HasValidCoefficientBase(decimal totalCoefficient) =>
-        decimal.Abs(totalCoefficient - CoefficientDistributionExpectedTotal) <= CoefficientDistributionTolerance;
 
     private static string ResolveName(ExpensePeriodUpsertRequest request) =>
         string.IsNullOrWhiteSpace(request.Name)

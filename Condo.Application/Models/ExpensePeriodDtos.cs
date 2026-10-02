@@ -63,19 +63,38 @@ public class CloneExpensePeriodResultDto
     public decimal AccumulatedBalance { get; set; }
 }
 
-public class GenerateExpenseChargesRequest
-{
-    public string Mode { get; set; } = "FixedAmount";
-    public string Concept { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-    public string Notes { get; set; } = string.Empty;
-}
-
-public class GenerateExpenseChargesResultDto
+// Conciliacion de un periodo: lo que deberian sumar los cargos segun los gastos, ingresos y aportes cargados,
+// contra lo que realmente se emitio, mas el estado de cobro.
+public class ExpensePeriodReconciliationDto
 {
     public Guid ExpensePeriodId { get; set; }
     public string ExpensePeriodName { get; set; } = string.Empty;
-    public int UnitsAffected { get; set; }
-    public decimal TotalGeneratedAmount { get; set; }
-    public string Mode { get; set; } = string.Empty;
+    public string PeriodStatus { get; set; } = string.Empty;
+    public string? SettlementStatus { get; set; }
+
+    // De donde sale lo que se cobra
+    public decimal TotalExpenses { get; set; }
+    public decimal NonDistributedExpenses { get; set; }
+    public decimal PaidByReserveFundExpenses { get; set; }
+    public decimal IncomesCredited { get; set; }
+    public decimal ReserveContribution { get; set; }
+    public decimal ExtraordinaryContribution { get; set; }
+
+    // Lo esperado (reparto de la liquidacion con los datos actuales) contra lo emitido
+    public decimal ExpectedCharges { get; set; }
+    public decimal IssuedCharges { get; set; }
+    public decimal Difference { get; set; }
+    // Preview (todavia no se emitieron cargos) | Reconciled | Difference | Error
+    public string State { get; set; } = "Preview";
+    public string? Message { get; set; }
+
+    // Cargos manuales anteriores (legacy) que siguen en el periodo y la mora
+    public int ManualChargeCount { get; set; }
+    public decimal ManualChargeAmount { get; set; }
+    public decimal LateFeeAmount { get; set; }
+
+    // Cobranza del periodo (suma de todos sus cargos vigentes)
+    public decimal TotalCharged { get; set; }
+    public decimal Collected { get; set; }
+    public decimal Pending { get; set; }
 }

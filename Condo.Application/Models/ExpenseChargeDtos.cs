@@ -2,17 +2,6 @@ using Condo.Domain.Enums;
 
 namespace Condo.Application.Models;
 
-public class ExpenseChargeUpsertRequest
-{
-    public Guid ExpensePeriodId { get; set; }
-    public Guid UnitId { get; set; }
-    public ExpenseChargeType ChargeType { get; set; } = ExpenseChargeType.Ordinary;
-    public bool IsLateFee { get; set; }
-    public string Concept { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-    public string Notes { get; set; } = string.Empty;
-}
-
 public class ExpenseChargeDto
 {
     public Guid Id { get; set; }
@@ -29,6 +18,8 @@ public class ExpenseChargeDto
     public Guid? SourceSettlementId { get; set; }
     public string SourceSettlementName { get; set; } = string.Empty;
     public bool IsLateFee { get; set; }
+    // Cargo manual anterior (legacy): no viene de una liquidacion, ni es mora, ni ajuste. Ya no se crean.
+    public bool IsManual { get; set; }
     public string Concept { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Notes { get; set; } = string.Empty;
