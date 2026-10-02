@@ -16,6 +16,9 @@ public class Plan : BaseEntity
     // El plan incluye el modulo "Finanzas del edificio": sin esto el SuperAdmin no puede habilitarlo en el edificio.
     public bool IncludesFinanceModule { get; set; }
 
+    // El plan incluye el "Marketplace de espacios temporales": sin esto el SuperAdmin no puede habilitarlo en el edificio.
+    public bool IncludesMarketplace { get; set; }
+
     // Readonly once at least one BuildingPlan references this plan
     public bool IsAssigned { get; set; }
 

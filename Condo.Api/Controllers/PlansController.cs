@@ -79,6 +79,7 @@ public class PlansController(ICondoDbContext dbContext, ITenantContext tenantCon
             GracePeriodDays = request.GracePeriodDays,
             IsActive = true,
             IncludesFinanceModule = request.IncludesFinanceModule,
+            IncludesMarketplace = request.IncludesMarketplace,
             IsAssigned = false
         };
 
@@ -116,6 +117,7 @@ public class PlansController(ICondoDbContext dbContext, ITenantContext tenantCon
         plan.GracePeriodDays = request.GracePeriodDays;
         plan.IsActive = request.IsActive;
         plan.IncludesFinanceModule = request.IncludesFinanceModule;
+        plan.IncludesMarketplace = request.IncludesMarketplace;
 
         await dbContext.SaveChangesAsync(ct);
 
@@ -171,6 +173,7 @@ public class PlansController(ICondoDbContext dbContext, ITenantContext tenantCon
             GracePeriodDays = source.GracePeriodDays,
             IsActive = true,
             IncludesFinanceModule = source.IncludesFinanceModule,
+            IncludesMarketplace = source.IncludesMarketplace,
             IsAssigned = false
         };
 
@@ -212,6 +215,7 @@ public class PlansController(ICondoDbContext dbContext, ITenantContext tenantCon
         GracePeriodDays = p.GracePeriodDays,
         IsActive = p.IsActive,
         IncludesFinanceModule = p.IncludesFinanceModule,
+        IncludesMarketplace = p.IncludesMarketplace,
         IsAssigned = p.IsAssigned,
         CreatedAtUtc = p.CreatedAtUtc,
         UpdatedAtUtc = p.UpdatedAtUtc,

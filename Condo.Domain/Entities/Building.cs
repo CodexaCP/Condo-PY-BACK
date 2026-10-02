@@ -39,6 +39,14 @@ public class Building : BaseEntity
     // edificio incluye el modulo (Plan.IncludesFinanceModule). Apagarlo conserva los datos ya cargados.
     public bool FinanceModuleEnabled { get; set; }
 
+    // Interruptor del "Marketplace de espacios temporales". Solo lo opera el SuperAdmin y solo si el plan vigente del
+    // edificio lo incluye (Plan.IncludesMarketplace). Apagarlo conserva los datos ya cargados.
+    public bool MarketplaceEnabled { get; set; }
+    // Comision de gestion (porcentaje 0-100) que se suma al precio del propietario. La fija solo el SuperAdmin.
+    public decimal MarketplaceCommissionPercent { get; set; } = 10m;
+    // Datos para transferir (banco, titular, numero, alias). Se muestran solo en el pago de una reserva en curso.
+    public string? MarketplaceTransferInfo { get; set; }
+
     // Modelos de documentos (factura, nota de credito y liquidacion). Con UseStandardTemplates los PDF
     // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
     // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.

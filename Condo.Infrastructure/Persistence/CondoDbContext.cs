@@ -144,6 +144,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.ContactPhone).HasMaxLength(30);
         modelBuilder.Entity<Building>().Property(x => x.ContactEmail).HasMaxLength(160);
         modelBuilder.Entity<Building>().Property(x => x.LateFeeRatePercentage).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<Building>().Property(x => x.MarketplaceCommissionPercent).HasColumnType("decimal(5,2)").HasDefaultValue(10m);
+        modelBuilder.Entity<Building>().Property(x => x.MarketplaceTransferInfo).HasMaxLength(1000);
         modelBuilder.Entity<Building>().Property(x => x.IncomeTreatment).HasConversion<string>().HasMaxLength(30);
         modelBuilder.Entity<Building>().Property(x => x.ReserveFundPercentage).HasColumnType("decimal(5,2)");
         modelBuilder.Entity<Building>().Property(x => x.ExtraordinaryPercentage).HasColumnType("decimal(5,2)");
