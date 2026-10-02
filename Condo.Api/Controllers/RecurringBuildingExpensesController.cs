@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -13,7 +14,8 @@ namespace Condo.Api.Controllers;
 [Route("api/recurring-building-expenses")]
 public class RecurringBuildingExpensesController(
     ICondoDbContext dbContext,
-    IAccessScopeService accessScope) : ControllerBase
+    IAccessScopeService accessScope,
+    MovementRubroResolver rubros) : ControllerBase
 {
     private const string GeneralBuildingName = "Todos los edificios";
 
@@ -69,7 +71,10 @@ public class RecurringBuildingExpensesController(
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
                 Notes = x.Notes,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .ToListAsync(cancellationToken);
 
@@ -96,7 +101,10 @@ public class RecurringBuildingExpensesController(
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
                 Notes = x.Notes,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                LedgerCategoryId = x.LedgerCategoryId,
+                LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -168,11 +176,18 @@ public class RecurringBuildingExpensesController(
             }
         }
 
+        var rubro = await ResolveRubroAsync(request, null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         var entity = new RecurringBuildingExpense
         {
             CompanyId = effectiveCompanyId,
             BuildingId = request.BuildingId,
-            Category = request.Category,
+            Category = rubro.ExpenseCategory ?? request.Category,
+            LedgerCategoryId = rubro.Rubro?.Id,
             SupplierName = request.SupplierName.Trim(),
             Description = request.Description.Trim(),
             Amount = request.Amount,
@@ -185,7 +200,7 @@ public class RecurringBuildingExpensesController(
         dbContext.RecurringBuildingExpenses.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit));
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit, rubro.Rubro));
     }
 
     [HttpPut("{id:guid}")]
@@ -261,9 +276,17 @@ public class RecurringBuildingExpensesController(
             }
         }
 
+        // Conservar el rubro que ya tenia no exige que siga activo; cambiarlo a otro si.
+        var rubro = await ResolveRubroAsync(request, entity.BuildingId == request.BuildingId ? entity.LedgerCategoryId : null, cancellationToken);
+        if (rubro.Error is not null)
+        {
+            return BadRequest(rubro.Error);
+        }
+
         entity.CompanyId = effectiveCompanyId;
         entity.BuildingId = request.BuildingId;
-        entity.Category = request.Category;
+        entity.Category = rubro.ExpenseCategory ?? request.Category;
+        entity.LedgerCategoryId = rubro.Rubro?.Id;
         entity.SupplierName = request.SupplierName.Trim();
         entity.Description = request.Description.Trim();
         entity.Amount = request.Amount;
@@ -273,7 +296,7 @@ public class RecurringBuildingExpensesController(
         entity.IsActive = request.IsActive;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit));
+        return Ok(ToDto(entity, building?.Name ?? GeneralBuildingName, targetUnit, rubro.Rubro));
     }
 
     [HttpDelete("{id:guid}")]
@@ -348,11 +371,28 @@ public class RecurringBuildingExpensesController(
 
         foreach (var template in templates)
         {
+            // El rubro de la plantilla se usa solo si sigue disponible (existe, activo y con Finanzas habilitado en el edificio); si no,
+            // el gasto nace con su categoria, como siempre, y se avisa.
+            Guid? rubroId = null;
+            if (template.LedgerCategoryId.HasValue)
+            {
+                var resolved = await rubros.ResolveAsync(template.LedgerCategoryId, period.BuildingId, LedgerCategoryType.Expense, null, cancellationToken);
+                if (resolved.Error is null)
+                {
+                    rubroId = resolved.Rubro!.Id;
+                }
+                else
+                {
+                    result.WithoutRubro++;
+                }
+            }
+
             newExpenses.Add(new BuildingExpense
             {
                 CompanyId = period.CompanyId,
                 BuildingId = period.BuildingId,
                 ExpensePeriodId = period.Id,
+                LedgerCategoryId = rubroId,
                 Category = template.Category,
                 SupplierName = template.SupplierName,
                 Description = template.Description,
@@ -382,6 +422,20 @@ public class RecurringBuildingExpensesController(
         }
 
         return accessScope.IsSuperAdmin || accessScope.CompanyId == companyId;
+    }
+
+    // Valida el rubro elegido para la plantilla (solo con un edificio puntual: el plan de cuentas es de cada edificio).
+    private async Task<MovementRubroResolver.Result> ResolveRubroAsync(
+        RecurringBuildingExpenseUpsertRequest request, Guid? currentRubroId, CancellationToken cancellationToken)
+    {
+        if (request.LedgerCategoryId.HasValue && !request.BuildingId.HasValue)
+        {
+            return new MovementRubroResolver.Result(
+                "El rubro es del plan de cuentas de un edificio: elegí un edificio puntual para usar un rubro en la plantilla.", null, null, null);
+        }
+
+        return await rubros.ResolveAsync(
+            request.LedgerCategoryId, request.BuildingId ?? Guid.Empty, LedgerCategoryType.Expense, currentRubroId, cancellationToken);
     }
 
     private static bool IsValidRequest(RecurringBuildingExpenseUpsertRequest request, out string error)
@@ -441,7 +495,8 @@ public class RecurringBuildingExpensesController(
     private static RecurringBuildingExpenseDto ToDto(
         RecurringBuildingExpense entity,
         string buildingName,
-        Unit? targetUnit) =>
+        Unit? targetUnit,
+        LedgerCategory? rubro = null) =>
         new()
         {
             Id = entity.Id,
@@ -456,6 +511,9 @@ public class RecurringBuildingExpensesController(
             TargetUnitId = entity.TargetUnitId,
             TargetUnitCode = targetUnit?.Code ?? string.Empty,
             Notes = entity.Notes,
-            IsActive = entity.IsActive
+            IsActive = entity.IsActive,
+            LedgerCategoryId = entity.LedgerCategoryId,
+            LedgerCategoryCode = rubro?.Code,
+            LedgerCategoryName = rubro?.Name
         };
 }

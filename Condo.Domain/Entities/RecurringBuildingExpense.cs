@@ -16,8 +16,12 @@ public class RecurringBuildingExpense : CompanyScopedEntity
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
+    // Rubro del plan de cuentas de Finanzas del edificio (opcional). Solo en las plantillas de un edificio puntual: el plan es de
+    // cada edificio. Los gastos que genera la plantilla nacen con este rubro, si sigue disponible al aplicarla.
+    public Guid? LedgerCategoryId { get; set; }
 
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public Unit? TargetUnit { get; set; }
+    public LedgerCategory? LedgerCategory { get; set; }
 }

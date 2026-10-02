@@ -227,6 +227,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BuildingExpense>().HasIndex(x => x.LedgerCategoryId);
 
         // ── RecurringBuildingExpense ───────────────────────────────────────────
+        modelBuilder.Entity<RecurringBuildingExpense>()
+            .HasOne(x => x.LedgerCategory).WithMany()
+            .HasForeignKey(x => x.LedgerCategoryId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<RecurringBuildingExpense>().HasIndex(x => x.LedgerCategoryId);
         modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.Category).HasConversion<string>().HasMaxLength(50);
         modelBuilder.Entity<RecurringBuildingExpense>().Property(x => x.DistributionType).HasConversion<string>().HasMaxLength(30);

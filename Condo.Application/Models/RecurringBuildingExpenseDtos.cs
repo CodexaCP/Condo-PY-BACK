@@ -14,6 +14,8 @@ public class RecurringBuildingExpenseUpsertRequest
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
+    // Rubro del plan de cuentas de Finanzas del edificio (opcional; solo con un edificio puntual). Con rubro, la categoria sale del rubro.
+    public Guid? LedgerCategoryId { get; set; }
 }
 
 public class RecurringBuildingExpenseDto
@@ -31,6 +33,9 @@ public class RecurringBuildingExpenseDto
     public string TargetUnitCode { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    public Guid? LedgerCategoryId { get; set; }
+    public string? LedgerCategoryCode { get; set; }
+    public string? LedgerCategoryName { get; set; }
 }
 
 public class ApplyRecurringExpensesRequest
@@ -42,6 +47,9 @@ public class ApplyRecurringExpensesResultDto
 {
     public int Applied { get; set; }
     public int Skipped { get; set; }
+    // Gastos creados sin el rubro de su plantilla porque el rubro ya no esta disponible (desactivado, eliminado o modulo apagado):
+    // quedan solo con su categoria, como siempre.
+    public int WithoutRubro { get; set; }
     public string ExpensePeriodName { get; set; } = string.Empty;
     public List<string> AppliedDescriptions { get; set; } = [];
 }

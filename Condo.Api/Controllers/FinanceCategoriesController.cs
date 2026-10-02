@@ -381,9 +381,11 @@ public class FinanceCategoriesController(
     private Task<bool> HasBudgetAsync(Guid categoryId, CancellationToken cancellationToken) =>
         Db.BudgetLines.AnyAsync(x => !x.IsDeleted && x.CategoryId == categoryId && x.Amount != 0m, cancellationToken);
 
+    // "Con movimientos": ya tiene gastos o ingresos cargados o lo usa una plantilla de gasto recurrente.
     private async Task<bool> HasMovementsAsync(Guid categoryId, CancellationToken cancellationToken) =>
         await Db.BuildingExpenses.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken)
-        || await Db.BuildingIncomes.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken);
+        || await Db.BuildingIncomes.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken)
+        || await Db.RecurringBuildingExpenses.AnyAsync(x => !x.IsDeleted && x.LedgerCategoryId == categoryId, cancellationToken);
 
     // Rubros del edificio que ya tienen gastos o ingresos cargados.
     private async Task<HashSet<Guid>> MovementCategoryIdsAsync(Guid buildingId, CancellationToken cancellationToken)
@@ -398,7 +400,12 @@ public class FinanceCategoriesController(
             .Select(x => x.LedgerCategoryId!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);
-        return fromExpenses.Concat(fromIncomes).ToHashSet();
+        var fromRecurring = await Db.RecurringBuildingExpenses.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.LedgerCategoryId != null)
+            .Select(x => x.LedgerCategoryId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        return fromExpenses.Concat(fromIncomes).Concat(fromRecurring).ToHashSet();
     }
 
     private static string? NormalizeExternalCode(string? value)
