@@ -4,7 +4,7 @@ Base: [ESPECIFICACION_MARKETPLACE.md](ESPECIFICACION_MARKETPLACE.md) (las decisi
 Repos y rama de trabajo: `Condo-PY-BACK`, `Condo-PY-WEB`, `CondoPY-APP`, todos en la rama **`feature/marketplace`**.
 
 > **Estado de las fases** (se actualiza al cerrar cada una):
-> Fases 1 y 2 — **hechas y desplegadas** · Fases 3, 4, 5 y 6 — **hechas y commiteadas, sin desplegar** (publicar; explorar y reservar; pago y revisión; acreditación al saldo, extracto de la cuenta aparte con Excel, ajustes y reversa: API con 347 pruebas verdes en `dotnet test Condo.Tests`, app, web). **Solo la fase 5 trae migración (`MarketplacePaymentAlerts`); la 6 no.** · Fases 7 a 9 — pendientes.
+> Fases 1 y 2 — **hechas y desplegadas** · Fases 3, 4, 5 y 6 — **hechas y commiteadas, sin desplegar** (publicar; explorar y reservar; pago y revisión; acreditación al saldo, extracto de la cuenta aparte con Excel, ajustes y reversa: API con 354 pruebas verdes en `dotnet test Condo.Tests`, app, web). **Solo la fase 5 trae migración (`MarketplacePaymentAlerts`); la 6 no.** · **Paso previo a la 7 (menús según el acceso real): hecho** (ver 2.1 abajo; sin migración) · Fases 7 a 9 — pendientes.
 
 ---
 
@@ -108,6 +108,14 @@ Cada fase indica: objetivo, trabajo por repo, migración, pruebas, **criterio de
 - **WEB:** pantalla "Cuenta del marketplace" (extracto, filtros, Excel; edición manual solo SuperAdmin).
 - **Pruebas:** propietario sin saldo / con saldo / acreditación doble / uso posterior del saldo en expensas (el flujo existente de `CoverWithCredit` sigue igual) / reversa.
 - **Criterio de salida:** una reserva completa termina en saldo y en extracto, sin duplicados.
+
+### 2.1 Paso previo a la fase 7 — Menús según el acceso real  *(BACK + WEB + APP, sin migración)*
+**Regla (rige también para las fases 7 a 9):** un usuario solo ve una opción de menú si el backend se la va a atender: módulo habilitado **en ese edificio**, plan que lo incluye, rol con permiso y edificio dentro de su alcance. Toda pantalla nueva del marketplace entra al menú con esa condición.
+- **BACK:** `GET api/marketplace/staff-buildings` (personal): edificios de su alcance con el módulo disponible y, por edificio, `canReviewPayments` (los 4 roles del personal), `canViewAccount` (SuperAdmin, Administrador de empresa y Encargado; no el Operador) y `canEditAccount` (solo SuperAdmin). Usuario final recibe lista vacía. Los roles que ven la cuenta quedan en una sola constante (`MarketplaceScope.AccountViewerRoles`), usada también por el extracto.
+- **WEB:** `MarketplaceAccessService` (mismo patrón que `FinanceAccessService`); «Pagos del Marketplace» y «Cuenta del Marketplace» aparecen solo si hay un edificio donde corresponden; los selectores de edificio de ambas pantallas listan solo esos edificios (antes listaban todos y el elegido sin módulo respondía 403).
+- **APP:** en la sección del Encargado, «Marketplace · pagos por revisar» aparece solo si el **edificio elegido** lo tiene disponible (se recalcula al cambiar de edificio y al entrar a «Más»). En la sección del propietario/residente, la pestaña «Pagos» y el atajo «Mis pagos» se muestran solo al rol Propietario (el backend responde 403 a un residente; ya estaba así antes del marketplace).
+- **Pruebas:** 7 nuevas en `MarketplaceScopeTests` (alcance, módulo apagado, plan sin marketplace, rol sin cuenta, SuperAdmin, otra empresa, usuario final).
+- **Pendiente conocido (no del marketplace):** las rutas de la web no tienen guard por rol/módulo; ocultar el menú no impide abrir la URL a mano (el backend igual responde 403 y las pantallas del marketplace muestran el aviso).
 
 ### Fase 7 — Cancelaciones, reembolsos, reclamos y aviso de inicio  *(BACK + APP + WEB)*
 - Cancelación del comprador (antes del inicio; comisión no se devuelve; aviso previo), del propietario (motivo; devolución total; deuda por gestión), registro de **reembolso pendiente** con lista del Encargado, marca "devuelto" y alerta a 72 h; movimiento `RefundOut`.
