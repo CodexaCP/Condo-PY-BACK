@@ -39,6 +39,7 @@ builder.Services.AddScoped<Condo.Api.Services.FinanceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceScope>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceAudit>();
+builder.Services.AddScoped<Condo.Api.Services.MarketplaceListingService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceLedgerService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceBudgetService>();
 builder.Services.AddScoped<Condo.Api.Services.MovementRubroResolver>();

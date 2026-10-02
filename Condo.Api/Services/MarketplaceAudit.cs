@@ -22,7 +22,8 @@ public class MarketplaceAudit(ICondoDbContext dbContext, ITenantContext tenantCo
         string? fromStatus = null,
         string? toStatus = null,
         object? data = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        bool automatic = false)
     {
         var http = httpContextAccessor.HttpContext;
 
@@ -30,8 +31,8 @@ public class MarketplaceAudit(ICondoDbContext dbContext, ITenantContext tenantCo
         {
             CompanyId = companyId,
             BuildingId = buildingId,
-            // Sin usuario autenticado (proceso automatico) queda nulo.
-            UserId = userId ?? (tenantContext.IsAuthenticated ? tenantContext.UserId : null),
+            // Sin usuario autenticado, o con "automatic" (el sistema actua durante la peticion de otro), queda nulo.
+            UserId = automatic ? null : userId ?? (tenantContext.IsAuthenticated ? tenantContext.UserId : null),
             TimestampUtc = DateTime.UtcNow,
             Action = action,
             EntityType = entityType,
