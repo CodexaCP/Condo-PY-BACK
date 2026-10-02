@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Condo.Api.Controllers;
 
-/// <summary>Acceso al marketplace del usuario final: en que edificios lo tiene disponible.</summary>
+/// <summary>Acceso al marketplace: en que edificios lo tiene disponible el usuario final y el personal.</summary>
 [ApiController]
 [Authorize]
 [Route("api/marketplace")]
@@ -21,6 +21,21 @@ public class MarketplaceController(MarketplaceScope scope) : ControllerBase
             BuildingId = x.BuildingId,
             BuildingName = x.BuildingName,
             CanPublish = x.CanPublish
+        }).ToList());
+    }
+
+    // Edificios del personal con el marketplace disponible y sus permisos. Vacio = no se muestran los accesos del personal.
+    [HttpGet("staff-buildings")]
+    public async Task<ActionResult<List<MarketplaceStaffBuildingDto>>> GetStaffBuildings(CancellationToken cancellationToken)
+    {
+        var buildings = await scope.GetStaffBuildingsAsync(cancellationToken);
+        return Ok(buildings.Select(x => new MarketplaceStaffBuildingDto
+        {
+            BuildingId = x.BuildingId,
+            BuildingName = x.BuildingName,
+            CanReviewPayments = x.CanReviewPayments,
+            CanViewAccount = x.CanViewAccount,
+            CanEditAccount = x.CanEditAccount
         }).ToList());
     }
 }

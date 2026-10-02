@@ -391,4 +391,92 @@ public class MarketplaceScopeTests : IDisposable
 
         Assert.Empty(await Scope().GetAvailableBuildingsAsync(CancellationToken.None));
     }
+
+    // ── Edificios del personal con el marketplace disponible (menu de la web y de la app del Encargado) ──
+
+    [Fact]
+    public async Task El_encargado_ve_solo_los_edificios_de_su_alcance_con_el_modulo_disponible()
+    {
+        Login(_t.AddUser(_companyX, UserRole.BuildingManager), "BuildingManager");
+        _access.Buildings.Add(_buildingA.Id);
+        _access.Buildings.Add(_buildingB.Id);
+        _t.EnableMarketplace(_buildingB, enabled: false);
+
+        var only = Assert.Single(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+
+        Assert.Equal(_buildingA.Id, only.BuildingId);
+        Assert.True(only.CanReviewPayments);
+        Assert.True(only.CanViewAccount);
+        Assert.False(only.CanEditAccount);
+    }
+
+    [Fact]
+    public async Task El_encargado_no_ve_un_edificio_fuera_de_su_alcance_aunque_tenga_el_modulo()
+    {
+        Login(_t.AddUser(_companyX, UserRole.BuildingManager), "BuildingManager");
+        _access.Buildings.Add(_buildingA.Id);
+
+        var only = Assert.Single(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+
+        Assert.Equal(_buildingA.Id, only.BuildingId);
+    }
+
+    [Fact]
+    public async Task El_operador_revisa_pagos_pero_no_ve_la_cuenta_aparte()
+    {
+        Login(_t.AddUser(_companyX, UserRole.CompanyOperator), "CompanyOperator");
+        _access.Buildings.Add(_buildingA.Id);
+
+        var only = Assert.Single(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+
+        Assert.True(only.CanReviewPayments);
+        Assert.False(only.CanViewAccount);
+        Assert.False(only.CanEditAccount);
+    }
+
+    [Fact]
+    public async Task El_SuperAdmin_ve_los_edificios_habilitados_y_es_el_unico_que_edita_la_cuenta()
+    {
+        _tenant.Role = "SuperAdmin";
+        _tenant.CompanyId = null;
+        _access.Buildings.Add(_buildingA.Id);
+        _access.Buildings.Add(_buildingB.Id);
+
+        var buildings = await Scope().GetStaffBuildingsAsync(CancellationToken.None);
+
+        Assert.Equal(2, buildings.Count);
+        Assert.All(buildings, b => Assert.True(b.CanViewAccount && b.CanEditAccount));
+    }
+
+    [Fact]
+    public async Task Un_edificio_con_plan_sin_marketplace_no_aparece_para_el_personal()
+    {
+        var companyZ = _t.AddCompany("Empresa Z");
+        var buildingZ = _t.AddBuilding(companyZ);
+        _t.AssignPlan(buildingZ, _t.AddUser(companyZ, UserRole.CompanyAdmin), includesMarketplace: false);
+        _t.EnableMarketplace(buildingZ);
+        Login(_t.AddUser(companyZ, UserRole.BuildingManager), "BuildingManager");
+        _access.Buildings.Add(buildingZ.Id);
+
+        Assert.Empty(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Un_usuario_final_no_recibe_edificios_de_personal_aunque_el_alcance_los_tenga()
+    {
+        Login(_t.AddUser(_companyX), "Owner");
+        _access.Buildings.Add(_buildingA.Id);
+
+        Assert.Empty(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task El_personal_de_otra_empresa_no_recibe_edificios_ajenos()
+    {
+        var companyY = _t.AddCompany("Empresa Y");
+        Login(_t.AddUser(companyY, UserRole.BuildingManager), "BuildingManager");
+        _access.Buildings.Add(_buildingA.Id);
+
+        Assert.Empty(await Scope().GetStaffBuildingsAsync(CancellationToken.None));
+    }
 }

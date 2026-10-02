@@ -64,3 +64,13 @@ public class MarketplaceBuildingDto
     // Es propietario principal de al menos una unidad del edificio: puede publicar.
     public bool CanPublish { get; set; }
 }
+
+// Edificio del personal con el marketplace disponible y lo que su rol puede hacer ahi (menu de la web y de la app del Encargado).
+public class MarketplaceStaffBuildingDto
+{
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public bool CanReviewPayments { get; set; }
+    public bool CanViewAccount { get; set; }
+    public bool CanEditAccount { get; set; }
+}

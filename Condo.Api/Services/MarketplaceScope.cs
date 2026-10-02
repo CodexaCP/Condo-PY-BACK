@@ -18,6 +18,10 @@ public sealed record MarketplaceOwnedUnit(Guid UnitId, string Code, string Floor
 
 public sealed record MarketplaceAvailableBuilding(Guid BuildingId, string BuildingName, bool CanPublish);
 
+/// <summary>Edificio del personal con el marketplace disponible y lo que el rol del usuario puede hacer en el.</summary>
+public sealed record MarketplaceStaffBuilding(
+    Guid BuildingId, string BuildingName, bool CanReviewPayments, bool CanViewAccount, bool CanEditAccount);
+
 /// <summary>
 /// Aislamiento del marketplace: de que edificios puede ver o publicar el usuario. NUNCA se confia en el edificio que
 /// manda el cliente: se valida contra la relacion real del usuario (propietario o residente de una unidad del edificio, o
@@ -34,6 +38,9 @@ public class MarketplaceScope(
     public const string BuildingRequiredCode = "marketplace_building_required";
 
     private static readonly string[] StaffRoles = ["SuperAdmin", "CompanyAdmin", "CompanyOperator", "BuildingManager"];
+
+    // La cuenta aparte la ve el SuperAdmin, el Administrador de empresa y el Encargado; el Operador no.
+    public static readonly string[] AccountViewerRoles = ["SuperAdmin", "CompanyAdmin", "BuildingManager"];
 
     private bool IsStaffRole => StaffRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase);
 
@@ -111,6 +118,55 @@ public class MarketplaceScope(
             .ToHashSet();
 
         return buildings.Select(x => new MarketplaceAvailableBuilding(x.Id, x.Name, publishable.Contains(x.Id))).ToList();
+    }
+
+    /// <summary>
+    /// Edificios del alcance del personal con el marketplace disponible (habilitado y con plan que lo incluye), con lo que
+    /// su rol puede hacer en cada uno. Sirve para mostrar u ocultar los accesos de la web y de la app del Encargado: un
+    /// usuario final (propietario o residente) recibe una lista vacia.
+    /// </summary>
+    public async Task<List<MarketplaceStaffBuilding>> GetStaffBuildingsAsync(CancellationToken cancellationToken)
+    {
+        if (!IsStaffRole)
+        {
+            return [];
+        }
+
+        var scopeIds = (await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken)).ToList();
+        if (scopeIds.Count == 0)
+        {
+            return [];
+        }
+
+        var withPlan = await gate.PlansIncludingModuleAsync(scopeIds, cancellationToken);
+        if (withPlan.Count == 0)
+        {
+            return [];
+        }
+
+        var buildings = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.MarketplaceEnabled && withPlan.Contains(x.Id))
+            .OrderBy(x => x.Name)
+            .Select(x => new
+            {
+                x.Id,
+                x.Name,
+                CompanyId = x.CompanyId ?? (x.Condominium != null ? x.Condominium.CompanyId : null)
+            })
+            .ToListAsync(cancellationToken);
+
+        // Igual que al operar: el SuperAdmin no esta atado a una empresa; el resto solo ve la suya.
+        var companyId = tenantContext.CompanyId;
+        if (!tenantContext.IsSuperAdmin && companyId.HasValue)
+        {
+            buildings = buildings.Where(x => x.CompanyId == companyId.Value).ToList();
+        }
+
+        var canViewAccount = AccountViewerRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase);
+        return buildings
+            .Select(x => new MarketplaceStaffBuilding(x.Id, x.Name, true, canViewAccount, tenantContext.IsSuperAdmin))
+            .ToList();
     }
 
     /// <summary>

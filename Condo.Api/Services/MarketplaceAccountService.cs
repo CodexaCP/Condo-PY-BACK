@@ -25,9 +25,7 @@ public class MarketplaceAccountService(
     // Hora local de Paraguay (UTC-3), la misma que usa el resto del sistema para decidir "hoy" y los periodos.
     private static readonly TimeSpan LocalOffset = TimeSpan.FromHours(-3);
 
-    private static readonly string[] ViewerRoles = ["SuperAdmin", "CompanyAdmin", "BuildingManager"];
-
-    private bool CanView => ViewerRoles.Contains(tenant.Role, StringComparer.OrdinalIgnoreCase);
+    private bool CanView => MarketplaceScope.AccountViewerRoles.Contains(tenant.Role, StringComparer.OrdinalIgnoreCase);
 
     public static DateTime LocalDayStartUtc(DateOnly day) => day.ToDateTime(TimeOnly.MinValue) - LocalOffset;
 
