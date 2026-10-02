@@ -20,7 +20,8 @@ public class FinanceBudgetController(
     ITenantContext tenantContext,
     FinanceModuleGate gate,
     FinanceLedgerService ledgerService,
-    FinanceBudgetService budgets) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
+    FinanceBudgetService budgets,
+    FinanceReportService reports) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
     private const int MaxCells = 2000;
     private const decimal MaxAmount = 9_999_999_999_999m;
@@ -280,26 +281,8 @@ public class FinanceBudgetController(
             return denied;
         }
 
-        var today = FinancePeriods.Today();
-        var monthStart = ResolveMonth(year, month, today, ctx!.StartDate, out var error);
-        if (error is not null)
-        {
-            return BadRequest(error);
-        }
-
-        var asOf = FinancePeriods.EndOfMonth(monthStart.Year, monthStart.Month);
-        if (asOf > today)
-        {
-            asOf = today;
-        }
-
-        var fiscalYear = FinancePeriods.FiscalYearOf(monthStart, ctx.FiscalYearStartMonth);
-        var (fiscalStart, _) = FinancePeriods.FiscalYearRange(fiscalYear, ctx.FiscalYearStartMonth);
-
-        var actuals = await budgets.GetActualsAsync(ctx, fiscalStart, asOf, cancellationToken);
-        var cells = await budgets.GetCellsAsync(buildingId, fiscalStart, monthStart, cancellationToken);
-
-        return Ok(FinanceBudgetCalculator.BuildVsActual(ctx, monthStart.Year, monthStart.Month, asOf, cells, actuals));
+        var (result, error) = await reports.BudgetVsActualAsync(ctx!, year, month, cancellationToken);
+        return error is null ? Ok(result) : BadRequest(error);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -351,15 +334,6 @@ public class FinanceBudgetController(
         return true;
     }
 
-    private async Task<FinanceBudgetDto> BuildBudgetAsync(Guid buildingId, int fiscalYear, int startMonth, int affected, CancellationToken cancellationToken)
-    {
-        var categories = await LoadCategoriesAsync(buildingId, cancellationToken);
-        var months = FinancePeriods.FiscalMonths(fiscalYear, startMonth);
-        var cells = await budgets.GetCellsAsync(
-            buildingId, new DateOnly(months[0].Year, months[0].Month, 1), new DateOnly(months[11].Year, months[11].Month, 1), cancellationToken);
-
-        var dto = FinanceBudgetCalculator.BuildBudget(buildingId, fiscalYear, startMonth, categories, cells);
-        dto.AffectedCells = affected;
-        return dto;
-    }
+    private Task<FinanceBudgetDto> BuildBudgetAsync(Guid buildingId, int fiscalYear, int startMonth, int affected, CancellationToken cancellationToken) =>
+        reports.BudgetAsync(buildingId, fiscalYear, startMonth, affected, cancellationToken);
 }

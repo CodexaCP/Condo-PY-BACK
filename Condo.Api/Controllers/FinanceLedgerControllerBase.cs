@@ -41,20 +41,6 @@ public abstract class FinanceLedgerControllerBase(
     }
 
     // Mes pedido (por defecto, el actual), acotado entre el mes de arranque y el mes actual.
-    protected static DateOnly ResolveMonth(int? year, int? month, DateOnly today, DateOnly start, out string? error)
-    {
-        error = null;
-        if (year is < 2000 or > 2100 || month is < 1 or > 12)
-        {
-            error = "El año o el mes no son válidos.";
-            return today;
-        }
-
-        var requested = new DateOnly(year ?? today.Year, month ?? today.Month, 1);
-        var current = new DateOnly(today.Year, today.Month, 1);
-        var first = new DateOnly(start.Year, start.Month, 1);
-        if (requested > current) requested = current;
-        if (requested < first) requested = first;
-        return requested;
-    }
+    protected static DateOnly ResolveMonth(int? year, int? month, DateOnly today, DateOnly start, out string? error) =>
+        FinanceReportService.ResolveMonth(year, month, today, start, out error);
 }

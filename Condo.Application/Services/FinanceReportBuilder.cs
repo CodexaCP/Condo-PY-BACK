@@ -303,7 +303,8 @@ public static class FinanceReportBuilder
         bool descending,
         int page,
         int pageSize,
-        decimal? openingForScope)
+        decimal? openingForScope,
+        bool unpaged = false)
     {
         IEnumerable<LedgerRow> filtered = rows;
 
@@ -368,8 +369,15 @@ public static class FinanceReportBuilder
             dtos.Reverse();
         }
 
+        // Sin paginar (exportacion): todas las filas en una sola pagina.
+        if (unpaged)
+        {
+            page = 1;
+            pageSize = Math.Max(dtos.Count, 1);
+        }
+
         page = Math.Max(page, 1);
-        pageSize = Math.Clamp(pageSize, 1, 500);
+        pageSize = unpaged ? pageSize : Math.Clamp(pageSize, 1, 500);
 
         return new FinanceMovementsPageDto
         {
