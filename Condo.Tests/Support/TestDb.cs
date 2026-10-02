@@ -133,6 +133,24 @@ internal sealed class TestDb : IDisposable
         Db.SaveChanges();
     }
 
+    // El usuario (Encargado u Operador) queda con acceso asignado al edificio.
+    public void AddBuildingAccess(ApplicationUser user, Building building)
+    {
+        Db.UserBuildingAccesses.Add(new UserBuildingAccess
+        {
+            CompanyId = building.CompanyId!.Value,
+            ApplicationUserId = user.Id,
+            BuildingId = building.Id
+        });
+        Db.SaveChanges();
+    }
+
+    public void SetTransferInfo(Building building, string? text)
+    {
+        building.MarketplaceTransferInfo = text;
+        Db.SaveChanges();
+    }
+
     public void EnableMarketplace(Building building, bool enabled = true)
     {
         building.MarketplaceEnabled = enabled;

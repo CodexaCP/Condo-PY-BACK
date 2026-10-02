@@ -46,6 +46,14 @@ public sealed class MarketplaceMaintenanceService(
             logger.LogInformation("Marketplace: {Count} reservas vencidas por falta de pago.", expired);
         }
 
+        // Alertas al revisor: pagos que siguen sin revisar (a los 15 minutos y luego cada hora).
+        var payments = scope.ServiceProvider.GetRequiredService<MarketplacePaymentService>();
+        var alerted = await payments.SendReviewAlertsAsync(ct);
+        if (alerted > 0)
+        {
+            logger.LogInformation("Marketplace: {Count} alertas de pagos por revisar.", alerted);
+        }
+
         // Publicaciones de dueños que ya no son el principal: solo de edificios con el modulo encendido.
         var db = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
         var listings = scope.ServiceProvider.GetRequiredService<MarketplaceListingService>();

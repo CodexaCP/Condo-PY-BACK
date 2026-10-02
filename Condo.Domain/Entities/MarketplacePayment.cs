@@ -23,6 +23,10 @@ public class MarketplacePayment : CompanyScopedEntity
     public DateTime? ReviewedAtUtc { get; set; }
     public string? RejectionReason { get; set; }
 
+    // Alertas al revisor mientras el pago espera revision: cuantas se mandaron y cuando fue la ultima.
+    public int AlertCount { get; set; }
+    public DateTime? LastAlertAtUtc { get; set; }
+
     public byte[] RowVersion { get; set; } = [];
 
     public Company? Company { get; set; }

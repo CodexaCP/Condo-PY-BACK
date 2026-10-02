@@ -13,6 +13,7 @@ public static class MarketplaceEventActions
 
     public const string ReservationCreated = "reservation.created";
     public const string ReservationExpired = "reservation.expired";
+    public const string ReservationInReview = "reservation.in_review";
     public const string ReservationConfirmed = "reservation.confirmed";
     public const string ReservationRejected = "reservation.rejected";
     public const string ReservationCancelled = "reservation.cancelled";

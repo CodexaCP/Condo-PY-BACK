@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 namespace Condo.Api.Services;
 
 /// <summary>Aviso a un usuario (push) que se manda DESPUES de guardar, fuera de la transaccion.</summary>
-public sealed record MarketplacePushItem(Guid RecipientId, string Title, string Body, Guid ReservationId);
+public sealed record MarketplacePushItem(Guid RecipientId, string Title, string Body, Guid EntityId, string EntityType = "MarketplaceReservation");
 
 /// <summary>
 /// Explorar y reservar. La reserva es una operacion comercial: congela los importes al crearse y ocupa bloques de 30 minutos.
@@ -396,7 +396,7 @@ public class MarketplaceReservationService(
     {
         foreach (var item in pushes)
         {
-            await push.NotifyUserAsync(item.RecipientId, item.Title, item.Body, nameof(MarketplaceReservation), item.ReservationId, CancellationToken.None);
+            await push.NotifyUserAsync(item.RecipientId, item.Title, item.Body, item.EntityType, item.EntityId, CancellationToken.None);
         }
     }
 

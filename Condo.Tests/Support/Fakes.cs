@@ -41,3 +41,14 @@ internal sealed class NoopPushSender : IPushNotificationSender
     public Task SendAsync(string deviceToken, string title, string body, IDictionary<string, string>? data, CancellationToken cancellationToken) =>
         Task.CompletedTask;
 }
+
+// Mora de mentira: se indica a mano que unidades estan en mora.
+internal sealed class StubOverdueService : Condo.Api.Services.IUnitOverdueService
+{
+    public HashSet<Guid> OverdueUnitIds { get; } = [];
+
+    public Task<bool> IsUnitOverdueAsync(Guid unitId, CancellationToken ct) => Task.FromResult(OverdueUnitIds.Contains(unitId));
+
+    public Task<HashSet<Guid>> GetOverdueUnitIdsByBuildingAsync(IReadOnlyCollection<Guid> buildingIds, CancellationToken ct) =>
+        Task.FromResult(OverdueUnitIds.ToHashSet());
+}
