@@ -260,8 +260,33 @@ public class MarketplaceReservationService(
     }
 
     /// <summary>
-    /// El comprador cancela una reserva que todavia no pago: se libera el horario. (Cancelar una reserva ya pagada, con su
-    /// politica de comision y reembolso, llega en una fase posterior.)
+    /// Reservas de MIS publicaciones en el edificio (quien reservo: solo nombre y unidad): las que ya estan pagadas o en revision
+    /// y las que se cancelaron despues de pagar. Las que esperan pago o vencieron no se muestran: todavia no son del propietario.
+    /// La reserva pertenece al propietario que figuraba al crearla, aunque despues cambie el principal.
+    /// </summary>
+    public async Task<MarketplaceResult<List<MarketplaceOwnerReservationDto>>> GetOnMyListingsAsync(Guid buildingId, CancellationToken ct)
+    {
+        var access = await scope.ResolveBuildingAsync(buildingId, ct);
+        if (!access.Allowed)
+        {
+            return MarketplaceResult<List<MarketplaceOwnerReservationDto>>.Fail(MarketplaceError.FromAccess(access));
+        }
+
+        db.ChangeTracker.Clear();
+        var query = db.MarketplaceReservations.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.OwnerId == tenant.UserId
+                        && (x.Status == MarketplaceReservationStatus.InReview
+                            || x.Status == MarketplaceReservationStatus.Confirmed
+                            || x.Status == MarketplaceReservationStatus.Completed
+                            || (x.Status == MarketplaceReservationStatus.Cancelled
+                                && x.Payments.Any(p => !p.IsDeleted && p.Status == MarketplacePaymentStatus.Approved))));
+        return MarketplaceResult<List<MarketplaceOwnerReservationDto>>.Success(
+            await MarketplaceReservationViews.LoadOwnerViewAsync(db, query, ct));
+    }
+
+    /// <summary>
+    /// El comprador cancela una reserva que todavia no pago: se libera el horario, sin comision ni reembolso. (Cancelar una
+    /// reserva ya pagada lo resuelve <see cref="MarketplaceCancellationService"/>.)
     /// </summary>
     public async Task<MarketplaceResult<MarketplaceReservationDto>> CancelPendingAsync(Guid id, CancellationToken ct)
     {
@@ -554,40 +579,6 @@ public class MarketplaceReservationService(
     private async Task<MarketplaceReservationDto> LoadDtoAsync(Guid id, CancellationToken ct) =>
         (await ToDtosAsync(db.MarketplaceReservations.AsNoTracking().Where(x => x.Id == id), ct)).Single();
 
-    private async Task<List<MarketplaceReservationDto>> ToDtosAsync(IQueryable<MarketplaceReservation> query, CancellationToken ct)
-    {
-        var rows = await query
-            .OrderByDescending(x => x.StartsAtUtc)
-            .Select(x => new
-            {
-                x.Id, x.Reference, x.ListingId, x.BuildingId,
-                Title = x.Listing != null ? x.Listing.Title : string.Empty,
-                UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
-                x.StartsAtUtc, x.EndsAtUtc, x.Hours, x.HourlyPrice, x.BaseAmount, x.CommissionPercent,
-                x.CommissionAmount, x.TotalAmount, x.Status, x.ExpiresAtUtc, x.CancelReason, x.CreatedAtUtc
-            })
-            .ToListAsync(ct);
-
-        return rows.Select(x => new MarketplaceReservationDto
-        {
-            Id = x.Id,
-            Reference = x.Reference,
-            ListingId = x.ListingId,
-            BuildingId = x.BuildingId,
-            Title = x.Title,
-            UnitCode = x.UnitCode,
-            StartsAtUtc = AsUtc(x.StartsAtUtc),
-            EndsAtUtc = AsUtc(x.EndsAtUtc),
-            Hours = x.Hours,
-            HourlyPrice = x.HourlyPrice,
-            BaseAmount = x.BaseAmount,
-            CommissionPercent = x.CommissionPercent,
-            CommissionAmount = x.CommissionAmount,
-            TotalAmount = x.TotalAmount,
-            Status = x.Status.ToString(),
-            ExpiresAtUtc = x.ExpiresAtUtc.HasValue ? AsUtc(x.ExpiresAtUtc.Value) : null,
-            CancelReason = x.CancelReason,
-            CreatedAtUtc = AsUtc(x.CreatedAtUtc)
-        }).ToList();
-    }
+    private Task<List<MarketplaceReservationDto>> ToDtosAsync(IQueryable<MarketplaceReservation> query, CancellationToken ct) =>
+        MarketplaceReservationViews.LoadBuyerViewAsync(db, query, ct);
 }

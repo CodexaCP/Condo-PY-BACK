@@ -62,6 +62,22 @@ public sealed class MarketplaceMaintenanceService(
             logger.LogInformation("Marketplace: {Count} alertas de pagos por revisar.", alerted);
         }
 
+        // Aviso de inicio: "¿La vas a usar?" al comprador cuando empieza su reserva confirmada.
+        var startNotices = scope.ServiceProvider.GetRequiredService<MarketplaceStartNoticeService>();
+        var noticed = await startNotices.SendDueAsync(ct);
+        if (noticed > 0)
+        {
+            logger.LogInformation("Marketplace: {Count} avisos de inicio de reserva.", noticed);
+        }
+
+        // Reembolsos que pasaron las 72 horas sin devolverse: una alerta al Encargado.
+        var refunds = scope.ServiceProvider.GetRequiredService<MarketplaceRefundService>();
+        var overdueRefunds = await refunds.SendOverdueAlertsAsync(ct);
+        if (overdueRefunds > 0)
+        {
+            logger.LogInformation("Marketplace: {Count} alertas de reembolsos vencidos.", overdueRefunds);
+        }
+
         // Publicaciones de dueños que ya no son el principal: solo de edificios con el modulo encendido.
         var db = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
         var listings = scope.ServiceProvider.GetRequiredService<MarketplaceListingService>();

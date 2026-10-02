@@ -12,7 +12,11 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/marketplace")]
-public class MarketplaceReservationsController(MarketplaceReservationService reservations) : ControllerBase
+public class MarketplaceReservationsController(
+    MarketplaceReservationService reservations,
+    MarketplaceCancellationService cancellations,
+    MarketplaceClaimService claims,
+    MarketplaceStartNoticeService startNotices) : ControllerBase
 {
     // Publicaciones de otros vecinos de mi edificio con horario libre.
     [HttpGet("listings/explore")]
@@ -41,8 +45,37 @@ public class MarketplaceReservationsController(MarketplaceReservationService res
     public async Task<ActionResult<List<MarketplaceReservationDto>>> GetMine([FromQuery] Guid buildingId, CancellationToken ct) =>
         (await reservations.GetMineAsync(buildingId, ct)).ToActionResult(this);
 
-    // Cancelar una reserva que todavia no se pago (libera el horario).
+    // Reservas de MIS publicaciones (quien reservo: nombre y unidad) para que el propietario las vea y pueda cancelarlas.
+    [HttpGet("reservations/on-my-listings")]
+    public async Task<ActionResult<List<MarketplaceOwnerReservationDto>>> GetOnMyListings([FromQuery] Guid buildingId, CancellationToken ct) =>
+        (await reservations.GetOnMyListingsAsync(buildingId, ct)).ToActionResult(this);
+
+    // Que pasa si cancelo (monto a devolver y comision), calculado por el servidor para avisarlo antes de confirmar.
+    [HttpGet("reservations/{id:guid}/cancel-preview")]
+    public async Task<ActionResult<MarketplaceCancelPreviewDto>> CancelPreview(Guid id, CancellationToken ct) =>
+        (await cancellations.PreviewAsync(id, ct)).ToActionResult(this);
+
+    // El comprador cancela: sin pagar libera el horario; ya pagada y antes del inicio, se devuelve la base (la comision no).
     [HttpPost("reservations/{id:guid}/cancel")]
-    public async Task<ActionResult<MarketplaceReservationDto>> Cancel(Guid id, CancellationToken ct) =>
-        (await reservations.CancelPendingAsync(id, ct)).ToActionResult(this);
+    public async Task<ActionResult<MarketplaceReservationDto>> Cancel(
+        Guid id, [FromBody] MarketplaceCancelRequest? request, CancellationToken ct) =>
+        (await cancellations.CancelByBuyerAsync(id, request?.Reason, ct)).ToActionResult(this);
+
+    // El propietario cancela una reserva ya pagada (con motivo): se devuelve todo al comprador y el propietario asume la comision.
+    [HttpPost("reservations/{id:guid}/owner-cancel")]
+    public async Task<ActionResult<MarketplaceOwnerReservationDto>> OwnerCancel(
+        Guid id, [FromBody] MarketplaceCancelRequest? request, CancellationToken ct) =>
+        (await cancellations.CancelByOwnerAsync(id, request?.Reason, ct)).ToActionResult(this);
+
+    // "Reportar un problema" (comprador o propietario): retiene la acreditacion y avisa al Encargado.
+    [HttpPost("reservations/{id:guid}/claim")]
+    public async Task<ActionResult<MarketplaceClaimDto>> OpenClaim(
+        Guid id, [FromBody] MarketplaceClaimRequest request, CancellationToken ct) =>
+        (await claims.OpenAsync(id, request?.Reason, ct)).ToActionResult(this);
+
+    // Respuesta al aviso de inicio ("Si, voy" / "No la voy a usar"): solo queda registrada.
+    [HttpPost("reservations/{id:guid}/start-response")]
+    public async Task<ActionResult<MarketplaceReservationDto>> StartResponse(
+        Guid id, [FromBody] MarketplaceStartResponseRequest request, CancellationToken ct) =>
+        (await startNotices.RespondAsync(id, request, ct)).ToActionResult(this);
 }

@@ -72,6 +72,18 @@ public class MarketplaceAccountService(
                 .ToListAsync(ct))
             .Sum();
 
+        // Lo que la gestion todavia le debe a compradores (reembolsos sin devolver) sigue dentro del saldo pero no es ganancia.
+        var pendingRefunds = (await db.MarketplaceRefunds.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.Status == MarketplaceRefundStatus.Pending)
+                .Select(x => x.Amount)
+                .ToListAsync(ct))
+            .Sum();
+        var ownerDebtsPending = (await db.MarketplaceOwnerDebts.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.SettledAtUtc == null)
+                .Select(x => new { x.Amount, x.PaidAmount })
+                .ToListAsync(ct))
+            .Sum(x => x.Amount - x.PaidAmount);
+
         var rows = await LoadRowsAsync(buildingId, fromUtc, toUtcExclusive, ct);
 
         var buildingName = await db.Buildings.AsNoTracking().Where(x => x.Id == buildingId).Select(x => x.Name).FirstAsync(ct);
@@ -92,10 +104,13 @@ public class MarketplaceAccountService(
                 TotalCredited = -inPeriod.Where(x => x.Kind == MarketplaceAccountMovementKind.OwnerCredit).Sum(x => x.Amount),
                 TotalRefunds = -inPeriod.Where(x => x.Kind == MarketplaceAccountMovementKind.RefundOut).Sum(x => x.Amount),
                 TotalAdjustments = inPeriod.Where(x => x.Kind == MarketplaceAccountMovementKind.Adjustment).Sum(x => x.Amount),
+                TotalCancellationFees = inPeriod.Where(x => x.Kind == MarketplaceAccountMovementKind.CancellationFee).Sum(x => x.Amount),
                 ClosingBalance = closing,
                 CurrentBalance = currentBalance,
                 PendingToCredit = pendingToCredit,
-                ManagementGain = currentBalance - pendingToCredit
+                PendingRefunds = pendingRefunds,
+                OwnerDebtsPending = ownerDebtsPending,
+                ManagementGain = currentBalance - pendingToCredit - pendingRefunds
             }
         });
     }

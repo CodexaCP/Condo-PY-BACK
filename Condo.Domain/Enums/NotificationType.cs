@@ -30,5 +30,12 @@ public enum NotificationType
     MarketplaceReservationRejected = 26,
     MarketplaceNewReservation = 27,
     MarketplaceCreditApplied = 28,
-    MarketplaceCreditReversed = 29
+    MarketplaceCreditReversed = 29,
+    MarketplaceReservationCancelled = 30,
+    MarketplaceRefundPending = 31,
+    MarketplaceRefundReturned = 32,
+    MarketplaceRefundOverdue = 33,
+    MarketplaceClaimOpened = 34,
+    MarketplaceClaimResolved = 35,
+    MarketplaceStartNotice = 36
 }

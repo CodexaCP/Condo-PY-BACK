@@ -49,10 +49,54 @@ public enum MarketplaceCancellationActor
 
 // Movimientos del extracto de la cuenta aparte (contable, por edificio). El importe va con signo:
 // PaymentIn suma, OwnerCredit y RefundOut restan, Adjustment lo carga el SuperAdmin con el signo que corresponda.
+// CancellationFee suma: la comision que el propietario asume al cancelar y que se le descontó de su saldo a favor.
 public enum MarketplaceAccountMovementKind
 {
     PaymentIn = 1,
     OwnerCredit = 2,
     RefundOut = 3,
-    Adjustment = 4
+    Adjustment = 4,
+    CancellationFee = 5
+}
+
+// Reembolso pendiente: el Encargado devuelve el dinero fuera del sistema y lo marca como devuelto.
+public enum MarketplaceRefundStatus
+{
+    Pending = 1,
+    Returned = 2
+}
+
+// De donde sale el reembolso: define el monto (solo la base si cancela el comprador; todo si cancela el propietario o si el
+// Encargado resuelve un reclamo a favor del comprador).
+public enum MarketplaceRefundOrigin
+{
+    BuyerCancellation = 1,
+    OwnerCancellation = 2,
+    ClaimResolution = 3
+}
+
+public enum MarketplaceClaimStatus
+{
+    Open = 1,
+    Resolved = 2
+}
+
+// Quien reporta el problema (comprador o propietario de la reserva).
+public enum MarketplaceClaimParty
+{
+    Buyer = 1,
+    Owner = 2
+}
+
+public enum MarketplaceClaimResolution
+{
+    InFavorOfOwner = 1,
+    InFavorOfBuyer = 2
+}
+
+// Respuesta del comprador al aviso de inicio. Sin respuesta (nulo) se asume que uso el espacio.
+public enum MarketplaceStartResponse
+{
+    Attending = 1,
+    NotUsing = 2
 }

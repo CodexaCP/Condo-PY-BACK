@@ -59,6 +59,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<MarketplacePayment> MarketplacePayments => Set<MarketplacePayment>();
     public DbSet<MarketplaceAccountMovement> MarketplaceAccountMovements => Set<MarketplaceAccountMovement>();
     public DbSet<MarketplaceEvent> MarketplaceEvents => Set<MarketplaceEvent>();
+    public DbSet<MarketplaceRefund> MarketplaceRefunds => Set<MarketplaceRefund>();
+    public DbSet<MarketplaceClaim> MarketplaceClaims => Set<MarketplaceClaim>();
+    public DbSet<MarketplaceOwnerDebt> MarketplaceOwnerDebts => Set<MarketplaceOwnerDebt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

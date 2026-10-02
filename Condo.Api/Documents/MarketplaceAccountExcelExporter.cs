@@ -23,6 +23,7 @@ public static class MarketplaceAccountExcelExporter
         "OwnerCredit" => "Acreditado al propietario",
         "RefundOut" => "Devolución al comprador",
         "Adjustment" => "Ajuste manual",
+        "CancellationFee" => "Comisión por cancelación del propietario",
         _ => kind
     };
 
@@ -65,9 +66,12 @@ public static class MarketplaceAccountExcelExporter
             ("Acreditado a propietarios", s.TotalCredited, true),
             ("Devuelto a compradores", s.TotalRefunds, true),
             ("Ajustes manuales", s.TotalAdjustments, true),
+            ("Comisiones por cancelación de propietarios", s.TotalCancellationFees, true),
             ("Saldo final del período", s.ClosingBalance, true),
             ("Saldo actual (hoy)", s.CurrentBalance, true),
             ("Pendiente de acreditar a propietarios (hoy)", s.PendingToCredit, true),
+            ("Reembolsos pendientes de devolver (hoy)", s.PendingRefunds, true),
+            ("Deudas por gestión de propietarios por descontar (hoy)", s.OwnerDebtsPending, true),
             ("Ganancia de la gestión (hoy)", s.ManagementGain, true)
         };
 
@@ -91,7 +95,7 @@ public static class MarketplaceAccountExcelExporter
         }
 
         ws.Cell(row + 1, 1).Value =
-            "Cuenta contable aparte: no es una cuenta bancaria ni toca la contabilidad del edificio. La ganancia de la gestión es el saldo menos lo que todavía falta acreditar a los propietarios; su reparto se acuerda fuera del sistema.";
+            "Cuenta contable aparte: no es una cuenta bancaria ni toca la contabilidad del edificio. La ganancia de la gestión es el saldo menos lo que todavía falta acreditar a los propietarios y devolver a los compradores; su reparto se acuerda fuera del sistema.";
         ws.Cell(row + 1, 1).Style.Font.SetItalic();
 
         ws.Column(1).Width = 46;

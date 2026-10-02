@@ -66,4 +66,25 @@ public class MarketplaceReservationDto
     public DateTime? ExpiresAtUtc { get; set; }
     public string? CancelReason { get; set; }
     public DateTime CreatedAtUtc { get; set; }
+
+    // Fase 7: lo que el comprador puede hacer con esta reserva y como van sus reclamos y su reembolso.
+    // Cancelar: antes de pagar (sin costo) o con la reserva confirmada y antes de que empiece (la comision no se devuelve).
+    public bool CanCancel { get; set; }
+    // "Reportar un problema": desde que empieza la reserva hasta 24 horas despues de su fin.
+    public bool CanReportProblem { get; set; }
+    // Llego el aviso de inicio y todavia no respondio.
+    public bool NeedsStartResponse { get; set; }
+    // Attending | NotUsing | nulo
+    public string? StartResponse { get; set; }
+    // Open | Resolved | nulo (sin reclamo)
+    public string? ClaimStatus { get; set; }
+    // InFavorOfOwner | InFavorOfBuyer
+    public string? ClaimResolution { get; set; }
+    public string? ClaimResolutionNote { get; set; }
+    // Reembolso pendiente o ya devuelto (nulo si no corresponde).
+    public decimal? RefundAmount { get; set; }
+    // Pending | Returned
+    public string? RefundStatus { get; set; }
+    // Hasta cuando se le devuelve (72 horas desde que se creo el reembolso).
+    public DateTime? RefundDueAtUtc { get; set; }
 }

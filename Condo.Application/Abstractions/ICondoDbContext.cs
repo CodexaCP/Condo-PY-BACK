@@ -60,6 +60,9 @@ public interface ICondoDbContext
     DbSet<MarketplacePayment> MarketplacePayments { get; }
     DbSet<MarketplaceAccountMovement> MarketplaceAccountMovements { get; }
     DbSet<MarketplaceEvent> MarketplaceEvents { get; }
+    DbSet<MarketplaceRefund> MarketplaceRefunds { get; }
+    DbSet<MarketplaceClaim> MarketplaceClaims { get; }
+    DbSet<MarketplaceOwnerDebt> MarketplaceOwnerDebts { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

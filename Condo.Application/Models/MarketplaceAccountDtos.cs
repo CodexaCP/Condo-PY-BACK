@@ -7,7 +7,7 @@ public class MarketplaceAccountRowDto
 {
     public Guid Id { get; set; }
     public DateTime OccurredAtUtc { get; set; }
-    // PaymentIn | OwnerCredit | RefundOut | Adjustment
+    // PaymentIn | OwnerCredit | RefundOut | Adjustment | CancellationFee
     public string Kind { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Concept { get; set; } = string.Empty;
@@ -27,13 +27,19 @@ public class MarketplaceAccountSummaryDto
     public decimal TotalCredited { get; set; }
     public decimal TotalRefunds { get; set; }
     public decimal TotalAdjustments { get; set; }
+    // Comisiones que los propietarios asumieron al cancelar y que se descontaron de su saldo a favor (suman a la cuenta).
+    public decimal TotalCancellationFees { get; set; }
     public decimal ClosingBalance { get; set; }
 
     // Al dia de hoy (no dependen del periodo elegido):
     public decimal CurrentBalance { get; set; }
     // Parte del saldo que todavia le corresponde acreditar a los propietarios (reservas confirmadas o finalizadas sin acreditar).
     public decimal PendingToCredit { get; set; }
-    // Lo que queda para la gestion: saldo actual menos lo pendiente de acreditar. Se reparte fuera del sistema.
+    // Reembolsos a compradores que el Encargado todavia no devolvio (siguen dentro del saldo, pero no son ganancia).
+    public decimal PendingRefunds { get; set; }
+    // Deudas por gestion de propietarios que se descontaran de sus proximas acreditaciones (informativo: aun no suman al saldo).
+    public decimal OwnerDebtsPending { get; set; }
+    // Lo que queda para la gestion: saldo actual menos lo pendiente de acreditar y de reembolsar. Se reparte fuera del sistema.
     public decimal ManagementGain { get; set; }
 }
 

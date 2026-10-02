@@ -43,10 +43,14 @@ internal static class MarketplaceModelConfiguration
         reservation.Property(x => x.CreditStatus).HasConversion<string>().HasMaxLength(20);
         reservation.Property(x => x.CancelledBy).HasConversion<string>().HasMaxLength(20);
         reservation.Property(x => x.CancelReason).HasMaxLength(500);
+        reservation.Property(x => x.StartResponse).HasConversion<string>().HasMaxLength(20);
+        reservation.Property(x => x.StartResponseReason).HasMaxLength(500);
         if (isSqlServer)
         {
             reservation.Property(x => x.RowVersion).IsRowVersion();
         }
+        // El proceso de fondo busca las reservas confirmadas que ya empezaron y todavia no recibieron el aviso de inicio.
+        reservation.HasIndex(x => new { x.Status, x.StartNoticeSentAtUtc, x.StartsAtUtc });
 
         reservation.HasIndex(x => new { x.CompanyId, x.Reference }).IsUnique().HasFilter("[IsDeleted] = 0");
         reservation.HasIndex(x => new { x.ListingId, x.Status });
@@ -106,6 +110,63 @@ internal static class MarketplaceModelConfiguration
         movement.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         movement.HasOne(x => x.Building).WithMany().HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
         movement.HasOne(x => x.Reservation).WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Reembolso pendiente al comprador ─────────────────────────────────
+        var refund = modelBuilder.Entity<MarketplaceRefund>();
+        refund.Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        refund.Property(x => x.Origin).HasConversion<string>().HasMaxLength(20);
+        refund.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        refund.Property(x => x.Reason).HasMaxLength(500);
+        if (isSqlServer)
+        {
+            refund.Property(x => x.RowVersion).IsRowVersion();
+        }
+
+        // Un solo reembolso por reserva: una operacion no se devuelve dos veces.
+        refund.HasIndex(x => x.ReservationId).IsUnique().HasFilter("[IsDeleted] = 0")
+            .HasDatabaseName("IX_MarketplaceRefunds_OnePerReservation");
+        refund.HasIndex(x => new { x.BuildingId, x.Status, x.CreatedAtUtc });
+        refund.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        refund.HasOne(x => x.Reservation).WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        refund.HasOne(x => x.Building).WithMany().HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        refund.HasOne(x => x.Recipient).WithMany().HasForeignKey(x => x.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
+        refund.HasOne(x => x.ReturnedByUser).WithMany().HasForeignKey(x => x.ReturnedByUserId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Reclamo ("Reportar un problema") ─────────────────────────────────
+        var claim = modelBuilder.Entity<MarketplaceClaim>();
+        claim.Property(x => x.OpenedBy).HasConversion<string>().HasMaxLength(20);
+        claim.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        claim.Property(x => x.Resolution).HasConversion<string>().HasMaxLength(20);
+        claim.Property(x => x.Reason).HasMaxLength(500);
+        claim.Property(x => x.ResolutionNote).HasMaxLength(500);
+        if (isSqlServer)
+        {
+            claim.Property(x => x.RowVersion).IsRowVersion();
+        }
+
+        // Un solo reclamo abierto por reserva.
+        claim.HasIndex(x => x.ReservationId).IsUnique().HasFilter("[Status] = 'Open' AND [IsDeleted] = 0")
+            .HasDatabaseName("IX_MarketplaceClaims_OneOpenPerReservation");
+        claim.HasIndex(x => new { x.BuildingId, x.Status, x.CreatedAtUtc });
+        claim.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        claim.HasOne(x => x.Reservation).WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        claim.HasOne(x => x.Building).WithMany().HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        claim.HasOne(x => x.OpenedByUser).WithMany().HasForeignKey(x => x.OpenedByUserId).OnDelete(DeleteBehavior.Restrict);
+        claim.HasOne(x => x.ResolvedByUser).WithMany().HasForeignKey(x => x.ResolvedByUserId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Deuda por gestion del propietario ────────────────────────────────
+        var debt = modelBuilder.Entity<MarketplaceOwnerDebt>();
+        debt.Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        debt.Property(x => x.PaidAmount).HasColumnType("decimal(18,2)");
+        debt.Property(x => x.Reason).HasMaxLength(500);
+        // Una deuda por reserva: la comision de una operacion no se cobra dos veces.
+        debt.HasIndex(x => x.ReservationId).IsUnique().HasFilter("[IsDeleted] = 0")
+            .HasDatabaseName("IX_MarketplaceOwnerDebts_OnePerReservation");
+        debt.HasIndex(x => new { x.OwnerId, x.BuildingId, x.SettledAtUtc });
+        debt.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        debt.HasOne(x => x.Building).WithMany().HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        debt.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        debt.HasOne(x => x.Reservation).WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Auditoria ────────────────────────────────────────────────────────
         var audit = modelBuilder.Entity<MarketplaceEvent>();

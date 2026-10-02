@@ -23,7 +23,7 @@ public class MarketplaceCreditService(
     PushDispatcher push)
 {
     // Ventana de reclamo: la ganancia se acredita 24 horas despues del fin de la reserva, si no hubo reclamo.
-    public static readonly TimeSpan ClaimWindow = TimeSpan.FromHours(24);
+    public static readonly TimeSpan ClaimWindow = MarketplaceCancellationRules.ClaimWindow;
 
     private const int BatchSize = 100;
     private const int ReasonMaxLength = 500;
@@ -124,58 +124,111 @@ public class MarketplaceCreditService(
 
                 MarketplaceStateMachine.EnsureTransition(reservation.CreditStatus, MarketplaceCreditStatus.Credited);
 
-                var amount = reservation.OwnerNetAmount;
-                var credit = await db.OwnerCredits
-                    .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == reservation.OwnerId && x.CompanyId == reservation.CompanyId, ct);
-                if (credit is null)
+                // Deuda por gestion pendiente del propietario en este edificio (comision que asumio al cancelar): se descuenta de lo
+                // que se le acredita, la mas antigua primero. No toca las expensas. Si la deuda iguala o supera la ganancia, no
+                // se genera saldo: la reserva se aplica a la deuda.
+                var net = reservation.OwnerNetAmount;
+                var debts = await db.MarketplaceOwnerDebts
+                    .Where(x => !x.IsDeleted && x.OwnerId == reservation.OwnerId && x.CompanyId == reservation.CompanyId
+                                && x.BuildingId == reservation.BuildingId && x.SettledAtUtc == null)
+                    .OrderBy(x => x.CreatedAtUtc)
+                    .ToListAsync(ct);
+
+                var deducted = 0m;
+                foreach (var debt in debts)
                 {
-                    credit = new OwnerCredit { CompanyId = reservation.CompanyId, OwnerId = reservation.OwnerId, Amount = 0m };
-                    db.OwnerCredits.Add(credit);
+                    var room = net - deducted;
+                    if (room <= 0m)
+                    {
+                        break;
+                    }
+
+                    var take = Math.Min(debt.Amount - debt.PaidAmount, room);
+                    debt.PaidAmount += take;
+                    deducted += take;
+                    if (debt.PaidAmount >= debt.Amount)
+                    {
+                        debt.SettledAtUtc = now;
+                    }
+
+                    audit.Record(reservation.CompanyId, reservation.BuildingId, nameof(MarketplaceOwnerDebt), debt.Id,
+                        MarketplaceEventActions.OwnerDebtDeducted, null, debt.SettledAtUtc.HasValue ? "Settled" : "Pending",
+                        new { reservation.Reference, Deducted = take, debt.PaidAmount, debt.Amount }, automatic: true);
                 }
 
-                var previousBalance = credit.Amount;
-                credit.Amount += amount;
+                var amount = net - deducted;
+                var credit = await db.OwnerCredits
+                    .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == reservation.OwnerId && x.CompanyId == reservation.CompanyId, ct);
+                var previousBalance = credit?.Amount ?? 0m;
+                var newBalance = previousBalance;
 
-                // Lote de saldo con su origen: asi cada guarani se puede rastrear hasta la reserva (y, al usarse, hasta el cargo).
-                db.OwnerCreditMovements.Add(new OwnerCreditMovement
+                if (amount > 0m)
                 {
-                    CompanyId = reservation.CompanyId,
-                    OwnerId = reservation.OwnerId,
-                    Kind = OwnerCreditMovementKind.Generated,
-                    Amount = amount,
-                    RemainingAmount = amount,
-                    SourceReference = reservation.Reference,
-                    MarketplaceReservationId = reservation.Id,
-                    Description = $"Saldo a favor generado por la reserva {reservation.Reference} del Marketplace ({reservation.Listing?.Title})"
-                });
+                    if (credit is null)
+                    {
+                        credit = new OwnerCredit { CompanyId = reservation.CompanyId, OwnerId = reservation.OwnerId, Amount = 0m };
+                        db.OwnerCredits.Add(credit);
+                    }
+
+                    credit.Amount += amount;
+                    newBalance = credit.Amount;
+
+                    // Lote de saldo con su origen: asi cada guarani se puede rastrear hasta la reserva (y, al usarse, hasta el cargo).
+                    db.OwnerCreditMovements.Add(new OwnerCreditMovement
+                    {
+                        CompanyId = reservation.CompanyId,
+                        OwnerId = reservation.OwnerId,
+                        Kind = OwnerCreditMovementKind.Generated,
+                        Amount = amount,
+                        RemainingAmount = amount,
+                        SourceReference = reservation.Reference,
+                        MarketplaceReservationId = reservation.Id,
+                        Description = $"Saldo a favor generado por la reserva {reservation.Reference} del Marketplace ({reservation.Listing?.Title})" +
+                                      (deducted > 0m ? $" — se descontaron Gs. {deducted:N0} de deuda por gestión" : string.Empty)
+                    });
+                }
 
                 reservation.CreditStatus = MarketplaceCreditStatus.Credited;
                 reservation.CreditedAtUtc = now;
 
-                // Salida de la cuenta aparte del edificio (una sola vez por reserva: indice unico).
-                var movement = new MarketplaceAccountMovement
+                // Salida de la cuenta aparte del edificio (una sola vez por reserva: indice unico). Lo descontado por deuda no sale:
+                // queda en la cuenta como ganancia de la gestion.
+                MarketplaceAccountMovement? movement = null;
+                if (amount > 0m)
                 {
-                    CompanyId = reservation.CompanyId,
-                    BuildingId = reservation.BuildingId,
-                    Kind = MarketplaceAccountMovementKind.OwnerCredit,
-                    Amount = -amount,
-                    ReservationId = reservation.Id,
-                    Concept = $"Acreditado al saldo del propietario: reserva {reservation.Reference} ({reservation.Listing?.Title})",
-                    CreatedByUserId = null,
-                    OccurredAtUtc = now
-                };
-                db.MarketplaceAccountMovements.Add(movement);
+                    movement = new MarketplaceAccountMovement
+                    {
+                        CompanyId = reservation.CompanyId,
+                        BuildingId = reservation.BuildingId,
+                        Kind = MarketplaceAccountMovementKind.OwnerCredit,
+                        Amount = -amount,
+                        ReservationId = reservation.Id,
+                        Concept = $"Acreditado al saldo del propietario: reserva {reservation.Reference} ({reservation.Listing?.Title})" +
+                                  (deducted > 0m ? $" — neto de Gs. {deducted:N0} de deuda por gestión" : string.Empty),
+                        CreatedByUserId = null,
+                        OccurredAtUtc = now
+                    };
+                    db.MarketplaceAccountMovements.Add(movement);
+                }
 
                 audit.Record(reservation.CompanyId, reservation.BuildingId, nameof(MarketplaceReservation), reservation.Id,
                     MarketplaceEventActions.CreditApplied, MarketplaceCreditStatus.Pending.ToString(), MarketplaceCreditStatus.Credited.ToString(),
-                    new { reservation.OwnerId, Amount = amount, PreviousBalance = previousBalance, NewBalance = credit.Amount }, automatic: true);
-                audit.Record(reservation.CompanyId, reservation.BuildingId, nameof(MarketplaceAccountMovement), movement.Id,
-                    MarketplaceEventActions.AccountMovementRecorded, null, movement.Kind.ToString(),
-                    new { movement.Amount, reservation.Reference }, automatic: true);
+                    new { reservation.OwnerId, Amount = amount, DebtDeducted = deducted, PreviousBalance = previousBalance, NewBalance = newBalance },
+                    automatic: true);
+                if (movement is not null)
+                {
+                    audit.Record(reservation.CompanyId, reservation.BuildingId, nameof(MarketplaceAccountMovement), movement.Id,
+                        MarketplaceEventActions.AccountMovementRecorded, null, movement.Kind.ToString(),
+                        new { movement.Amount, reservation.Reference }, automatic: true);
+                }
 
                 const string heading = "Saldo a favor acreditado";
-                var body = $"Se acreditaron Gs. {amount:N0} a tu saldo a favor por la reserva de {reservation.Listing?.Title ?? "tu espacio"} " +
-                           "del Marketplace. Se usa en tu próximo pago de expensas.";
+                var spaceName = reservation.Listing?.Title ?? "tu espacio";
+                var body = amount > 0m
+                    ? $"Se acreditaron Gs. {amount:N0} a tu saldo a favor por la reserva de {spaceName} del Marketplace. " +
+                      (deducted > 0m ? $"Se descontaron Gs. {deducted:N0} de tu deuda por gestión. " : string.Empty) +
+                      "Se usa en tu próximo pago de expensas."
+                    : $"La reserva de {spaceName} del Marketplace se aplicó a tu deuda por gestión (Gs. {deducted:N0}): no se acreditó saldo.";
                 db.Notifications.Add(new Notification
                 {
                     CompanyId = reservation.CompanyId,
@@ -267,7 +320,15 @@ public class MarketplaceCreditService(
 
                 var lot = await db.OwnerCreditMovements.FirstOrDefaultAsync(x => !x.IsDeleted
                     && x.MarketplaceReservationId == reservation.Id && x.Kind == OwnerCreditMovementKind.Generated, ct);
-                if (lot is null || lot.RemainingAmount != lot.Amount)
+                if (lot is null)
+                {
+                    await transaction.RollbackAsync(ct);
+                    outcome = MarketplaceResult<MarketplaceReversalDto>.Fail(MarketplaceError.Conflict(
+                        "Esta reserva no generó saldo (se aplicó a una deuda por gestión del propietario): no hay nada que revertir."));
+                    return;
+                }
+
+                if (lot.RemainingAmount != lot.Amount)
                 {
                     await transaction.RollbackAsync(ct);
                     outcome = MarketplaceResult<MarketplaceReversalDto>.Fail(MarketplaceError.Conflict(

@@ -44,6 +44,13 @@ public class MarketplaceReservation : CompanyScopedEntity
     public MarketplaceCancellationActor? CancelledBy { get; set; }
     public string? CancelReason { get; set; }
 
+    // Aviso de inicio: se manda al empezar el horario ("Sí, voy" / "No la voy a usar"). Sin respuesta se asume que se uso.
+    // Responder no devuelve dinero: el motivo solo queda registrado.
+    public DateTime? StartNoticeSentAtUtc { get; set; }
+    public MarketplaceStartResponse? StartResponse { get; set; }
+    public string? StartResponseReason { get; set; }
+    public DateTime? StartResponseAtUtc { get; set; }
+
     // Control de concurrencia (solo SQL Server la actualiza sola). Evita que dos cambios simultaneos se pisen.
     public byte[] RowVersion { get; set; } = [];
 

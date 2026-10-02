@@ -593,31 +593,8 @@ public class MarketplacePaymentService(
         _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
     };
 
-    private async Task<MarketplaceReservationDto> LoadReservationDtoAsync(Guid id, CancellationToken ct)
-    {
-        var x = await db.MarketplaceReservations.AsNoTracking()
-            .Where(r => r.Id == id)
-            .Select(r => new
-            {
-                r.Id, r.Reference, r.ListingId, r.BuildingId,
-                Title = r.Listing != null ? r.Listing.Title : string.Empty,
-                UnitCode = r.Unit != null ? r.Unit.Code : string.Empty,
-                r.StartsAtUtc, r.EndsAtUtc, r.Hours, r.HourlyPrice, r.BaseAmount, r.CommissionPercent,
-                r.CommissionAmount, r.TotalAmount, r.Status, r.ExpiresAtUtc, r.CancelReason, r.CreatedAtUtc
-            })
-            .FirstAsync(ct);
-
-        return new MarketplaceReservationDto
-        {
-            Id = x.Id, Reference = x.Reference, ListingId = x.ListingId, BuildingId = x.BuildingId,
-            Title = x.Title, UnitCode = x.UnitCode,
-            StartsAtUtc = AsUtc(x.StartsAtUtc), EndsAtUtc = AsUtc(x.EndsAtUtc), Hours = x.Hours,
-            HourlyPrice = x.HourlyPrice, BaseAmount = x.BaseAmount, CommissionPercent = x.CommissionPercent,
-            CommissionAmount = x.CommissionAmount, TotalAmount = x.TotalAmount, Status = x.Status.ToString(),
-            ExpiresAtUtc = x.ExpiresAtUtc.HasValue ? AsUtc(x.ExpiresAtUtc.Value) : null,
-            CancelReason = x.CancelReason, CreatedAtUtc = AsUtc(x.CreatedAtUtc)
-        };
-    }
+    private async Task<MarketplaceReservationDto> LoadReservationDtoAsync(Guid id, CancellationToken ct) =>
+        (await MarketplaceReservationViews.LoadBuyerViewAsync(db, db.MarketplaceReservations.AsNoTracking().Where(r => r.Id == id), ct)).Single();
 
     private async Task<MarketplaceReviewItemDto> LoadReviewItemAsync(Guid paymentId, CancellationToken ct)
     {
