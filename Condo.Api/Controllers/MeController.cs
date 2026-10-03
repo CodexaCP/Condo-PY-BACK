@@ -228,7 +228,17 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
             }
         }
 
-        return results;
+        // Una persona puede ser propietaria y residente de la misma unidad (o tener el vínculo repetido):
+        // la unidad se lista una sola vez, priorizando el vínculo de propietario.
+        return results
+            .GroupBy(x => x.UnitId)
+            .Select(g =>
+            {
+                var best = g.OrderBy(x => x.RelationRole == "Owner" ? 0 : 1).First();
+                best.IsPrimary = g.Any(x => x.IsPrimary);
+                return best;
+            })
+            .ToList();
     }
 
     private static System.Linq.Expressions.Expression<Func<Claim, ClaimDto>> ToClaimDto() =>
