@@ -7,28 +7,53 @@ using Microsoft.EntityFrameworkCore;
 namespace Condo.Tests.Support;
 
 /// <summary>
-/// Base SQLite en memoria con el modelo REAL de CondoDbContext. A diferencia de EF InMemory, SQLite hace cumplir los
-/// indices unicos filtrados y las claves foraneas, que son justo las garantias que el marketplace pone en la base.
+/// Base de pruebas con el modelo REAL de CondoDbContext: SQLite en memoria por defecto, o SQL Server real (LocalDB) si se define la
+/// variable de entorno CONDO_TEST_SQLSERVER (solo para las pruebas de concurrencia). A diferencia de EF InMemory, ambos
+/// hacen cumplir los indices unicos filtrados y las claves foraneas, que son justo las garantias que el marketplace pone en la base.
 /// </summary>
 internal sealed class TestDb : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    // Conexion al SERVIDOR (sin base) de un SQL Server real, p. ej.: Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True
+    public const string SqlServerVariable = "CONDO_TEST_SQLSERVER";
+
+    public static string? SqlServerServer => Environment.GetEnvironmentVariable(SqlServerVariable) is { Length: > 0 } v ? v : null;
+
+    private readonly SqliteConnection? _connection;
     private readonly DbContextOptions<CondoDbContext> _options;
+    private readonly bool _sqlServer;
     private int _seq;
 
     public CondoDbContext Db { get; }
 
-    public TestDb()
+    public TestDb() : this(useSqlServer: false)
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
-        _options = new DbContextOptionsBuilder<CondoDbContext>().UseSqlite(_connection).Options;
-        Db = new SqliteCondoDbContext(_options);
+    }
+
+    public TestDb(bool useSqlServer)
+    {
+        _sqlServer = useSqlServer;
+        if (useSqlServer)
+        {
+            var server = SqlServerServer ?? throw new InvalidOperationException($"Falta la variable de entorno {SqlServerVariable}.");
+            var connection = $"{server.TrimEnd(';')};Database=CondoTests_{Guid.NewGuid():N};Connect Timeout=30";
+            // Igual que produccion: con reintentos ante fallas transitorias (por ejemplo, un deadlock).
+            _options = new DbContextOptionsBuilder<CondoDbContext>()
+                .UseSqlServer(connection, sql => sql.EnableRetryOnFailure()).Options;
+            Db = new CondoDbContext(_options);
+        }
+        else
+        {
+            _connection = new SqliteConnection("DataSource=:memory:");
+            _connection.Open();
+            _options = new DbContextOptionsBuilder<CondoDbContext>().UseSqlite(_connection).Options;
+            Db = new SqliteCondoDbContext(_options);
+        }
+
         Db.Database.EnsureCreated();
     }
 
     // Otro contexto sobre la misma base: sirve para comprobar que algo quedo realmente guardado (sin cache de EF).
-    public CondoDbContext NewContext() => new SqliteCondoDbContext(_options);
+    public CondoDbContext NewContext() => _sqlServer ? new CondoDbContext(_options) : new SqliteCondoDbContext(_options);
 
     private int Next() => ++_seq;
 
@@ -214,7 +239,16 @@ internal sealed class TestDb : IDisposable
 
     public void Dispose()
     {
+        if (_sqlServer)
+        {
+            // La base de prueba es temporal: se borra al terminar.
+            try { Db.Database.EnsureDeleted(); } catch (Exception) { /* si no se pudo borrar, queda una base CondoTests_* para limpiar a mano */ }
+            Db.Dispose();
+            Microsoft.Data.SqlClient.SqlConnection.ClearAllPools();
+            return;
+        }
+
         Db.Dispose();
-        _connection.Dispose();
+        _connection!.Dispose();
     }
 }

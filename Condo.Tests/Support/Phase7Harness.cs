@@ -16,7 +16,7 @@ namespace Condo.Tests.Support;
 /// </summary>
 internal sealed class Phase7Harness : IDisposable
 {
-    public readonly TestDb T = new();
+    public readonly TestDb T;
     public readonly FakeTenantContext Tenant = new();
     public readonly FakeAccessScope Access;
 
@@ -36,8 +36,9 @@ internal sealed class Phase7Harness : IDisposable
     public readonly MarketplaceListing Listing;
     private int _ref;
 
-    public Phase7Harness()
+    public Phase7Harness(bool useSqlServer = false)
     {
+        T = new TestDb(useSqlServer);
         Access = new FakeAccessScope(Tenant);
         Company = T.AddCompany();
         CompanyAdmin = T.AddUser(Company, UserRole.CompanyAdmin, "Admin");
@@ -106,23 +107,50 @@ internal sealed class Phase7Harness : IDisposable
         MarketplaceAccountService Account,
         MarketplacePaymentService Payments);
 
-    public Services Build()
+    public Services Build() => BuildFor(Tenant, Access);
+
+    // Servicios para OTRA sesion (otro usuario con su propio contexto): lo que hace falta para simular pedidos simultaneos.
+    public Services BuildAs(ApplicationUser user, string role, params Building[] staffBuildings)
+    {
+        var s = NewSession(user, role, null, staffBuildings);
+        return BuildFor(s.Tenant, s.Access);
+    }
+
+    // Una sesion completa (usuario, rol, empresa del token y edificios del personal) para armar servicios y documentos.
+    public sealed record Session(FakeTenantContext Tenant, FakeAccessScope Access);
+
+    // companyId distinto del de la cuenta = un token que dice otra empresa (para probar que no abre puertas).
+    public Session NewSession(ApplicationUser user, string role, Guid? companyId = null, params Building[] staffBuildings)
+    {
+        var tenant = new FakeTenantContext { UserId = user.Id, Role = role, CompanyId = companyId ?? user.CompanyId };
+        var access = new FakeAccessScope(tenant);
+        foreach (var building in staffBuildings)
+        {
+            access.Buildings.Add(building.Id);
+        }
+
+        return new Session(tenant, access);
+    }
+
+    public Services Build(Session session) => BuildFor(session.Tenant, session.Access);
+
+    private Services BuildFor(FakeTenantContext tenant, FakeAccessScope access)
     {
         var db = T.NewContext();
         var gate = new MarketplaceModuleGate(db);
-        var scope = new MarketplaceScope(db, Tenant, Access, gate);
-        var audit = new MarketplaceAudit(db, Tenant, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
-        var listings = new MarketplaceListingService(db, Tenant, scope, audit);
+        var scope = new MarketplaceScope(db, tenant, access, gate);
+        var audit = new MarketplaceAudit(db, tenant, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
+        var listings = new MarketplaceListingService(db, tenant, scope, audit);
         var push = new PushDispatcher(db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance);
-        var reservations = new MarketplaceReservationService(db, Tenant, scope, audit, listings, push, Options.Create(new MarketplaceOptions()));
+        var reservations = new MarketplaceReservationService(db, tenant, scope, audit, listings, push, Options.Create(new MarketplaceOptions()));
         var credits = new OwnerCreditService(db);
-        var refunds = new MarketplaceRefundService(db, Tenant, scope, audit, push, credits);
-        var cancellations = new MarketplaceCancellationService(db, Tenant, scope, audit, push, reservations, refunds);
-        var claims = new MarketplaceClaimService(db, Tenant, scope, audit, push, refunds);
-        var startNotices = new MarketplaceStartNoticeService(db, Tenant, scope, audit, push);
-        var creditService = new MarketplaceCreditService(db, Tenant, audit, push);
-        var account = new MarketplaceAccountService(db, Tenant, scope, audit);
-        var payments = new MarketplacePaymentService(db, Tenant, scope, audit, push, new StubOverdueService());
+        var refunds = new MarketplaceRefundService(db, tenant, scope, audit, push, credits);
+        var cancellations = new MarketplaceCancellationService(db, tenant, scope, audit, push, reservations, refunds);
+        var claims = new MarketplaceClaimService(db, tenant, scope, audit, push, refunds);
+        var startNotices = new MarketplaceStartNoticeService(db, tenant, scope, audit, push);
+        var creditService = new MarketplaceCreditService(db, tenant, audit, push);
+        var account = new MarketplaceAccountService(db, tenant, scope, audit);
+        var payments = new MarketplacePaymentService(db, tenant, scope, audit, push, new StubOverdueService());
         return new Services(reservations, cancellations, refunds, claims, startNotices, creditService, account, payments);
     }
 
@@ -132,16 +160,19 @@ internal sealed class Phase7Harness : IDisposable
         MarketplaceListingService Listings);
 
     // Documentos de la fase 8: comprobante en PDF, notas de cambio de propietario principal e historial.
-    public DocServices BuildDocuments()
+    public DocServices BuildDocuments() => BuildDocuments(new Session(Tenant, Access));
+
+    public DocServices BuildDocuments(Session session)
     {
+        var tenant = session.Tenant;
         var db = T.NewContext();
         var gate = new MarketplaceModuleGate(db);
-        var scope = new MarketplaceScope(db, Tenant, Access, gate);
-        var audit = new MarketplaceAudit(db, Tenant, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
-        var listings = new MarketplaceListingService(db, Tenant, scope, audit);
+        var scope = new MarketplaceScope(db, tenant, session.Access, gate);
+        var audit = new MarketplaceAudit(db, tenant, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
+        var listings = new MarketplaceListingService(db, tenant, scope, audit);
         var push = new PushDispatcher(db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance);
-        var handover = new MarketplaceHandoverService(db, Tenant, scope, audit, push, listings);
-        var documents = new MarketplaceDocumentService(db, Tenant, scope, audit, handover, new StubWebHostEnvironment(WebRoot));
+        var handover = new MarketplaceHandoverService(db, tenant, scope, audit, push, listings);
+        var documents = new MarketplaceDocumentService(db, tenant, scope, audit, handover, new StubWebHostEnvironment(WebRoot));
         return new DocServices(handover, documents, listings);
     }
 

@@ -89,6 +89,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+// Limite de tasa de las escrituras del marketplace (por usuario y tipo de accion).
+builder.Services.AddRateLimiter(Condo.Api.Services.MarketplaceRateLimiting.Configure);
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
@@ -107,6 +109,8 @@ app.UseCors("frontend");
 // app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAuthentication();
+// Despues de autenticar: el limite se cuenta por usuario.
+app.UseRateLimiter();
 app.UseAuthorization();
 app.UseMiddleware<PlanRestrictionMiddleware>();
 app.MapControllers();
