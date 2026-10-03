@@ -116,7 +116,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
         foreach (var it in incomeTotals)
         {
             AddBucket(raw, it.Year, it.Month,
-                FinanceLedgerRules.ForIncome(it.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.RubroKeyOf(it.LedgerCategoryId)), it.Amount);
+                FinanceLedgerRules.ForIncome(it.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.IncomeKey(it.LedgerCategoryId, it.Category)), it.Amount);
         }
 
         var expenseTotals = await dbContext.BuildingExpenses.AsNoTracking()
@@ -127,7 +127,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
         foreach (var et in expenseTotals)
         {
             AddBucket(raw, et.Year, et.Month,
-                FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.RubroKeyOf(et.LedgerCategoryId)), et.Amount);
+                FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(et.LedgerCategoryId, et.Category)), et.Amount);
         }
 
         return raw
@@ -190,7 +190,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ToListAsync(cancellationToken);
         foreach (var i in incomes)
         {
-            var rule = FinanceLedgerRules.ForIncome(i.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.RubroKeyOf(i.LedgerCategoryId));
+            var rule = FinanceLedgerRules.ForIncome(i.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.IncomeKey(i.LedgerCategoryId, i.Category));
             if (rule is null)
             {
                 continue;
@@ -206,7 +206,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ToListAsync(cancellationToken);
         foreach (var e in expenses)
         {
-            var rule = FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.RubroKeyOf(e.LedgerCategoryId));
+            var rule = FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(e.LedgerCategoryId, e.Category));
             if (rule is null)
             {
                 continue;

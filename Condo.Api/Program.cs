@@ -56,6 +56,7 @@ builder.Services.AddScoped<Condo.Api.Services.FinanceBudgetService>();
 builder.Services.AddScoped<Condo.Api.Services.MovementRubroResolver>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceReportService>();
 builder.Services.AddScoped<Condo.Api.Services.FinancePlanCopier>();
+builder.Services.AddScoped<Condo.Api.Services.FinancePlanService>();
 builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();

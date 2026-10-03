@@ -81,27 +81,39 @@ public static class FinanceExcelExporter
     /// <summary>Plan de cuentas del edificio, con el codigo del contador de cada rubro.</summary>
     public static void AddChart(XLWorkbook wb, LedgerContext ctx)
     {
-        var ws = Sheet(wb, "Plan de cuentas", $"Plan de cuentas — {ctx.BuildingName}", "Rubros del edificio con su código y el código del contador (columna E).");
-        Header(ws, 4, "Código", "Nombre", "Tipo", "Grupo", "Código del contador", "Origen", "Estado", "En la liquidación cuenta como");
+        var ws = Sheet(wb, "Plan de cuentas", $"Plan de cuentas — {ctx.BuildingName}", "Cuentas del edificio con su código y el código del contador (columna E). El grupo muestra la ruta completa.");
+        Header(ws, 4, "Código", "Nombre", "Clase", "Grupo", "Código del contador", "Función", "Estado", "En la liquidación cuenta como", "Nivel");
 
-        var groups = ctx.Categories.Where(c => !c.ParentId.HasValue).ToDictionary(c => c.Id);
+        var parents = ctx.Categories.Where(c => c.ParentId.HasValue).Select(c => c.ParentId!.Value).ToHashSet();
         var row = 5;
         foreach (var c in ctx.Categories.OrderBy(x => x.Code, StringComparer.Ordinal))
         {
-            var group = c.ParentId.HasValue && groups.TryGetValue(c.ParentId.Value, out var g) ? $"{g.Code} · {g.Name}" : string.Empty;
+            // Ruta de grupos, de la clase hacia la cuenta (sin la cuenta misma).
+            var path = new List<string>();
+            var cursor = c;
+            var level = 1;
+            while (cursor.ParentId.HasValue && ctx.ById.TryGetValue(cursor.ParentId.Value, out var up) && level < 20)
+            {
+                path.Insert(0, $"{up.Code} · {up.Name}");
+                cursor = up;
+                level++;
+            }
+
+            var isGroup = parents.Contains(c.Id);
             ws.Cell(row, 1).Value = c.Code;
             ws.Cell(row, 2).Value = c.Name;
             ws.Cell(row, 3).Value = TypeLabel(c.Type);
-            ws.Cell(row, 4).Value = group;
+            ws.Cell(row, 4).Value = string.Join(" › ", path);
             ws.Cell(row, 5).Value = c.ExternalCode ?? string.Empty;
-            ws.Cell(row, 6).Value = c.SystemKey is not null ? "Plantilla" : (c.ParentId.HasValue ? "Propio" : "Grupo");
+            ws.Cell(row, 6).Value = FinanceChartTemplate.FindRole(c.SystemKey)?.Label ?? (isGroup ? "Grupo" : string.Empty);
             ws.Cell(row, 7).Value = c.IsActive ? "Activo" : "Inactivo";
-            ws.Cell(row, 8).Value = SettlementCategoryText(c);
-            if (!c.ParentId.HasValue) ws.Range(row, 1, row, 8).Style.Font.SetBold();
+            ws.Cell(row, 8).Value = isGroup ? string.Empty : SettlementCategoryText(c);
+            ws.Cell(row, 9).Value = level;
+            if (isGroup) ws.Range(row, 1, row, 9).Style.Font.SetBold();
             row++;
         }
 
-        Finish(ws, 4, row - 1, 8, [12, 38, 12, 34, 20, 12, 10, 30]);
+        Finish(ws, 4, row - 1, 9, [12, 42, 18, 46, 20, 38, 10, 30, 8]);
     }
 
     /// <summary>Saldo de cada cuenta a una fecha.</summary>
@@ -490,9 +502,11 @@ public static class FinanceExcelExporter
 
     private static string TypeLabel(LedgerCategoryType type) => type switch
     {
+        LedgerCategoryType.Asset => "Activo",
+        LedgerCategoryType.Liability => "Pasivo",
+        LedgerCategoryType.Fund => "Patrimonio / Fondos",
         LedgerCategoryType.Income => "Ingresos",
-        LedgerCategoryType.Expense => "Gastos",
-        _ => "Fondos"
+        _ => "Gastos"
     };
 
     private static string AccountTypeLabel(FinancialAccountType type) => type switch

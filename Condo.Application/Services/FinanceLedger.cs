@@ -233,5 +233,40 @@ public sealed class LedgerContext
     public string? RubroKeyOf(Guid? categoryId) =>
         categoryId.HasValue && ById.TryGetValue(categoryId.Value, out var c) ? c.RubroKey : null;
 
+    /// <summary>Clave de rubro de un gasto: la de la cuenta que eligio o, si no eligio ninguna, la cuenta por defecto de su categoria.</summary>
+    public string ExpenseKey(Guid? categoryId, BuildingExpenseCategory category) =>
+        RubroKeyOf(categoryId)
+        ?? DefaultKey(FinanceChartTemplate.ExpenseKey(category), LedgerCategoryType.Expense, c => FinanceChartTemplate.ExpenseCategoryOf(c) == category);
+
+    /// <summary>Clave de rubro de un ingreso propio del edificio (misma regla que los gastos).</summary>
+    public string IncomeKey(Guid? categoryId, BuildingIncomeCategory category) =>
+        RubroKeyOf(categoryId)
+        ?? DefaultKey(FinanceChartTemplate.IncomeKey(category), LedgerCategoryType.Income, c => FinanceChartTemplate.IncomeCategoryOf(c) == category);
+
+    private readonly Dictionary<string, string> _defaultKeys = new();
+
+    // Cuenta por defecto de una categoria: la que tiene esa funcion especial o, si el plan no la tiene (por ejemplo, un plan importado),
+    // la primera cuenta final activa de esa categoria (por codigo). Si no hay ninguna, queda la clave generica y el reporte la rotula.
+    private string DefaultKey(string roleKey, LedgerCategoryType type, Func<LedgerCategory, bool> sameCategory)
+    {
+        if (ByKey.ContainsKey(roleKey))
+        {
+            return roleKey;
+        }
+
+        if (_defaultKeys.TryGetValue(roleKey, out var cached))
+        {
+            return cached;
+        }
+
+        var parents = Categories.Where(c => c.ParentId.HasValue).Select(c => c.ParentId!.Value).ToHashSet();
+        var pick = Categories
+            .Where(c => c.Type == type && c.ParentId.HasValue && !parents.Contains(c.Id) && sameCategory(c))
+            .OrderByDescending(c => c.IsActive)
+            .ThenBy(c => c.Code, StringComparer.Ordinal)
+            .FirstOrDefault();
+        return _defaultKeys[roleKey] = pick?.RubroKey ?? roleKey;
+    }
+
     public decimal TotalOpening => Accounts.Sum(x => x.OpeningBalance);
 }

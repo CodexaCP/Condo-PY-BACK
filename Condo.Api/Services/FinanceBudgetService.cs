@@ -47,7 +47,7 @@ public class FinanceBudgetService(ICondoDbContext dbContext, FinanceLedgerServic
         foreach (var t in totals)
         {
             // El gasto que eligio rubro cuenta en ese rubro; el que no, en el de su categoria.
-            var key = (t.Year, t.Month, ctx.RubroKeyOf(t.LedgerCategoryId) ?? FinanceChartTemplate.ExpenseKey(t.Category));
+            var key = (t.Year, t.Month, ctx.ExpenseKey(t.LedgerCategoryId, t.Category));
             result[key] = result.GetValueOrDefault(key) + t.Amount;
         }
 
@@ -60,7 +60,12 @@ public class FinanceBudgetService(ICondoDbContext dbContext, FinanceLedgerServic
         var result = new Dictionary<(int, int, string), decimal>();
         foreach (var b in buckets.Where(b => b.Direction == LedgerDirection.In))
         {
-            if (ctx.CategoryFor(b.RubroKey)?.Type != LedgerCategoryType.Income)
+            // Cobranzas e ingresos de cuentas de ingresos; los que no tienen cuenta en el plan igual cuentan (el reporte los muestra aparte).
+            var category = ctx.CategoryFor(b.RubroKey);
+            var isIncome = category is not null
+                ? category.Type == LedgerCategoryType.Income
+                : b.RubroKey.StartsWith("Collection.", StringComparison.Ordinal) || b.RubroKey.StartsWith("Income.", StringComparison.Ordinal);
+            if (!isIncome)
             {
                 continue;
             }

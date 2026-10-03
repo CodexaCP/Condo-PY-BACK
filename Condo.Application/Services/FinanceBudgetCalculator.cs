@@ -187,6 +187,40 @@ public static class FinanceBudgetCalculator
             });
         }
 
+        // Lo real que no cae en ninguna cuenta del plan (por ejemplo, el aporte al fondo cargado como gasto, o una cobranza cuya funcion no se
+        // asigno a ninguna cuenta) se muestra aparte para que los totales no queden por debajo de lo que de verdad se gasto o cobro.
+        var knownKeys = BudgetableCategories(ctx.Categories.ToList()).Select(c => c.RubroKey).ToHashSet();
+        foreach (var unmapped in actuals.Keys.Where(k => !knownKeys.Contains(k.RubroKey)).GroupBy(k => k.RubroKey))
+        {
+            var monthActual = actuals.GetValueOrDefault((year, month, unmapped.Key));
+            var ytdActual = ytdMonths.Sum(m => actuals.GetValueOrDefault((m.Year, m.Month, unmapped.Key)));
+            if (monthActual == 0m && ytdActual == 0m)
+            {
+                continue;
+            }
+
+            var type = unmapped.Key.StartsWith("Expense.", StringComparison.Ordinal) ? LedgerCategoryType.Expense : LedgerCategoryType.Income;
+            lines.Add(new FinanceBudgetVsActualLineDto
+            {
+                CategoryId = Guid.Empty,
+                Code = string.Empty,
+                Name = FinanceChartTemplate.FallbackName(unmapped.Key),
+                GroupCode = string.Empty,
+                GroupName = "Sin cuenta en el plan",
+                Type = type,
+                MonthBudget = 0m,
+                MonthActual = monthActual,
+                MonthVariance = monthActual,
+                MonthVariancePct = null,
+                MonthStatus = Status(type, 0m, monthActual),
+                YtdBudget = 0m,
+                YtdActual = ytdActual,
+                YtdVariance = ytdActual,
+                YtdVariancePct = null,
+                YtdStatus = Status(type, 0m, ytdActual)
+            });
+        }
+
         FinanceBudgetTotalsDto Totals(LedgerCategoryType type)
         {
             var own = lines.Where(l => l.Type == type).ToList();

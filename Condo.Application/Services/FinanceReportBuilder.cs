@@ -82,7 +82,7 @@ public static class FinanceReportBuilder
                 {
                     CategoryId = category?.Id,
                     Code = category?.Code ?? string.Empty,
-                    Name = category?.Name ?? g.Key,
+                    Name = category?.Name ?? FinanceChartTemplate.FallbackName(g.Key),
                     Amount = g.Sum(b => b.Amount)
                 };
             })
@@ -153,7 +153,7 @@ public static class FinanceReportBuilder
                     {
                         CategoryId = category?.Id,
                         Code = category?.Code ?? string.Empty,
-                        Name = category?.Name ?? g.Key,
+                        Name = category?.Name ?? FinanceChartTemplate.FallbackName(g.Key),
                         GroupCode = group?.Code ?? string.Empty,
                         GroupName = group?.Name ?? string.Empty,
                         Direction = direction,
@@ -319,8 +319,18 @@ public static class FinanceReportBuilder
 
         if (categoryId.HasValue)
         {
-            // Un rubro principal incluye a sus subrubros.
-            var ids = ctx.Categories.Where(c => c.Id == categoryId.Value || c.ParentId == categoryId.Value).Select(c => c.Id).ToHashSet();
+            // Un grupo incluye todo lo que cuelga de el, a cualquier nivel.
+            var ids = new HashSet<Guid> { categoryId.Value };
+            var pending = new Queue<Guid>(ids);
+            while (pending.Count > 0)
+            {
+                var parentId = pending.Dequeue();
+                foreach (var child in ctx.Categories.Where(c => c.ParentId == parentId && ids.Add(c.Id)))
+                {
+                    pending.Enqueue(child.Id);
+                }
+            }
+
             var keys = ctx.Categories.Where(c => ids.Contains(c.Id)).Select(c => c.RubroKey).ToHashSet();
             filtered = filtered.Where(r => keys.Contains(r.RubroKey));
         }
@@ -348,7 +358,7 @@ public static class FinanceReportBuilder
                 AccountName = r.AccountId.HasValue ? ctx.Accounts.FirstOrDefault(a => a.Id == r.AccountId.Value)?.Name ?? string.Empty : "Sin cuenta asignada",
                 CategoryId = category?.Id,
                 CategoryCode = category?.Code ?? string.Empty,
-                CategoryName = category?.Name ?? r.RubroKey,
+                CategoryName = category?.Name ?? FinanceChartTemplate.FallbackName(r.RubroKey),
                 Direction = r.Direction,
                 Amount = r.Amount,
                 SignedAmount = r.Signed,
