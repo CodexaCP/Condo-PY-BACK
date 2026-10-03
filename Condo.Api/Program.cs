@@ -48,6 +48,8 @@ builder.Services.AddScoped<Condo.Api.Services.MarketplaceRefundService>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceCancellationService>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceClaimService>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceStartNoticeService>();
+builder.Services.AddScoped<Condo.Api.Services.MarketplaceHandoverService>();
+builder.Services.AddScoped<Condo.Api.Services.MarketplaceDocumentService>();
 builder.Services.Configure<Condo.Api.Services.MarketplaceOptions>(builder.Configuration.GetSection("Marketplace"));
 builder.Services.AddScoped<Condo.Api.Services.FinanceLedgerService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceBudgetService>();

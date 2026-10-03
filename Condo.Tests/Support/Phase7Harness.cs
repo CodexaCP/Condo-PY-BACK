@@ -66,7 +66,14 @@ internal sealed class Phase7Harness : IDisposable
         Listing = T.AddListing(Building, Unit, Juan, 20_000m);
     }
 
-    public void Dispose() => T.Dispose();
+    public void Dispose()
+    {
+        T.Dispose();
+        try { if (Directory.Exists(WebRoot)) Directory.Delete(WebRoot, recursive: true); } catch (IOException) { /* temporal: no importa */ }
+    }
+
+    // Carpeta web de prueba (las imagenes subidas viven en WebRoot/uploads).
+    public readonly string WebRoot = Path.Combine(Path.GetTempPath(), "condo-tests-" + Guid.NewGuid().ToString("N"));
 
     // ── Sesion ───────────────────────────────────────────────────────────────
 
@@ -117,6 +124,25 @@ internal sealed class Phase7Harness : IDisposable
         var account = new MarketplaceAccountService(db, Tenant, scope, audit);
         var payments = new MarketplacePaymentService(db, Tenant, scope, audit, push, new StubOverdueService());
         return new Services(reservations, cancellations, refunds, claims, startNotices, creditService, account, payments);
+    }
+
+    public sealed record DocServices(
+        MarketplaceHandoverService Handover,
+        MarketplaceDocumentService Documents,
+        MarketplaceListingService Listings);
+
+    // Documentos de la fase 8: comprobante en PDF, notas de cambio de propietario principal e historial.
+    public DocServices BuildDocuments()
+    {
+        var db = T.NewContext();
+        var gate = new MarketplaceModuleGate(db);
+        var scope = new MarketplaceScope(db, Tenant, Access, gate);
+        var audit = new MarketplaceAudit(db, Tenant, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
+        var listings = new MarketplaceListingService(db, Tenant, scope, audit);
+        var push = new PushDispatcher(db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance);
+        var handover = new MarketplaceHandoverService(db, Tenant, scope, audit, push, listings);
+        var documents = new MarketplaceDocumentService(db, Tenant, scope, audit, handover, new StubWebHostEnvironment(WebRoot));
+        return new DocServices(handover, documents, listings);
     }
 
     // ── Datos sembrados ──────────────────────────────────────────────────────

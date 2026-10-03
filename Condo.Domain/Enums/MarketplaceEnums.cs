@@ -100,3 +100,10 @@ public enum MarketplaceStartResponse
     Attending = 1,
     NotUsing = 2
 }
+
+// Que cambio en la titularidad de la unidad: dejo de existir un propietario principal, o se asigno uno nuevo.
+public enum MarketplaceHandoverTrigger
+{
+    PrimaryRemoved = 1,
+    PrimaryReplaced = 2
+}

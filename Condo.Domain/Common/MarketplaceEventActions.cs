@@ -44,4 +44,10 @@ public static class MarketplaceEventActions
 
     public const string StartNoticeSent = "start_notice.sent";
     public const string StartResponded = "start_notice.responded";
+
+    // Documentos: comprobante interno de reserva generado y nota de cambio de propietario principal.
+    public const string ReceiptGenerated = "receipt.generated";
+    public const string HandoverCreated = "handover.created";
+    public const string HandoverCompleted = "handover.completed";
+    public const string HandoverRead = "handover.read";
 }

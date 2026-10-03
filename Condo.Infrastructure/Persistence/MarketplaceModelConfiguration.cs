@@ -168,6 +168,20 @@ internal static class MarketplaceModelConfiguration
         debt.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
         debt.HasOne(x => x.Reservation).WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
 
+        // ── Nota de cambio de propietario principal ──────────────────────────
+        var handover = modelBuilder.Entity<MarketplaceHandoverNote>();
+        handover.Property(x => x.Trigger).HasConversion<string>().HasMaxLength(20);
+        handover.Property(x => x.Content).HasMaxLength(4000);
+        handover.Property(x => x.ReservationIds).HasMaxLength(4000);
+        handover.HasIndex(x => new { x.BuildingId, x.ReadAtUtc, x.CreatedAtUtc });
+        handover.HasIndex(x => new { x.UnitId, x.CreatedAtUtc });
+        handover.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        handover.HasOne(x => x.Building).WithMany().HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        handover.HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        handover.HasOne(x => x.PreviousOwner).WithMany().HasForeignKey(x => x.PreviousOwnerId).OnDelete(DeleteBehavior.Restrict);
+        handover.HasOne(x => x.NewOwner).WithMany().HasForeignKey(x => x.NewOwnerId).OnDelete(DeleteBehavior.Restrict);
+        handover.HasOne(x => x.ReadByUser).WithMany().HasForeignKey(x => x.ReadByUserId).OnDelete(DeleteBehavior.Restrict);
+
         // ── Auditoria ────────────────────────────────────────────────────────
         var audit = modelBuilder.Entity<MarketplaceEvent>();
         audit.Property(x => x.Action).HasMaxLength(60);

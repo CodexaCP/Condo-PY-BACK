@@ -37,5 +37,6 @@ public enum NotificationType
     MarketplaceRefundOverdue = 33,
     MarketplaceClaimOpened = 34,
     MarketplaceClaimResolved = 35,
-    MarketplaceStartNotice = 36
+    MarketplaceStartNotice = 36,
+    MarketplaceHandoverNote = 37
 }

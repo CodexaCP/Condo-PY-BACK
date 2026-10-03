@@ -13,7 +13,8 @@ namespace Condo.Api.Controllers;
 [Authorize]
 [Route("api/unit-owners")]
 public class UnitOwnersController(
-    ICondoDbContext dbContext, IAccessScopeService accessScope, IOwnerResidencySyncService residencySync) : ControllerBase
+    ICondoDbContext dbContext, IAccessScopeService accessScope, IOwnerResidencySyncService residencySync,
+    MarketplaceHandoverService marketplaceHandover, ILogger<UnitOwnersController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<UnitOwnerDto>>> GetAll(
@@ -105,11 +106,29 @@ public class UnitOwnersController(
             CompanyId = companyId
         };
 
+        // Otro propietario principal ya vigente: si el nuevo tambien es principal, la titularidad no queda sin principal.
+        var hadOtherPrimary = request.IsPrimary && await dbContext.UnitOwners
+            .AnyAsync(x => !x.IsDeleted && x.UnitId == request.UnitId && x.IsPrimary, cancellationToken);
+
         dbContext.UnitOwners.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         if (owner.IsResident)
             await residencySync.SyncAsync(owner, companyId, cancellationToken);
+
+        // Marketplace: si primero se dio de baja al principal anterior, la nota de cambio queda esperando a este nuevo principal.
+        if (request.IsPrimary && !hadOtherPrimary)
+        {
+            try
+            {
+                await marketplaceHandover.OnPrimaryAssignedAsync(request.UnitId, request.OwnerId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // La nota es un aviso interno: si falla, el alta del propietario no se pierde.
+                logger.LogError(ex, "No se pudo completar la nota de cambio de propietario principal de la unidad {UnitId}.", request.UnitId);
+            }
+        }
 
         return Ok(new UnitOwnerDto
         {
@@ -140,8 +159,33 @@ public class UnitOwnersController(
         if (unit is null || !await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken))
             return Forbid();
 
+        var wasPrimary = entity.IsPrimary;
+        var removedOwnerId = entity.OwnerId;
+        var unitId = entity.UnitId;
+
         entity.IsDeleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Marketplace: si se desvinculo al propietario principal, sus publicaciones se suspenden en el momento y, si le quedaron
+        // reservas abiertas, se genera la nota interna para el personal (con quien pasa a ser el principal, si ya hay otro).
+        if (wasPrimary)
+        {
+            try
+            {
+                var currentPrimary = await dbContext.UnitOwners
+                    .AsNoTracking()
+                    .Where(x => !x.IsDeleted && x.UnitId == unitId && x.IsPrimary)
+                    .Select(x => (Guid?)x.OwnerId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                await marketplaceHandover.OnPrimaryRemovedAsync(unitId, removedOwnerId, currentPrimary, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // La nota es un aviso interno: si falla, la baja del propietario no se revierte.
+                logger.LogError(ex, "No se pudo generar la nota de cambio de propietario principal de la unidad {UnitId}.", unitId);
+            }
+        }
+
         return NoContent();
     }
 }

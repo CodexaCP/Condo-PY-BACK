@@ -52,3 +52,14 @@ internal sealed class StubOverdueService : Condo.Api.Services.IUnitOverdueServic
     public Task<HashSet<Guid>> GetOverdueUnitIdsByBuildingAsync(IReadOnlyCollection<Guid> buildingIds, CancellationToken ct) =>
         Task.FromResult(OverdueUnitIds.ToHashSet());
 }
+
+// Entorno web de mentira: solo importa WebRootPath (de ahi se leen las imagenes subidas, como el comprobante de transferencia).
+internal sealed class StubWebHostEnvironment(string webRootPath) : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
+{
+    public string ApplicationName { get; set; } = "Condo.Tests";
+    public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+    public string WebRootPath { get; set; } = webRootPath;
+    public string EnvironmentName { get; set; } = "Test";
+    public string ContentRootPath { get; set; } = webRootPath;
+    public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+}
