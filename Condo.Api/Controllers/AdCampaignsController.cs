@@ -44,8 +44,8 @@ public class AdCampaignsController(
         await using var stream = System.IO.File.Create(filePath);
         await file.CopyToAsync(stream, ct);
 
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        return Ok(new AdBannerUploadResultDto { ImageUrl = $"{baseUrl}/uploads/ad-banners/{fileName}" });
+        // Ruta relativa, como /api/uploads: cada cliente arma la URL completa con su propio apiUrl al mostrarla.
+        return Ok(new AdBannerUploadResultDto { ImageUrl = $"/uploads/ad-banners/{fileName}" });
     }
 
     // ── GET /api/ad-campaigns/buildings ───────────────────────────────────────
