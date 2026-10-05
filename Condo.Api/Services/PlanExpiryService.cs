@@ -10,8 +10,8 @@ namespace Condo.Api.Services;
 
 /// <summary>
 /// Corre cada 6 horas y avisa del vencimiento de los planes de edificio:
-///   • Por correo (Resend) y en la campanita del sistema, solo a Administrador de empresa, Operador y
-///     Encargado de edificio de la empresa y del edificio del plan. No se manda push.
+///   • Por correo (Resend), en la campanita del sistema y por push (aviso en pantalla de la app y del panel web), solo a
+///     Administrador de empresa, Operador y Encargado de edificio de la empresa y del edificio del plan.
 ///   • Las restricciones (solo lectura / bloqueo total) NO las aplica este servicio: se calculan por fechas
 ///     en <see cref="PlanAccessPolicy"/>. Aca solo se avisa cuando empieza cada etapa.
 /// AlertLevel en BuildingPlan guarda el ultimo aviso enviado del periodo actual:
@@ -58,6 +58,7 @@ public sealed class PlanExpiryService(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CondoDbContext>();
         var emailSender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
+        var pushDispatcher = scope.ServiceProvider.GetRequiredService<PushDispatcher>();
 
         var today = DateTime.UtcNow.Date;
 
@@ -169,6 +170,16 @@ public sealed class PlanExpiryService(
             {
                 logger.LogError(ex, "No se pudo enviar el aviso de plan a {Email}.", email);
             }
+        }
+
+        // Push (aviso en pantalla), tambien despues de guardar. Un aviso por plan, a todos sus destinatarios.
+        // PushDispatcher no lanza: si falla un envio lo registra y sigue.
+        foreach (var group in notifications.GroupBy(x => x.EntityId))
+        {
+            var first = group.First();
+            await pushDispatcher.NotifyUsersAsync(
+                group.Select(x => x.RecipientId).Distinct().ToList(),
+                first.Title, first.Body, "BuildingPlan", first.EntityId, ct, first.Type.ToString());
         }
     }
 
