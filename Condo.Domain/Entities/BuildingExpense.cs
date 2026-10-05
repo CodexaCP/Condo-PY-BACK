@@ -11,7 +11,11 @@ public class BuildingExpense : CompanyScopedEntity
     public string SupplierName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public DateOnly ExpenseDate { get; set; }
+    // Monto que se reparte (neto). Con notas de credito del proveedor aplicadas es OriginalAmount menos su suma; sin ellas es el
+    // monto del gasto. Todos los reportes y la liquidacion leen este campo, por eso ya viene neto.
     public decimal Amount { get; set; }
+    // Monto facturado por el proveedor antes de las notas de credito. Null mientras el gasto no tenga ninguna aplicada.
+    public decimal? OriginalAmount { get; set; }
     public BuildingExpenseDistributionType DistributionType { get; set; } = BuildingExpenseDistributionType.ByCoefficient;
     public Guid? TargetUnitId { get; set; }
     public string Notes { get; set; } = string.Empty;
@@ -29,4 +33,5 @@ public class BuildingExpense : CompanyScopedEntity
     public Unit? TargetUnit { get; set; }
     public LedgerCategory? LedgerCategory { get; set; }
     public ICollection<ExpenseCharge> ExpenseCharges { get; set; } = new List<ExpenseCharge>();
+    public ICollection<BuildingExpenseCreditNote> CreditNotes { get; set; } = new List<BuildingExpenseCreditNote>();
 }

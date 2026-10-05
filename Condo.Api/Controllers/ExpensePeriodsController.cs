@@ -2149,7 +2149,8 @@ public class ExpensePeriodsController(
             SupplierName = e.SupplierName,
             Description = e.Description,
             ExpenseDate = startDate,
-            Amount = e.Amount,
+            // El monto del proveedor sin descontar su nota de credito: la nota fue de un solo periodo.
+            Amount = e.OriginalAmount ?? e.Amount,
             DistributionType = e.DistributionType,
             TargetUnitId = e.TargetUnitId,
             Notes = e.Notes,

@@ -78,6 +78,8 @@ public class BuildingExpensesController(
                 Description = x.Description,
                 ExpenseDate = x.ExpenseDate,
                 Amount = x.Amount,
+                OriginalAmount = x.OriginalAmount ?? x.Amount,
+                CreditedAmount = x.OriginalAmount != null ? x.OriginalAmount.Value - x.Amount : 0m,
                 DistributionType = x.DistributionType,
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
@@ -113,6 +115,8 @@ public class BuildingExpensesController(
                 Description = x.Description,
                 ExpenseDate = x.ExpenseDate,
                 Amount = x.Amount,
+                OriginalAmount = x.OriginalAmount ?? x.Amount,
+                CreditedAmount = x.OriginalAmount != null ? x.OriginalAmount.Value - x.Amount : 0m,
                 DistributionType = x.DistributionType,
                 TargetUnitId = x.TargetUnitId,
                 TargetUnitCode = x.TargetUnit != null ? x.TargetUnit.Code : string.Empty,
@@ -249,6 +253,13 @@ public class BuildingExpensesController(
         if (rubro.Error is not null)
         {
             return BadRequest(rubro.Error);
+        }
+
+        // Con notas de credito del proveedor aplicadas, el monto y el periodo son los de esas notas: primero se anulan.
+        if (entity.OriginalAmount.HasValue
+            && (request.Amount != entity.Amount || request.ExpensePeriodId != entity.ExpensePeriodId))
+        {
+            return BadRequest("Este gasto tiene notas de crédito del proveedor aplicadas: no se puede cambiar su monto ni su período. Anulá primero las notas de crédito.");
         }
 
         entity.CompanyId = effectiveCompanyId.Value;
@@ -565,6 +576,11 @@ public class BuildingExpensesController(
             return BadRequest("Los gastos del edificio solo se pueden eliminar mientras el periodo este en borrador.");
         }
 
+        if (entity.OriginalAmount.HasValue)
+        {
+            return BadRequest("Este gasto tiene notas de crédito del proveedor aplicadas: anulalas antes de eliminarlo.");
+        }
+
         entity.IsDeleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -854,7 +870,7 @@ public class BuildingExpensesController(
                 cancellationToken);
     }
 
-    private static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit, LedgerCategory? rubro = null) =>
+    internal static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit, LedgerCategory? rubro = null) =>
         new()
         {
             Id = entity.Id,
@@ -868,6 +884,8 @@ public class BuildingExpensesController(
             Description = entity.Description,
             ExpenseDate = entity.ExpenseDate,
             Amount = entity.Amount,
+            OriginalAmount = entity.OriginalAmount ?? entity.Amount,
+            CreditedAmount = entity.OriginalAmount.HasValue ? entity.OriginalAmount.Value - entity.Amount : 0m,
             DistributionType = entity.DistributionType,
             TargetUnitId = entity.TargetUnitId,
             TargetUnitCode = targetUnit?.Code ?? string.Empty,

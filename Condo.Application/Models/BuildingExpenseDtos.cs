@@ -31,7 +31,11 @@ public class BuildingExpenseDto
     public string SupplierName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public DateOnly ExpenseDate { get; set; }
+    // Monto que se reparte (neto de las notas de credito del proveedor aplicadas).
     public decimal Amount { get; set; }
+    // Monto facturado por el proveedor, antes de las notas de credito (igual a Amount si no tiene ninguna).
+    public decimal OriginalAmount { get; set; }
+    public decimal CreditedAmount { get; set; }
     public BuildingExpenseDistributionType DistributionType { get; set; }
     public Guid? TargetUnitId { get; set; }
     public string TargetUnitCode { get; set; } = string.Empty;

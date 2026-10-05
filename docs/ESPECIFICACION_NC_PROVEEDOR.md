@@ -1,6 +1,6 @@
 # Nota de crédito de proveedor sobre un gasto del edificio — Especificación
 
-Estado: **diseño cerrado en lo esencial (2026-10-05), sin implementar.** Pendiente de "procesa" de Tony.
+Estado: **fase 1 implementada (2026-10-05)**; fases 2 en adelante pendientes de "procesa" de Tony. Ver la sección 15 (estado de implementación).
 Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel), `CondoPY-APP` (solo aviso al propietario, ya cubierto por las notificaciones).
 
 > **Para quien implemente:** leer la sección 3 (lo que ya existe) y verificar cada punto marcado **[verificar]** antes de tocar código. Los puntos de la sección 12 son decisiones abiertas: preguntarlas, no asumirlas. Commits solo a nombre de Tony, sin `Co-Authored-By` y sin push.
@@ -18,7 +18,7 @@ El proveedor de un gasto del edificio (ya registrado y prorrateado entre las uni
 3. **Período cerrado:** se anula la liquidación (`void-settlement`, ya existe) y se recalcula como en borrador.
 4. **Período publicado:** se prorratea la NC entre las unidades y la parte de cada una se suma a su **saldo a favor trazable**, junto a lo que ya tenga. **No se crea ni se exige un período nuevo.**
 5. **Aportes de fondo de reserva y extraordinario:** se dejan como se cobraron (no se recalculan).
-6. **El crédito solo se usa en el edificio de origen** (no en otros edificios de la empresa).
+6. **Cómo se consume el saldo a favor: NO se cambia.** El saldo que genere la NC se acredita y se consume exactamente como hoy (automático, del lote más antiguo, en cualquier edificio de la empresa). Tony (2026-10-05): "solo acredita el saldo correspondiente a favor y que se consuma como es hoy, así evitas problemas". La idea anterior de restringir el crédito al edificio de origen **queda como pregunta pendiente** (sección 12, punto 8): no se implementa hasta que Tony la retome.
 7. **Cambio de propietario de una unidad:** primero se deben liquidar las deudas de esa unidad, sí o sí; el saldo a favor de la unidad **pasa al nuevo propietario**.
 8. **Unidad sin propietario:** significa que no se vendió; es del dueño del edificio. El Administrador de empresa le asigna como propietario a esa persona/empresa y se le calcula su parte como a cualquiera; nadie paga por ella o la paga el dueño del edificio.
 
@@ -67,7 +67,7 @@ Regla: la suma de NC `Applied` de un gasto **no puede superar** `BuildingExpense
 
 Agregar, todos opcionales para no romper lo existente:
 
-- `BuildingId` (Guid?): edificio de origen. **Lote con `BuildingId` solo se consume en comprobantes de ese edificio. Lote sin `BuildingId` (los de hoy) se consume en cualquiera, como ahora.**
+- `BuildingId` (Guid?): edificio de origen, **solo para trazabilidad**. NO restringe el consumo (decisión 6): el lote se consume como cualquier otro.
 - `UnitId` (Guid?): unidad de origen (para transferirlo al cambiar de propietario).
 - `SupplierCreditNoteId` (Guid?): la NC de proveedor que lo originó.
 - `OnHold` (bool, por defecto false): lote retenido, **no se consume** (ver sección 8).
@@ -115,7 +115,9 @@ Crear NC con `Mode = Credited` y repartir:
 
 Los aportes de reserva y extraordinario del período publicado **no se tocan** (decisión 5).
 
-## 6. Consumo del saldo a favor (cambio importante)
+## 6. Consumo del saldo a favor — **NO SE CAMBIA (decisión de Tony, 2026-10-05)**
+
+> Esta sección describe la restricción por edificio que se había propuesto. **No se implementa**: el saldo a favor generado por la NC se consume exactamente como se consume hoy. Queda como pregunta pendiente (sección 12, punto 8). Se conserva el texto por si Tony decide retomarla.
 
 Hoy `SettlePaymentAsync` calcula `availableCredit = OwnerCredit.Amount` (total por propietario) y consume lotes del más antiguo al más nuevo sin mirar el edificio. Con la decisión 6:
 
@@ -151,7 +153,8 @@ Aplica a `UnitOwnersController` (alta de un principal nuevo y baja del principal
 
 ## 10. Reportes y contabilidad
 
-- Las NC aparecen en el **libro de movimientos / estado de resultados / flujo** como **movimiento negativo con la fecha de la NC y el rubro del gasto original**; el gasto original queda bruto en su mes. No se reescriben meses cerrados.
+- **Periodo en borrador (`Netted`, fase 1):** el gasto se ve **neto en su propio mes** (el periodo todavía no se cobró ni se publicó). Se logró sin tocar los reportes: `BuildingExpense.Amount` pasa a ser el neto y `OriginalAmount` guarda lo facturado; libro de movimientos, estado de resultados, presupuesto, flujo, conciliación y liquidación leen `Amount`. El Excel y los reportes de un periodo con NC muestran el gasto por el neto.
+- **Periodo publicado (`Credited`, fase 2):** se aplica lo siguiente. Las NC aparecen en el **libro de movimientos / estado de resultados / flujo** como **movimiento negativo con la fecha de la NC y el rubro del gasto original**; el gasto original queda bruto en su mes. No se reescriben meses cerrados.
 - Gasto pagado por el fondo de reserva: el movimiento negativo se refleja como ingreso al fondo (`FinanceLedgerService` / reserva) **[verificar]**.
 - La liquidación publicada (PDF) **no cambia**. Ofrecer un anexo/listado de NC de proveedor aplicadas al período.
 - Excel del contador: incluir las NC como filas (ver `LibroMovimientosService`).
@@ -181,6 +184,8 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 
 ## 12. Decisiones abiertas
 
+8. **(PENDIENTE — Tony la dejó como pregunta)** ¿El saldo a favor de una NC de proveedor solo debe usarse en el edificio de origen, o en cualquier edificio de la empresa como hoy? Por ahora se consume **como hoy** (cualquier edificio de la empresa). Si algún día se decide restringirlo, ver la sección 6.
+
 1. **Fiscal**: la factura al propietario sigue por el monto original y el ajuste llega como crédito. **Confirmar con el contador** si corresponde NC fiscal al propietario (el sistema ya sabe emitirla con `CreditNote`) o basta el registro interno.
 2. **Mora ya cobrada**: por defecto **no se recalcula**. Confirmar.
 3. **Lotes sin unidad** al cambiar de propietario (8.5): se quedan con el saliente. Confirmar.
@@ -191,11 +196,11 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 
 ## 13. Fases sugeridas
 
-1. **Datos y borrador**: entidades, migración + script SQL, NC `Netted`, base de reparto neta, conciliación y bloqueo en cerrado. Tests.
-2. **Publicado**: preview + reparto + lotes + notificación + anular.
-3. **Crédito por edificio**: rehacer el consumo (sección 6) con pruebas de regresión del flujo de pagos (el más delicado).
+1. **Datos y borrador** — ✅ HECHA (2026-10-05): entidades, migración + script SQL, NC `Netted`, base de reparto neta, conciliación y bloqueo en cerrado. Tests.
+2. **Publicado**: preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
+3. ~~**Crédito por edificio**~~ — **en pausa**: pregunta pendiente (sección 12, punto 8). No hacer sin que Tony lo confirme.
 4. **Cambio de propietario**: validación de deuda, retención y traspaso de lotes.
-5. **Reportes y pantallas**: libro/Excel/estado de resultados, anexo de liquidación, UI web, aviso en app.
+5. **Reportes y pantallas**: libro/Excel (solo lo de `Credited`), anexo de liquidación, UI web, aviso en app.
 
 Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla de pagos del más antiguo al más nuevo y "comprobante completo, sin pagos parciales" (memoria `feedback_commits_and_payment_rule`).
 
@@ -209,3 +214,19 @@ Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla
 - Anular: sin consumo sí; con consumo no.
 - Cambio de propietario: bloqueado con deuda; sin deuda traspasa lotes con unidad y deja los demás.
 - Aislamiento por empresa y edificio (ver `Condo.Tests/Marketplace/MarketplaceIsolationMatrixTests.cs` como modelo).
+
+## 15. Estado de implementación
+
+### Fase 1 — hecha (2026-10-05, solo backend; compila y 31 pruebas nuevas pasan, suite completa 722/722)
+
+- **Datos**: `BuildingExpenseCreditNote` (+ enums `BuildingExpenseCreditNoteMode` y `...Status`), `BuildingExpense.OriginalAmount`. Migración `20261005114334_BuildingExpenseCreditNotes` con su script manual `.sql` (idempotente, con verificación) en `Condo.Infrastructure/Persistence/Migrations/`. **Correrlo en el VPS antes de desplegar el código.**
+- **Cómo queda el gasto**: `Amount` es el neto (lo que se reparte); `OriginalAmount` es lo facturado por el proveedor (null si no tiene NC). `BuildingExpenseDto` suma `OriginalAmount` y `CreditedAmount`.
+- **API** (`BuildingExpenseCreditNotesController`):
+  - `GET /api/building-expenses/{expenseId}/credit-notes`
+  - `POST /api/building-expenses/{expenseId}/credit-notes` — número, timbrado?, fecha, monto, motivo, archivo? (solo `/uploads/...`). Devuelve la NC, el gasto actualizado y `settlementNeedsRecalculation` (true si el periodo ya tenía una liquidación **Calculada**: hay que volver a calcularla).
+  - `POST /api/building-expenses/credit-notes/{id}/void` — motivo obligatorio.
+- **Reglas**: solo con el periodo en **Borrador**; **Cerrado** → 400 con el paso de anular la liquidación; **Publicado** → 400 "todavía no está disponible" (fase 2). La NC debe ser menor que el monto pendiente del gasto (si el proveedor anuló todo, se elimina el gasto). Sin repetir número por proveedor y edificio. Anular solo en borrador.
+- **Gasto con NC aplicadas**: no se cambia su monto ni su periodo ni se elimina hasta anular las NC (sí se editan los demás campos). Clonar un periodo copia el monto **original** (la NC fue de un solo periodo).
+- **Permisos**: igual que los gastos (acceso al edificio). Sin restricción extra de rol; las decisiones de rol de la sección 12 siguen abiertas.
+- **No hecho en fase 1 (a propósito)**: pantalla web, notificaciones, reparto del periodo publicado, cambio de propietario. Sin pantalla, la fase 1 se prueba por API.
+- **Riesgo conocido**: dos NC simultáneas sobre el mismo gasto podrían pisarse (no hay control de concurrencia en `BuildingExpense`); es una operación manual poco frecuente.
