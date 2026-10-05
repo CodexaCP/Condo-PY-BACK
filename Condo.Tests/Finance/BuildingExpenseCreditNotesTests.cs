@@ -29,7 +29,8 @@ public class BuildingExpenseCreditNotesTests : IDisposable
         Numero = numero,
         IssueDate = new DateOnly(2026, 10, 2),
         Amount = amount,
-        Reason = "Descuento por mercadería devuelta"
+        Reason = "Descuento por mercadería devuelta",
+        DocumentUrl = "/uploads/nc-proveedor.pdf"
     };
 
     private Task<ActionResult<BuildingExpenseCreditNoteResultDto>> Create(BuildingExpense expense, CreateBuildingExpenseCreditNoteRequest request) =>
@@ -189,6 +190,21 @@ public class BuildingExpenseCreditNotesTests : IDisposable
         request.DocumentUrl = url;
 
         Assert.Contains("archivo", FinanceEnv.BadRequestText(await Create(expense, request)));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ElDocumentoDelProveedorEsObligatorio(string? url)
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+        var request = Req(100_000m);
+        request.DocumentUrl = url;
+
+        Assert.Contains("Adjuntá el documento", FinanceEnv.BadRequestText(await Create(expense, request)));
+        Assert.Empty(_env.T.NewContext().BuildingExpenseCreditNotes);
+        Assert.Equal(1_000_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == expense.Id).Amount);
     }
 
     [Fact]

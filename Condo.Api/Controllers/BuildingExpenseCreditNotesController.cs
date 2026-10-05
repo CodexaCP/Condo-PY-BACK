@@ -62,8 +62,11 @@ public class BuildingExpenseCreditNotesController(
         if (request.IssueDate < new DateOnly(2000, 1, 1) || request.IssueDate > DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
             return BadRequest("La fecha de la nota de crédito no es válida.");
 
-        var documentUrl = string.IsNullOrWhiteSpace(request.DocumentUrl) ? null : request.DocumentUrl.Trim();
-        if (documentUrl is not null && !IsValidUploadUrl(documentUrl))
+        // El documento que envio el proveedor es el respaldo de la nota: es obligatorio.
+        var documentUrl = (request.DocumentUrl ?? string.Empty).Trim();
+        if (documentUrl.Length == 0)
+            return BadRequest("Adjuntá el documento de la nota de crédito que envió el proveedor.");
+        if (!IsValidUploadUrl(documentUrl))
             return BadRequest("El archivo de la nota de crédito no es válido. Subilo de nuevo.");
 
         var expense = await dbContext.BuildingExpenses
