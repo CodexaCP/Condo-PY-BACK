@@ -739,10 +739,13 @@ public class BuildingExpenseCreditNotesController(
 
         var allocations = await LoadAllocationDtosAsync(new[] { note.Id }, cancellationToken);
 
+        var expenseDto = BuildingExpensesController.ToDto(expense, building, period, targetUnit, rubro);
+        expenseDto.CreditedAfterPublishAmount = await CreditedSoFarAsync(expense.Id, cancellationToken);
+
         return new BuildingExpenseCreditNoteResultDto
         {
             CreditNote = ToDto(note, allocations.GetValueOrDefault(note.Id)),
-            Expense = BuildingExpensesController.ToDto(expense, building, period, targetUnit, rubro),
+            Expense = expenseDto,
             SettlementNeedsRecalculation = settlementCalculated && period.Status == ExpensePeriodStatus.Draft,
             CreditedToOwners = creditedToOwners
         };

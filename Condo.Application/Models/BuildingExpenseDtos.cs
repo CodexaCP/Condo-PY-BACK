@@ -36,6 +36,8 @@ public class BuildingExpenseDto
     // Monto facturado por el proveedor, antes de las notas de credito (igual a Amount si no tiene ninguna).
     public decimal OriginalAmount { get; set; }
     public decimal CreditedAmount { get; set; }
+    // Notas de credito del proveedor registradas con el periodo ya publicado (suman al total que se acredita; el monto repartido no cambia).
+    public decimal CreditedAfterPublishAmount { get; set; }
     public BuildingExpenseDistributionType DistributionType { get; set; }
     public Guid? TargetUnitId { get; set; }
     public string TargetUnitCode { get; set; } = string.Empty;

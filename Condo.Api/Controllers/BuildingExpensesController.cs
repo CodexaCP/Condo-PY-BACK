@@ -93,6 +93,10 @@ public class BuildingExpensesController(
             })
             .ToListAsync(cancellationToken);
 
+        // Notas de credito del proveedor de periodos ya publicados: se suman aparte (pocas filas) para mostrarlas en la fila del gasto.
+        var credited = await CreditedAfterPublishAsync(items.Select(x => x.Id).ToList(), cancellationToken);
+        foreach (var item in items) item.CreditedAfterPublishAmount = credited.GetValueOrDefault(item.Id);
+
         return Ok(items);
     }
 
@@ -135,7 +139,25 @@ public class BuildingExpensesController(
             return NotFound();
         }
 
-        return await accessScope.CanAccessBuildingAsync(item.BuildingId, cancellationToken) ? Ok(item) : Forbid();
+        if (!await accessScope.CanAccessBuildingAsync(item.BuildingId, cancellationToken)) return Forbid();
+
+        var credited = await CreditedAfterPublishAsync(new[] { item.Id }, cancellationToken);
+        item.CreditedAfterPublishAmount = credited.GetValueOrDefault(item.Id);
+        return Ok(item);
+    }
+
+    // Por gasto: suma de las notas de credito del proveedor aplicadas con el periodo ya publicado (Mode = Credited).
+    private async Task<Dictionary<Guid, decimal>> CreditedAfterPublishAsync(IReadOnlyCollection<Guid> expenseIds, CancellationToken ct)
+    {
+        if (expenseIds.Count == 0) return new Dictionary<Guid, decimal>();
+
+        return (await dbContext.BuildingExpenseCreditNotes.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.Status == BuildingExpenseCreditNoteStatus.Applied
+                            && x.Mode == BuildingExpenseCreditNoteMode.Credited && expenseIds.Contains(x.BuildingExpenseId))
+                .Select(x => new { x.BuildingExpenseId, x.Amount })
+                .ToListAsync(ct))
+            .GroupBy(x => x.BuildingExpenseId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
     }
 
     [HttpPost]
