@@ -168,6 +168,85 @@ public class OwnerPaymentsController(
         return Ok(await LoadCreditMovementsAsync(ownerId, companyId.Value, ct));
     }
 
+    // ─── CREDIT BREAKDOWN ────────────────────────────────────────────────────
+    // Desglose del saldo a favor para la ficha del propietario: cada lote con su origen (comprobante, reserva del Marketplace,
+    // nota de credito, nota de credito del proveedor o saldo anterior), lo que queda de cada uno y como se fue usando.
+    [HttpGet("credit-breakdown/{ownerId:guid}")]
+    public async Task<ActionResult<OwnerCreditBreakdownDto>> GetOwnerCreditBreakdown(Guid ownerId, CancellationToken ct)
+    {
+        if (!CanManagePayments()) return Forbid();
+        var companyId = tenantContext.CompanyId;
+        if (companyId is null) return Forbid();
+
+        if (!await OwnerInScopeAsync(ownerId, companyId.Value, requireAll: false, ct)) return NotFound();
+
+        var amount = (await dbContext.OwnerCredits
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value, ct))?.Amount ?? 0m;
+
+        var lots = await dbContext.OwnerCreditMovements
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value && x.Kind == OwnerCreditMovementKind.Generated)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(ct);
+
+        var unitIds = lots.Where(x => x.UnitId != null).Select(x => x.UnitId!.Value).Distinct().ToList();
+        var units = unitIds.Count == 0
+            ? new Dictionary<Guid, (string Code, string Building)>()
+            : (await dbContext.Units
+                .AsNoTracking()
+                .Where(u => unitIds.Contains(u.Id) && u.CompanyId == companyId.Value)
+                .Select(u => new { u.Id, u.Code, Building = u.Building!.Name })
+                .ToListAsync(ct))
+                .ToDictionary(u => u.Id, u => (u.Code, u.Building));
+
+        var activeRemaining = lots.Where(x => !x.OnHold).Sum(x => x.RemainingAmount);
+
+        var uses = await dbContext.OwnerCreditMovements
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId.Value && x.Kind == OwnerCreditMovementKind.Applied)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Select(x => new OwnerCreditMovementDto
+            {
+                Id = x.Id,
+                CreatedAtUtc = x.CreatedAtUtc,
+                Kind = x.Kind.ToString(),
+                ApplyMode = x.ApplyMode == null ? null : x.ApplyMode.ToString(),
+                Amount = x.Amount,
+                SourceReference = x.SourceReference,
+                PaymentId = x.PaymentId,
+                Description = x.Description
+            })
+            .ToListAsync(ct);
+
+        return Ok(new OwnerCreditBreakdownDto
+        {
+            Amount = amount,
+            UntracedAmount = decimal.Max(0m, amount - activeRemaining),
+            HeldAmount = lots.Where(x => x.OnHold).Sum(x => x.RemainingAmount),
+            Lots = lots.Select(x => new OwnerCreditLotDto
+            {
+                Id = x.Id,
+                CreatedAtUtc = x.CreatedAtUtc,
+                Origin = x.SupplierCreditNoteId != null ? "SupplierCreditNote"
+                    : x.CreditNoteId != null ? "CreditNote"
+                    : x.MarketplaceReservationId != null ? "Marketplace"
+                    : x.OwnerPaymentId != null ? "OwnerPayment"
+                    : "Previous",
+                Reference = x.SourceReference,
+                Description = x.Description,
+                BuildingName = x.UnitId != null && units.TryGetValue(x.UnitId.Value, out var u) ? u.Building : null,
+                UnitCode = x.UnitId != null && units.TryGetValue(x.UnitId.Value, out var u2) ? u2.Code : null,
+                OriginalAmount = x.Amount,
+                RemainingAmount = x.RemainingAmount,
+                OnHold = x.OnHold,
+                OwnerPaymentId = x.OwnerPaymentId,
+                MarketplaceReservationId = x.MarketplaceReservationId
+            }).ToList(),
+            Uses = uses
+        });
+    }
+
     private async Task<List<OwnerCreditMovementDto>> LoadCreditMovementsAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
         await dbContext.OwnerCreditMovements
             .AsNoTracking()

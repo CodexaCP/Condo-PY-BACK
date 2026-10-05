@@ -99,6 +99,36 @@ public class OwnerCreditMovementDto
     public string Description { get; set; } = string.Empty;
 }
 
+/// <summary>De donde viene cada parte del saldo a favor del propietario (lotes) y como se uso.</summary>
+public class OwnerCreditBreakdownDto
+{
+    /// <summary>Saldo a favor vigente (el mismo que muestra la ficha).</summary>
+    public decimal Amount { get; set; }
+    /// <summary>Parte del saldo sin lote que la respalde: es anterior al historial de lotes.</summary>
+    public decimal UntracedAmount { get; set; }
+    /// <summary>Saldo retenido (la unidad quedo sin propietario principal): no cuenta en el saldo hasta que haya uno nuevo.</summary>
+    public decimal HeldAmount { get; set; }
+    public List<OwnerCreditLotDto> Lots { get; set; } = [];
+    public List<OwnerCreditMovementDto> Uses { get; set; } = [];
+}
+
+public class OwnerCreditLotDto
+{
+    public Guid Id { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    /// <summary>OwnerPayment, Marketplace, CreditNote, SupplierCreditNote o Previous.</summary>
+    public string Origin { get; set; } = string.Empty;
+    public string? Reference { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string? BuildingName { get; set; }
+    public string? UnitCode { get; set; }
+    public decimal OriginalAmount { get; set; }
+    public decimal RemainingAmount { get; set; }
+    public bool OnHold { get; set; }
+    public Guid? OwnerPaymentId { get; set; }
+    public Guid? MarketplaceReservationId { get; set; }
+}
+
 public class OwnerDebtChargeDto
 {
     public Guid ChargeId { get; set; }
