@@ -862,6 +862,16 @@ public class BuildingExpensesController(
             return BadRequest("Este gasto no tiene comprobante adjunto.");
         }
 
+        // Con el periodo cerrado o publicado el comprobante queda como respaldo de lo que se liquido: no se quita.
+        var periodStatus = await dbContext.ExpensePeriods.AsNoTracking()
+            .Where(x => x.Id == entity.ExpensePeriodId)
+            .Select(x => (ExpensePeriodStatus?)x.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (periodStatus is not null && periodStatus != ExpensePeriodStatus.Draft)
+        {
+            return BadRequest("El comprobante no se puede quitar: el período ya no está en borrador y el comprobante respalda lo liquidado.");
+        }
+
         var filePath = Path.Combine(env.ContentRootPath, "uploads", "receipts", entity.ReceiptStoredName);
         if (System.IO.File.Exists(filePath))
         {
