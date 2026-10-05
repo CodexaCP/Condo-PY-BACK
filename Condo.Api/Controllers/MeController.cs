@@ -306,6 +306,67 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
         return Ok(items);
     }
 
+    // ── GET /api/me/ad-slots?buildingId={guid} ────────────────────────────────
+    // Publicidad del edificio para la app. Es un modulo por edificio (Building.AdsEnabled): con el modulo apagado
+    // no hay anuncios ni banner de contacto, la respuesta viene vacia y la app no muestra nada.
+    [HttpGet("ad-slots")]
+    public async Task<ActionResult<BuildingAdsDto>> GetAdSlots(
+        [FromQuery] Guid buildingId,
+        CancellationToken cancellationToken)
+    {
+        var user = await GetCurrentUserAsync(cancellationToken);
+        if (user is null) return Unauthorized();
+        if (user.Role is not (UserRole.Owner or UserRole.Resident)) return Forbid();
+
+        var myUnits = await LoadAccessibleUnitsAsync(user, cancellationToken);
+        if (!myUnits.Any(x => x.BuildingId == buildingId))
+            return Forbid();
+
+        var building = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(b => !b.IsDeleted && b.Id == buildingId)
+            .Select(b => new { b.AdsEnabled, b.ContactPhonePrefix, b.ContactPhone })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (building is null || !building.AdsEnabled)
+            return Ok(new BuildingAdsDto());
+
+        var today = DateTime.UtcNow.Date;
+
+        var slots = await dbContext.AdCampaigns
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted
+                     && x.IsActive
+                     && x.StartDate <= today
+                     && x.EndDate >= today
+                     && x.Buildings.Any(b => b.BuildingId == buildingId))
+            .OrderBy(x => x.Position)
+            .Take(7)
+            .Select(x => new AdSlotDto
+            {
+                Id             = x.Id,
+                AdvertiserName = x.AdvertiserName,
+                Description    = x.Description,
+                CtaText        = x.CtaText,
+                CtaUrl         = x.CtaUrl,
+                ImageUrl       = x.ImageUrl,
+                Category       = x.Category.ToString(),
+                Position       = x.Position
+            })
+            .ToListAsync(cancellationToken);
+
+        // Teléfono de contacto del edificio para el banner de fallback
+        string? managerPhone = null;
+        if (!string.IsNullOrWhiteSpace(building.ContactPhone))
+        {
+            managerPhone = string.IsNullOrWhiteSpace(building.ContactPhonePrefix)
+                ? building.ContactPhone.Trim()
+                : $"{building.ContactPhonePrefix.Trim()}{building.ContactPhone.Trim()}";
+        }
+
+        return Ok(new BuildingAdsDto { Slots = slots, ManagerPhone = managerPhone });
+    }
+
     private static bool IsValidClaimCategory(string? category) =>
         category is "Ruido" or "Limpieza" or "Mantenimiento" or "Otro";
 }

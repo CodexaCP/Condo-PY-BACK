@@ -47,6 +47,10 @@ public class Building : BaseEntity
     // Datos para transferir (banco, titular, numero, alias). Se muestran solo en el pago de una reserva en curso.
     public string? MarketplaceTransferInfo { get; set; }
 
+    // Interruptor del modulo "Publicidad" (banners en la app del propietario y del residente). Solo lo opera el SuperAdmin.
+    // Apagado, el edificio no muestra anuncios ni puede recibir campanas; apagarlo conserva las campanas ya cargadas.
+    public bool AdsEnabled { get; set; }
+
     // Modelos de documentos (factura, nota de credito y liquidacion). Con UseStandardTemplates los PDF
     // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
     // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.

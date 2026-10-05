@@ -61,6 +61,7 @@ builder.Services.AddHostedService<LateFeeAccrualService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();
 builder.Services.AddHostedService<MarketplaceMaintenanceService>();
+builder.Services.AddHostedService<AdCampaignMaintenanceService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

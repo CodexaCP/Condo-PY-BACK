@@ -66,6 +66,8 @@ public interface ICondoDbContext
     DbSet<MarketplaceClaim> MarketplaceClaims { get; }
     DbSet<MarketplaceOwnerDebt> MarketplaceOwnerDebts { get; }
     DbSet<MarketplaceHandoverNote> MarketplaceHandoverNotes { get; }
+    DbSet<AdCampaign> AdCampaigns { get; }
+    DbSet<AdCampaignBuilding> AdCampaignBuildings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

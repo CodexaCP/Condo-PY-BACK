@@ -65,6 +65,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<MarketplaceClaim> MarketplaceClaims => Set<MarketplaceClaim>();
     public DbSet<MarketplaceOwnerDebt> MarketplaceOwnerDebts => Set<MarketplaceOwnerDebt>();
     public DbSet<MarketplaceHandoverNote> MarketplaceHandoverNotes => Set<MarketplaceHandoverNote>();
+    public DbSet<AdCampaign> AdCampaigns => Set<AdCampaign>();
+    public DbSet<AdCampaignBuilding> AdCampaignBuildings => Set<AdCampaignBuilding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -1018,6 +1020,31 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
 
         MarketplaceModelConfiguration.Configure(modelBuilder, Database.IsSqlServer());
+
+        // ── AdCampaign (publicidad) ────────────────────────────────────────────
+        modelBuilder.Entity<AdCampaign>().Property(x => x.AdvertiserName).HasMaxLength(200);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.CtaText).HasMaxLength(60);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.CtaUrl).HasMaxLength(500);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.ImageUrl).HasMaxLength(500);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.Category).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<AdCampaign>().Property(x => x.MonthlyAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<AdCampaign>().HasIndex(x => new { x.CompanyId, x.IsActive, x.StartDate, x.EndDate });
+        modelBuilder.Entity<AdCampaign>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AdCampaign>()
+            .HasOne(x => x.CreatedByUser).WithMany()
+            .HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AdCampaignBuilding>()
+            .HasIndex(x => new { x.AdCampaignId, x.BuildingId }).IsUnique();
+        modelBuilder.Entity<AdCampaignBuilding>()
+            .HasOne(x => x.AdCampaign).WithMany(x => x.Buildings)
+            .HasForeignKey(x => x.AdCampaignId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AdCampaignBuilding>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 
         SeedCatalog(modelBuilder);
     }

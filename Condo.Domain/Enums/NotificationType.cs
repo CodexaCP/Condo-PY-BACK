@@ -39,5 +39,7 @@ public enum NotificationType
     MarketplaceClaimResolved = 35,
     MarketplaceStartNotice = 36,
     MarketplaceHandoverNote = 37,
-    SupplierCreditApplied = 38
+    SupplierCreditApplied = 38,
+    AdCampaignExpiringSoon = 39,
+    AdCampaignPaused = 40
 }
