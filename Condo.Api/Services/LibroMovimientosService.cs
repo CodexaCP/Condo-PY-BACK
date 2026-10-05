@@ -90,6 +90,21 @@ public class LibroMovimientosService(ICondoDbContext dbContext) : ILibroMovimien
             });
         }
 
+        // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): entra con la fecha de la nota.
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, null, null, cancellationToken);
+        foreach (var n in supplierCredits)
+        {
+            movements.Add(new LibroMovimientoItemDto
+            {
+                Date = n.Date,
+                Type = LibroMovimientoType.NotaCreditoProveedor,
+                Description = $"NC proveedor {n.Numero} — {n.ExpenseDescription}",
+                Reference = string.IsNullOrWhiteSpace(n.SupplierName) ? null : n.SupplierName,
+                Credit = n.Amount,
+                Debit = 0m
+            });
+        }
+
         var openingBalance = movements.Where(m => m.Date < fromDate).Sum(m => m.Credit - m.Debit);
 
         var itemsInRange = movements

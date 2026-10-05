@@ -82,6 +82,13 @@ public class BuildingComparisonService(ICondoDbContext dbContext) : IBuildingCom
         var collectedMap = collectedByBuilding.ToDictionary(x => x.BuildingId, x => x.Amount);
         var expenseMap = expensesByBuilding.ToDictionary(x => x.BuildingId, x => x.Amount);
 
+        // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): baja los gastos del edificio.
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, buildingIds, fromDate, toDate, cancellationToken);
+        foreach (var credit in supplierCredits)
+        {
+            expenseMap[credit.BuildingId] = expenseMap.GetValueOrDefault(credit.BuildingId) - credit.Amount;
+        }
+
         var items = buildings
             .Select(b =>
             {

@@ -55,9 +55,17 @@ public class EstadoResultadosService(ICondoDbContext dbContext) : IEstadoResulta
             .Where(x => x.Amount != 0)
             .Select(x => new EstadoResultadosLineDto { Label = CategoryLabels.IncomeLabel(x.Category), Amount = x.Amount }));
 
-        var expenseLines = expenseByCategory
-            .Where(x => x.Amount != 0)
-            .Select(x => new EstadoResultadosLineDto { Label = CategoryLabels.ExpenseLabel(x.Category), Amount = x.Amount })
+        // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): baja el gasto de su categoria.
+        var expenseAmounts = expenseByCategory.ToDictionary(x => x.Category, x => x.Amount);
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, fromDate, toDate, cancellationToken);
+        foreach (var credit in supplierCredits)
+        {
+            expenseAmounts[credit.Category] = expenseAmounts.GetValueOrDefault(credit.Category) - credit.Amount;
+        }
+
+        var expenseLines = expenseAmounts
+            .Where(x => x.Value != 0)
+            .Select(x => new EstadoResultadosLineDto { Label = CategoryLabels.ExpenseLabel(x.Key), Amount = x.Value })
             .ToList();
 
         incomeLines = incomeLines.OrderByDescending(x => x.Amount).ToList();

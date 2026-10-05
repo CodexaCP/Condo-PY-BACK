@@ -51,6 +51,34 @@ public class BuildingExpenseCreditNoteAllocationDto
     public decimal Amount { get; set; }
 }
 
+// Una fila del anexo de notas de credito de proveedor de un edificio y periodo (para la liquidacion y para el contador).
+public class PeriodSupplierCreditNoteDto
+{
+    public Guid Id { get; set; }
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public Guid ExpensePeriodId { get; set; }
+    public string ExpensePeriodName { get; set; } = string.Empty;
+    public Guid BuildingExpenseId { get; set; }
+    public string ExpenseDescription { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string? Rubro { get; set; }
+    public string Numero { get; set; } = string.Empty;
+    public string? Timbrado { get; set; }
+    public DateOnly IssueDate { get; set; }
+    public decimal Amount { get; set; }
+    public BuildingExpenseCreditNoteMode Mode { get; set; }
+    public BuildingExpenseCreditNoteStatus Status { get; set; }
+    // Que se hizo con la nota: se descontó del gasto, se acreditó a las unidades, volvió al fondo de reserva...
+    public string Treatment { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string? DocumentUrl { get; set; }
+    public string VoidReason { get; set; } = string.Empty;
+    public int AllocationsCount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+}
+
 public class BuildingExpenseCreditNotePreviewRequest
 {
     public decimal Amount { get; set; }

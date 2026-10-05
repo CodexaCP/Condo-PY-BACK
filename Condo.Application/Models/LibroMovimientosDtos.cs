@@ -4,7 +4,9 @@ public enum LibroMovimientoType
 {
     Cobro = 1,
     IngresoEdificio = 2,
-    GastoEdificio = 3
+    GastoEdificio = 3,
+    // Nota de credito del proveedor (periodo publicado) que queda en el edificio: baja el gasto en la fecha de la nota.
+    NotaCreditoProveedor = 4
 }
 
 public class LibroMovimientoItemDto

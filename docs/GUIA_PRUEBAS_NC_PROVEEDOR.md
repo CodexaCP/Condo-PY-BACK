@@ -1,4 +1,4 @@
-# Guía de pruebas — Nota de crédito del proveedor (fases 1 a 4)
+# Guía de pruebas — Nota de crédito del proveedor (fases 1, 2, 4 y 5)
 
 Para probar a mano en el web (y un poco en la app). Especificación y decisiones: `docs/ESPECIFICACION_NC_PROVEEDOR.md`.
 
@@ -101,18 +101,53 @@ Preparar: unidad **A** con Ana como propietaria principal y saldo a favor por NC
 | 5.4 | Texto largo: proveedor de 200 caracteres y descripción de gasto de 500. Registrar una NC en período publicado. | Se guarda sin error (los textos del saldo y del aviso se recortan). |
 | 5.5 | Dos personas registran la **misma NC a la vez**. | Una la guarda; la otra recibe el aviso de duplicada. |
 | 5.6 | Plan del edificio vencido (solo lectura). | Debería comportarse igual que los gastos (la restricción del plan es general y no la toqué); confirmar que no deja registrar ni anular. |
-| 5.7 | Los **reportes** de un período en borrador con NC. | Ven el gasto neto. (Las NC de períodos publicados todavía **no** salen en libro y estado de resultados: fase 5.) |
+| 5.7 | Los **reportes** de un período en borrador con NC. | Ven el gasto neto (ver la sección 6 de reportes). |
 
 ---
 
-## 6. Pruebas automáticas
+## 6. Fase 5 — reportes y anexo
+
+Importante: la NC **no siempre** aparece como movimiento propio. Aparece cuando el dinero **queda en el edificio** (gasto pagado por el fondo de reserva o gasto no distribuido). Cuando se acredita a los propietarios como saldo a favor, **no** se registra aparte: ya entra cuando el propietario usa su saldo (el cobro incluye la parte pagada con saldo). Si no, el beneficio se contaría dos veces.
+
+Preparar: tener configurado el módulo **Finanzas** del edificio (fecha de arranque, cuenta bancaria y fondo de reserva) para ver el flujo y los movimientos.
+
+| # | Qué hacer | Resultado esperado |
+|---|---|---|
+| 6.1 | Gasto de ₲ 500.000 **pagado por el fondo de reserva** en un período **publicado**; registrar una NC de ₲ 100.000 con fecha de hoy. | **Libro de movimientos**: aparece una fila "NC proveedor … " tipo "NC proveedor" con ₲ 100.000 en ingreso, en la fecha de la NC. |
+| 6.2 | **Finanzas › Movimientos** del mismo rango. | Fila con etiqueta "NC proveedor" y la descripción "(devuelve al fondo de reserva)"; el saldo del **fondo de reserva** sube ₲ 100.000 en la fecha de la NC. |
+| 6.3 | **Estado de resultados** del rango. | La categoría de ese gasto baja ₲ 100.000 (el gasto de ₲ 500.000 sigue en su mes). |
+| 6.4 | **Presupuesto vs real** del mes de la NC. | Lo gastado del rubro baja ₲ 100.000 en el mes de la NC. |
+| 6.5 | **Comparativo entre edificios**. | Los gastos del edificio bajan ₲ 100.000. |
+| 6.6 | Repetir 6.1 con un gasto **no distribuido**. | Igual que 6.1 a 6.5 (el dinero queda en el edificio). |
+| 6.7 | NC en un período **publicado** de un gasto **repartido** a las unidades (saldo a favor). | **No** aparece como movimiento aparte en libro, estado de resultados ni flujo. |
+| 6.8 | Esos propietarios usan su saldo a favor en un pago (sección 3.11). | El cobro del libro es el comprobante **completo** (incluye la parte pagada con saldo). Es donde se refleja el beneficio. |
+| 6.9 | NC de un período en **borrador**. | No aparece como movimiento aparte; el gasto ya figura **neto** en el libro, estado de resultados y presupuesto. |
+| 6.10 | Anular la NC del caso 6.1. | Desaparece de libro, estado de resultados, flujo y presupuesto (las anuladas no cuentan). |
+| 6.11 | **Exportar a Excel y PDF** el libro de movimientos con la fila de NC. | El tipo sale como "NC proveedor" (PDF en verde). |
+| 6.12 | **Exportar el Excel de Finanzas** con movimientos. | La fuente sale como "Nota de crédito de proveedor". |
+| 6.13 | **Arrastre de saldo / clonar período** de un período con NC publicada. | El saldo con que cierra el período **no cambia** por la NC. |
+| 6.14 | Un período **sin** notas, o un edificio sin Finanzas configurado. | Los reportes salen igual que antes (sin la fila de NC). |
+
+### Anexo de la liquidación y Excel del contador
+
+| # | Qué hacer | Resultado esperado |
+|---|---|---|
+| 6.15 | **Gastos y cargos › Gastos** de un período con NC (borrador, publicado, acreditada, del fondo de reserva y una anulada). | Debajo de los gastos aparece "Notas de crédito de proveedor del período" con una fila por nota: fecha, proveedor y gasto, número y timbrado, monto, **qué se hizo** y enlace al documento. |
+| 6.16 | Columna "Qué se hizo". | "Descontada del gasto (período sin publicar)", "Acreditada como saldo a favor de las unidades" (con cuántas unidades y cuánto), "Devuelta al fondo de reserva" o "Registrada sin saldo a favor (gasto no repartido)". |
+| 6.17 | La nota anulada. | Sale tachada/atenuada con "Anulada" y el motivo; **no** suma en el total. |
+| 6.18 | **Descargar Excel**. | Excel con las mismas filas, rubro, categoría, estado, motivo y enlace "Ver documento" que abre el archivo del proveedor. |
+| 6.19 | Período **sin** notas. | La sección no aparece. |
+| 6.20 | Usuario sin acceso al edificio (por API o con otro edificio). | Prohibido. |
+| 6.21 | Abrir el PDF de la liquidación publicada. | **No cambió** (sigue igual que lo enviado a los propietarios). |
+
+## 7. Pruebas automáticas
 
 ```bash
 dotnet test Condo.Tests/Condo.Tests.csproj
 ```
 
 - Fases 1 y 2 tienen pruebas (`Condo.Tests/Finance/BuildingExpenseCreditNotes*Tests.cs`).
-- **La fase 4 no tiene pruebas automáticas** (las dejaste para el final). Casos sugeridos para escribirlas:
+- **Las fases 4 y 5 no tienen pruebas automáticas** (las dejaste para el final). Casos sugeridos para la fase 4:
   1. Quitar al único principal con deuda pendiente en un período publicado → 400 con monto y períodos; no se borra el vínculo.
   2. Quitar al único principal sin deuda → vínculo borrado; los lotes de la unidad quedan `OnHold`, el `OwnerCredit` baja en su suma y `EnsureLotsAsync` no los devuelve.
   3. Asignar un nuevo principal tras la baja → los lotes cambian de `OwnerId`, `OnHold = false`, el `OwnerCredit` del nuevo sube y la respuesta trae `TransferredCredit`.
@@ -123,3 +158,13 @@ dotnet test Condo.Tests/Condo.Tests.csproj
   8. Anular una NC cuyo lote está retenido, o cuyo propietario cambió → resta del saldo de quien lo tiene hoy (o nada si está retenido).
   9. Textos largos: referencia (100) y descripción (500) del lote y cuerpo (1000) del aviso se recortan sin romper el guardado.
   10. Aislamiento: usuario sin acceso al edificio → `Forbid` en la baja y en la vista previa.
+
+- Casos sugeridos para la **fase 5**:
+  1. `SupplierCreditNoteLedger.LoadAsync`: devuelve solo notas `Credited`, `Applied`, sin asignaciones a unidades, del edificio y del rango; excluye las anuladas, las de borrador (`Netted`) y las que tienen reparto.
+  2. `LibroMovimientosService`: con una NC del fondo de reserva aparece un movimiento `NotaCreditoProveedor` con crédito = monto y fecha = fecha de la NC; sube el saldo final.
+  3. `EstadoResultadosService`: la categoría del gasto baja el monto; si queda en 0 no aparece la línea.
+  4. `FinanceLedgerService.GetBucketsAsync`: bucket negativo en la cuenta del fondo de reserva y en el rubro del gasto; `GetRowsAsync`: fila `SupplierCreditNote` con monto negativo, `Signed` positivo.
+  5. `FinanceBudgetService.GetExpenseActualsAsync`: resta en el mes de la NC y en la clave del rubro.
+  6. `BuildingComparisonService`: resta por edificio dentro del rango.
+  7. Una NC acreditada a propietarios **no** cambia ninguno de los reportes anteriores.
+  8. `GET credit-notes` y `credit-notes/export`: filas con `Treatment` correcto para cada caso, `AllocationsCount`/`AllocatedAmount`, anuladas incluidas, `Forbid` sin acceso, 400 sin `buildingId`; el Excel abre y trae el enlace al documento.

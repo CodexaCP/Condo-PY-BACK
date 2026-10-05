@@ -51,6 +51,14 @@ public class FinanceBudgetService(ICondoDbContext dbContext, FinanceLedgerServic
             result[key] = result.GetValueOrDefault(key) + t.Amount;
         }
 
+        // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): baja lo gastado del rubro, en el mes de la nota.
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, from, to, cancellationToken);
+        foreach (var n in supplierCredits)
+        {
+            var key = (n.Date.Year, n.Date.Month, ctx.ExpenseKey(n.LedgerCategoryId, n.Category));
+            result[key] = result.GetValueOrDefault(key) - n.Amount;
+        }
+
         return result;
     }
 

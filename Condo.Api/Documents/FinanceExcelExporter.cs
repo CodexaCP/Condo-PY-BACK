@@ -520,6 +520,7 @@ public static class FinanceExcelExporter
     {
         LedgerSourceType.OwnerPayment => "Cobro de propietario",
         LedgerSourceType.BuildingExpense => "Gasto del edificio",
+        LedgerSourceType.SupplierCreditNote => "Nota de crédito de proveedor",
         _ => "Ingreso del edificio"
     };
 

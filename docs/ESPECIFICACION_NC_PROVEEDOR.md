@@ -1,6 +1,6 @@
 # Nota de crédito de proveedor sobre un gasto del edificio — Especificación
 
-Estado: **fases 1, 2 y 4 implementadas (2026-10-05)**; la 5 pendiente de "procesa" de Tony; la 3 CERRADA sin hacer (decisión de Tony). Guía de pruebas manuales: `docs/GUIA_PRUEBAS_NC_PROVEEDOR.md`. Ver la sección 15 (estado de implementación).
+Estado: **fases 1, 2, 4 y 5 implementadas (2026-10-05)**; la 3 CERRADA sin hacer (decisión de Tony). Todo lo del plan está hecho. Guía de pruebas manuales: `docs/GUIA_PRUEBAS_NC_PROVEEDOR.md`. Ver la sección 15 (estado de implementación).
 Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel), `CondoPY-APP` (solo aviso al propietario, ya cubierto por las notificaciones).
 
 > **Para quien implemente:** leer la sección 3 (lo que ya existe) y verificar cada punto marcado **[verificar]** antes de tocar código. Los puntos de la sección 12 son decisiones abiertas: preguntarlas, no asumirlas. Commits solo a nombre de Tony, sin `Co-Authored-By` y sin push.
@@ -200,7 +200,7 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 2. **Publicado** — ✅ HECHA (2026-10-05): preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
 3. ~~**Crédito por edificio**~~ — **CERRADA, no se hace** (Tony, 2026-10-05): el saldo a favor va al propietario y se usa como hoy, en cualquier edificio de la empresa. El edificio y la unidad quedan guardados en cada lote solo para trazabilidad.
 4. **Cambio de propietario** — ✅ HECHA (2026-10-05, sin pruebas automáticas por pedido de Tony; ver la guía de pruebas): validación de deuda, retención y traspaso de lotes.
-5. **Reportes y pantallas**: libro/Excel (solo lo de `Credited`), anexo de liquidación, UI web, aviso en app.
+5. **Reportes y pantallas** — ✅ HECHA (2026-10-05, con un cambio de criterio contable respecto de lo escrito en la sección 10: ver "Fase 5" abajo).
 
 Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla de pagos del más antiguo al más nuevo y "comprobante completo, sin pagos parciales" (memoria `feedback_commits_and_payment_rule`).
 
@@ -267,3 +267,19 @@ Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla
 - **Migración**: `20261005123940_OwnerCreditMovementOnHold` (+ .sql): columna `OnHold bit NOT NULL DEFAULT 0` en `OwnerCreditMovements`. Va DESPUÉS de las otras tres.
 - **Corrección de la fase 2 incluida**: la referencia (100) y la descripción (500) del lote y el título/cuerpo (200/1000) del aviso se recortan al largo de la columna (`OwnerCreditService.Clip` / `AppendDescription`); antes podían pasarse en SQL Server con proveedor o descripción largos.
 - **Prueba existente tocada**: `MarketplaceHandoverServiceTests` solo cambia el constructor de `UnitOwnersController` (ahora recibe `OwnerCreditService` y `PushDispatcher`).
+
+### Fase 5 — hecha (2026-10-05, backend + web; compila sin errores; **sin pruebas automáticas** a pedido de Tony, ver `docs/GUIA_PRUEBAS_NC_PROVEEDOR.md`)
+
+**Decisión contable (cambia lo previsto en la sección 10, y por qué).** La sección 10 decía que toda NC de período publicado entra a los reportes como movimiento negativo con la fecha de la NC. Al implementarlo vi que eso duplica el beneficio cuando la NC se acredita a los propietarios: al aprobar el pago de un propietario que usa saldo a favor, el sistema registra el **cobro completo del comprobante** (el `Payment` incluye la parte pagada con saldo: "Incluye Gs. X de saldo a favor"). Es decir, el saldo de la NC ya entra a libro, estado de resultados y flujo cuando el propietario lo usa. Registrar además la NC en su fecha lo contaría dos veces. Por eso:
+
+- **Entra al libro como movimiento propio** (negativo con la fecha de la NC, con la regla del gasto original) solo la NC de período **publicado que NO se acreditó a los propietarios**: gasto **pagado por el fondo de reserva** (el dinero vuelve al fondo) y gasto **no distribuido** (queda en el edificio).
+- **No entra** la NC de período en **borrador** (ya bajó el monto del gasto: `BuildingExpense.Amount` es el neto y todos los reportes lo leen) ni la **acreditada como saldo a favor** (se refleja cuando el propietario lo usa).
+- Consecuencia a explicar al contador: el beneficio de una NC repartida a propietarios aparece en el libro **cuando el propietario usa su saldo** (en el cobro), no en la fecha de la NC. El gasto original sigue en su mes con el monto bruto.
+- Implementación: `Condo.Api/Services/SupplierCreditNoteLedger.cs` (una sola consulta compartida: Credited, Aplicada, sin reparto a unidades, por edificio y rango de fechas), usada por: `LibroMovimientosService` (nuevo tipo `NotaCreditoProveedor`), `EstadoResultadosService` (baja el gasto de su categoría), `FinanceLedgerService` (saldos, flujo y movimientos: nuevo `LedgerSourceType.SupplierCreditNote`, monto negativo con la dirección del gasto), `FinanceBudgetService` (baja lo gastado del rubro en el mes de la nota) y `BuildingComparisonService`. `PeriodClosingBalance` (arrastre de saldo) **no cambia**: el período publicado no se reescribe.
+- Etiquetas nuevas en el PDF y el Excel del libro ("NC proveedor"), en el Excel de Finanzas ("Nota de crédito de proveedor") y en las pantallas web (libro de movimientos y movimientos de Finanzas).
+
+**Anexo de la liquidación y Excel del contador.**
+- `GET /api/building-expenses/credit-notes?buildingId=&expensePeriodId=` lista las NC (aplicadas y anuladas) de los gastos del período con proveedor, gasto, rubro, número, timbrado, fecha, monto, **qué se hizo con la nota** (descontada del gasto / acreditada como saldo a favor de las unidades / devuelta al fondo de reserva / registrada sin saldo), motivo, documento y, si fue acreditada, a cuántas unidades y cuánto.
+- `GET /api/building-expenses/credit-notes/export?...` baja el mismo listado en Excel (con enlace al documento del proveedor) — es lo que se le da al contador.
+- Web: debajo de los gastos del período (Gastos y cargos › Gastos) aparece la sección "Notas de crédito de proveedor del período" con la tabla y el botón "Descargar Excel". Solo se muestra si hay notas.
+- **El PDF de la liquidación publicada no se modificó** (sigue igual que lo que se envió a los propietarios); el anexo es esta sección y su Excel.

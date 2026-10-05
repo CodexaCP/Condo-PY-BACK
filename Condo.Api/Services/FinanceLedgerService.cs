@@ -130,6 +130,15 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
                 FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(et.LedgerCategoryId, et.Category)), et.Amount);
         }
 
+        // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): gasto negativo con la regla del gasto
+        // original (si lo pago el fondo de reserva, el dinero vuelve al fondo).
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, from, to, cancellationToken);
+        foreach (var n in supplierCredits)
+        {
+            AddBucket(raw, n.Date.Year, n.Date.Month,
+                FinanceLedgerRules.ForExpense(n.Category, n.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(n.LedgerCategoryId, n.Category)), -n.Amount);
+        }
+
         return raw
             .GroupBy(b => (b.Year, b.Month, b.AccountId, b.RubroKey, b.Direction))
             .Select(g => new LedgerBucket(g.Key.Year, g.Key.Month, g.Key.AccountId, g.Key.RubroKey, g.Key.Direction, g.Sum(b => b.Amount)))
@@ -215,6 +224,20 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             var description = string.IsNullOrWhiteSpace(e.Description) ? "Gasto del edificio" : e.Description;
             rows.Add(new LedgerRow(e.ExpenseDate, rule.AccountId, rule.RubroKey, rule.Direction, e.Amount, LedgerSourceType.BuildingExpense, e.Id,
                 e.PaidByReserveFund ? description + " (pagado por el fondo de reserva)" : description, e.SupplierName, string.Empty));
+        }
+
+        var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, from, to, cancellationToken);
+        foreach (var n in supplierCredits)
+        {
+            var rule = FinanceLedgerRules.ForExpense(n.Category, n.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(n.LedgerCategoryId, n.Category));
+            if (rule is null)
+            {
+                continue;
+            }
+
+            var description = $"NC proveedor {n.Numero} — {n.ExpenseDescription}";
+            rows.Add(new LedgerRow(n.Date, rule.AccountId, rule.RubroKey, rule.Direction, -n.Amount, LedgerSourceType.SupplierCreditNote, n.Id,
+                n.PaidByReserveFund ? description + " (devuelve al fondo de reserva)" : description, n.SupplierName, n.Numero));
         }
 
         return rows

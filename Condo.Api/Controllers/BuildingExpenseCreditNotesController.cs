@@ -292,6 +292,120 @@ public class BuildingExpenseCreditNotesController(
         return Ok(await BuildResultAsync(note, expense, period, 0m, cancellationToken));
     }
 
+    // ── Anexo: notas de credito de proveedor de un edificio y periodo ─────────
+
+    // Listado para la liquidacion y el contador: incluye todas las notas (aplicadas y anuladas) de los gastos del periodo.
+    [HttpGet("credit-notes")]
+    public async Task<ActionResult<IReadOnlyList<PeriodSupplierCreditNoteDto>>> GetByPeriod(
+        [FromQuery] Guid buildingId, [FromQuery] Guid? expensePeriodId, CancellationToken cancellationToken)
+    {
+        if (buildingId == Guid.Empty) return BadRequest("El edificio es obligatorio.");
+        if (!await accessScope.CanAccessBuildingAsync(buildingId, cancellationToken)) return Forbid();
+
+        return Ok(await LoadPeriodRowsAsync(buildingId, expensePeriodId, cancellationToken));
+    }
+
+    [HttpGet("credit-notes/export")]
+    public async Task<IActionResult> ExportByPeriod(
+        [FromQuery] Guid buildingId, [FromQuery] Guid? expensePeriodId, CancellationToken cancellationToken)
+    {
+        if (buildingId == Guid.Empty) return BadRequest("El edificio es obligatorio.");
+        if (!await accessScope.CanAccessBuildingAsync(buildingId, cancellationToken)) return Forbid();
+
+        var rows = await LoadPeriodRowsAsync(buildingId, expensePeriodId, cancellationToken);
+        var buildingName = rows.FirstOrDefault()?.BuildingName
+            ?? await dbContext.Buildings.AsNoTracking().Where(x => x.Id == buildingId).Select(x => x.Name).FirstOrDefaultAsync(cancellationToken)
+            ?? string.Empty;
+        var periodName = expensePeriodId.HasValue
+            ? rows.FirstOrDefault()?.ExpensePeriodName
+              ?? await dbContext.ExpensePeriods.AsNoTracking().Where(x => x.Id == expensePeriodId.Value).Select(x => x.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var bytes = Documents.SupplierCreditNotesExcelBuilder.Build(buildingName, periodName, rows, baseUrl);
+        var fileName = $"nc-proveedor-{DateTime.Now:yyyyMMdd-HHmm}.xlsx";
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    private async Task<List<PeriodSupplierCreditNoteDto>> LoadPeriodRowsAsync(Guid buildingId, Guid? expensePeriodId, CancellationToken ct)
+    {
+        var notes = await dbContext.BuildingExpenseCreditNotes.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId && (expensePeriodId == null || x.ExpensePeriodId == expensePeriodId))
+            .OrderByDescending(x => x.IssueDate).ThenByDescending(x => x.CreatedAtUtc)
+            .Select(x => new
+            {
+                x.Id,
+                x.BuildingId,
+                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                x.ExpensePeriodId,
+                PeriodName = x.ExpensePeriod != null ? x.ExpensePeriod.Name : string.Empty,
+                x.BuildingExpenseId,
+                ExpenseDescription = x.BuildingExpense != null ? x.BuildingExpense.Description : string.Empty,
+                x.SupplierName,
+                Category = x.BuildingExpense != null ? x.BuildingExpense.Category : BuildingExpenseCategory.Other,
+                PaidByReserveFund = x.BuildingExpense != null && x.BuildingExpense.PaidByReserveFund,
+                Rubro = x.BuildingExpense != null && x.BuildingExpense.LedgerCategory != null ? x.BuildingExpense.LedgerCategory.Name : null,
+                x.Numero,
+                x.Timbrado,
+                x.IssueDate,
+                x.Amount,
+                x.Mode,
+                x.Status,
+                x.Reason,
+                x.DocumentUrl,
+                x.VoidReason
+            })
+            .ToListAsync(ct);
+
+        var noteIds = notes.Select(n => n.Id).ToList();
+        var allocations = noteIds.Count == 0
+            ? new Dictionary<Guid, (int Count, decimal Amount)>()
+            : (await dbContext.BuildingExpenseCreditNoteAllocations.AsNoTracking()
+                    .Where(a => !a.IsDeleted && noteIds.Contains(a.CreditNoteId))
+                    .Select(a => new { a.CreditNoteId, a.Amount })
+                    .ToListAsync(ct))
+                .GroupBy(a => a.CreditNoteId)
+                .ToDictionary(g => g.Key, g => (Count: g.Count(), Amount: g.Sum(a => a.Amount)));
+
+        return notes.Select(n =>
+        {
+            var alloc = allocations.GetValueOrDefault(n.Id);
+            return new PeriodSupplierCreditNoteDto
+            {
+                Id = n.Id,
+                BuildingId = n.BuildingId,
+                BuildingName = n.BuildingName,
+                ExpensePeriodId = n.ExpensePeriodId,
+                ExpensePeriodName = n.PeriodName,
+                BuildingExpenseId = n.BuildingExpenseId,
+                ExpenseDescription = n.ExpenseDescription,
+                SupplierName = n.SupplierName,
+                Category = CategoryLabels.ExpenseLabel(n.Category),
+                Rubro = n.Rubro,
+                Numero = n.Numero,
+                Timbrado = n.Timbrado,
+                IssueDate = n.IssueDate,
+                Amount = n.Amount,
+                Mode = n.Mode,
+                Status = n.Status,
+                Treatment = TreatmentLabel(n.Mode, alloc.Count > 0, n.PaidByReserveFund),
+                Reason = n.Reason,
+                DocumentUrl = n.DocumentUrl,
+                VoidReason = n.VoidReason,
+                AllocationsCount = alloc.Count,
+                AllocatedAmount = alloc.Amount
+            };
+        }).ToList();
+    }
+
+    private static string TreatmentLabel(BuildingExpenseCreditNoteMode mode, bool hasAllocations, bool paidByReserveFund) => mode switch
+    {
+        BuildingExpenseCreditNoteMode.Netted => "Descontada del gasto (período sin publicar)",
+        _ when hasAllocations => "Acreditada como saldo a favor de las unidades",
+        _ when paidByReserveFund => "Devuelta al fondo de reserva",
+        _ => "Registrada sin saldo a favor (gasto no repartido)"
+    };
+
     // ── Periodo publicado: reparto y saldo a favor ────────────────────────────
 
     private sealed record PendingPush(Guid RecipientId, string Title, string Body, Guid PeriodId);

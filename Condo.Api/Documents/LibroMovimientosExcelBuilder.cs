@@ -93,6 +93,7 @@ public static class LibroMovimientosExcelBuilder
         LibroMovimientoType.Cobro => "Cobro",
         LibroMovimientoType.IngresoEdificio => "Ingreso",
         LibroMovimientoType.GastoEdificio => "Gasto",
+        LibroMovimientoType.NotaCreditoProveedor => "NC proveedor",
         _ => type.ToString()
     };
 }

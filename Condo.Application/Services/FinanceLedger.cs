@@ -12,7 +12,9 @@ public enum LedgerSourceType
 {
     OwnerPayment = 1,
     BuildingExpense = 2,
-    BuildingIncome = 3
+    BuildingIncome = 3,
+    // Nota de credito del proveedor sobre un gasto de un periodo ya publicado (movimiento negativo con la fecha de la nota).
+    SupplierCreditNote = 4
 }
 
 public enum LedgerDirection

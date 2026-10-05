@@ -164,6 +164,7 @@ public sealed class LibroMovimientosPdfDocument(LibroMovimientosReportDto report
         LibroMovimientoType.Cobro => "Cobro",
         LibroMovimientoType.IngresoEdificio => "Ingreso",
         LibroMovimientoType.GastoEdificio => "Gasto",
+        LibroMovimientoType.NotaCreditoProveedor => "NC proveedor",
         _ => type.ToString()
     };
 
@@ -172,6 +173,7 @@ public sealed class LibroMovimientosPdfDocument(LibroMovimientosReportDto report
         LibroMovimientoType.Cobro => ColorAccent,
         LibroMovimientoType.IngresoEdificio => ColorGreen,
         LibroMovimientoType.GastoEdificio => ColorDebt,
+        LibroMovimientoType.NotaCreditoProveedor => ColorGreen,
         _ => ColorGray
     };
 
