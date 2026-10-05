@@ -192,7 +192,7 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
     {
         var lots = await dbContext.OwnerCreditMovements
             .Where(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId
-                        && x.Kind == OwnerCreditMovementKind.Generated && x.RemainingAmount > 0)
+                        && x.Kind == OwnerCreditMovementKind.Generated && x.RemainingAmount > 0 && !x.OnHold)
             .OrderBy(x => x.CreatedAtUtc)
             .ToListAsync(ct);
 
@@ -296,14 +296,122 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
             Kind = OwnerCreditMovementKind.Generated,
             Amount = amount,
             RemainingAmount = amount,
-            SourceReference = reference,
+            // Las columnas tienen largo maximo (referencia 100, descripcion 500): el texto se recorta para no romper el guardado.
+            SourceReference = Clip(reference, ReferenceMaxLength),
             SupplierCreditNoteId = supplierCreditNoteId,
             BuildingId = buildingId,
             UnitId = unitId,
-            Description = description
+            Description = Clip(description, DescriptionMaxLength)
         };
         dbContext.OwnerCreditMovements.Add(lot);
         return lot;
+    }
+
+    private const int ReferenceMaxLength = 100;
+    private const int DescriptionMaxLength = 500;
+
+    /// <summary>Recorta el texto al largo maximo de la columna (con puntos suspensivos).</summary>
+    public static string Clip(string? value, int max)
+    {
+        var text = value ?? string.Empty;
+        return text.Length <= max ? text : text[..(max - 1)] + "…";
+    }
+
+    /// <summary>Agrega una nota al final de la descripcion del lote sin pasar el largo maximo (si no entra, se recorta lo anterior).</summary>
+    public static void AppendDescription(OwnerCreditMovement lot, string note)
+    {
+        var addition = " " + Clip(note, DescriptionMaxLength - 20);
+        var current = lot.Description ?? string.Empty;
+        var room = DescriptionMaxLength - addition.Length;
+        lot.Description = (current.Length <= room ? current : current[..Math.Max(0, room - 1)] + "…") + addition;
+    }
+
+    /// <summary>
+    /// Se dio de baja al propietario principal de la unidad (y no queda otro principal): el saldo a favor que vino de esa unidad queda
+    /// retenido hasta que haya un nuevo propietario principal. Se saca del saldo del propietario saliente y el lote deja de consumirse.
+    /// Devuelve lo retenido. No guarda: lo hace quien llama.
+    /// </summary>
+    public async Task<decimal> HoldUnitLotsAsync(Guid unitId, Guid ownerId, Guid companyId, string note, CancellationToken ct)
+    {
+        var lots = await dbContext.OwnerCreditMovements
+            .Where(x => !x.IsDeleted && x.Kind == OwnerCreditMovementKind.Generated && x.UnitId == unitId && x.OwnerId == ownerId
+                        && x.CompanyId == companyId && x.RemainingAmount > 0 && !x.OnHold)
+            .ToListAsync(ct);
+        if (lots.Count == 0) return 0m;
+
+        var total = lots.Sum(x => x.RemainingAmount);
+        await SubtractFromCreditAsync(ownerId, companyId, total, ct);
+
+        foreach (var lot in lots)
+        {
+            lot.OnHold = true;
+            AppendDescription(lot, note);
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// Pasa a un propietario el saldo a favor de la unidad: los lotes retenidos de la unidad (se asigno el nuevo propietario principal) y,
+    /// si se indica fromOwnerId, los que tenia ese propietario (se dio de baja a uno de varios principales y queda otro). Resta del saldo
+    /// del que lo tenia (si no estaba retenido) y suma al del nuevo. Devuelve lo traspasado. No guarda: lo hace quien llama.
+    /// </summary>
+    public async Task<decimal> TransferUnitLotsAsync(Guid unitId, Guid? fromOwnerId, Guid toOwnerId, Guid companyId, string note, CancellationToken ct)
+    {
+        var lots = await dbContext.OwnerCreditMovements
+            .Where(x => !x.IsDeleted && x.Kind == OwnerCreditMovementKind.Generated && x.UnitId == unitId && x.CompanyId == companyId
+                        && x.RemainingAmount > 0 && x.OwnerId != toOwnerId
+                        && (x.OnHold || (fromOwnerId != null && x.OwnerId == fromOwnerId)))
+            .ToListAsync(ct);
+        // Un lote retenido que ya era del nuevo propietario solo se libera.
+        var released = await dbContext.OwnerCreditMovements
+            .Where(x => !x.IsDeleted && x.Kind == OwnerCreditMovementKind.Generated && x.UnitId == unitId && x.CompanyId == companyId
+                        && x.RemainingAmount > 0 && x.OwnerId == toOwnerId && x.OnHold)
+            .ToListAsync(ct);
+
+        var total = 0m;
+
+        foreach (var group in lots.Where(x => !x.OnHold).GroupBy(x => x.OwnerId))
+            await SubtractFromCreditAsync(group.Key, companyId, group.Sum(x => x.RemainingAmount), ct);
+
+        foreach (var lot in lots)
+        {
+            lot.OwnerId = toOwnerId;
+            lot.OnHold = false;
+            AppendDescription(lot, note);
+            total += lot.RemainingAmount;
+        }
+
+        foreach (var lot in released)
+        {
+            lot.OnHold = false;
+            AppendDescription(lot, note);
+            total += lot.RemainingAmount;
+        }
+
+        if (total > 0m) await AddToCreditAsync(toOwnerId, companyId, total, ct);
+        return total;
+    }
+
+    private async Task SubtractFromCreditAsync(Guid ownerId, Guid companyId, decimal amount, CancellationToken ct)
+    {
+        var credit = dbContext.OwnerCredits.Local.FirstOrDefault(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId)
+            ?? await dbContext.OwnerCredits.FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct);
+        if (credit is null) return;
+        credit.Amount = decimal.Max(0m, credit.Amount - amount);
+    }
+
+    private async Task AddToCreditAsync(Guid ownerId, Guid companyId, decimal amount, CancellationToken ct)
+    {
+        var credit = dbContext.OwnerCredits.Local.FirstOrDefault(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId)
+            ?? await dbContext.OwnerCredits.FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct);
+        if (credit is null)
+        {
+            credit = new OwnerCredit { CompanyId = companyId, OwnerId = ownerId, Amount = 0m };
+            dbContext.OwnerCredits.Add(credit);
+        }
+
+        credit.Amount += amount;
     }
 
     /// <summary>Consume el monto de los lotes (mas antiguo primero) y registra cada porcion aplicada.

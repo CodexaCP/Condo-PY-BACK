@@ -476,28 +476,38 @@ public class BuildingExpenseCreditNotesController(
                    "Un saldo ya aplicado a un pago no se revierte desde acá.";
         }
 
-        var ownerIds = allocations.Select(a => a.OwnerId).Distinct().ToList();
+        // El saldo lo tiene hoy quien figura en el lote (pudo cambiar el propietario de la unidad despues de acreditarlo). Un lote retenido
+        // (unidad sin propietario principal) no esta en el saldo de nadie.
+        var heldBy = allocations.Where(a => !a.OwnerCreditMovement!.OnHold).GroupBy(a => a.OwnerCreditMovement!.OwnerId).ToList();
+        var ownerIds = heldBy.Select(g => g.Key).ToList();
         var ownerCredits = await dbContext.OwnerCredits
             .Where(x => !x.IsDeleted && x.CompanyId == expense.CompanyId && ownerIds.Contains(x.OwnerId))
             .ToDictionaryAsync(x => x.OwnerId, ct);
 
-        foreach (var group in allocations.GroupBy(a => a.OwnerId))
+        foreach (var group in heldBy)
         {
-            var amount = group.Sum(a => a.Amount);
+            var amount = group.Sum(a => a.OwnerCreditMovement!.Amount);
             if (!ownerCredits.TryGetValue(group.Key, out var credit) || credit.Amount < amount)
                 return "No se puede anular: el saldo a favor del propietario ya no alcanza para devolver lo acreditado.";
         }
 
-        foreach (var group in allocations.GroupBy(a => a.OwnerId))
+        foreach (var a in allocations.Where(a => a.OwnerCreditMovement!.OnHold))
         {
-            var amount = group.Sum(a => a.Amount);
+            var lot = a.OwnerCreditMovement!;
+            lot.RemainingAmount = 0m;
+            OwnerCreditService.AppendDescription(lot, "Anulado: la nota de crédito del proveedor fue anulada.");
+        }
+
+        foreach (var group in heldBy)
+        {
+            var amount = group.Sum(a => a.OwnerCreditMovement!.Amount);
             ownerCredits[group.Key].Amount -= amount;
 
             foreach (var a in group)
             {
                 var lot = a.OwnerCreditMovement!;
                 lot.RemainingAmount = 0m;
-                lot.Description += " Anulado: la nota de crédito del proveedor fue anulada.";
+                OwnerCreditService.AppendDescription(lot, "Anulado: la nota de crédito del proveedor fue anulada.");
             }
 
             var title = "Se anuló un ajuste de un gasto";
@@ -516,8 +526,8 @@ public class BuildingExpenseCreditNotesController(
             CompanyId = companyId,
             RecipientId = recipientId,
             Type = NotificationType.SupplierCreditApplied,
-            Title = title,
-            Body = body,
+            Title = OwnerCreditService.Clip(title, 200),
+            Body = OwnerCreditService.Clip(body, 1000),
             EntityType = "ExpensePeriod",
             EntityId = periodId
         });

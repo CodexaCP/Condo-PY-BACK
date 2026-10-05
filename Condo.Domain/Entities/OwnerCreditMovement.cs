@@ -22,6 +22,9 @@ public class OwnerCreditMovement : CompanyScopedEntity
     // Nota de credito de proveedor sobre un gasto de la que sale este lote, con el edificio y la unidad de origen. Solo trazabilidad:
     // el lote se consume igual que cualquier otro (no se restringe por edificio).
     public Guid? SupplierCreditNoteId { get; set; }
+    // Lote retenido: se dio de baja al propietario principal de la unidad y todavia no hay uno nuevo. No se consume ni cuenta en el saldo
+    // de nadie; al asignar el nuevo propietario principal pasa a el.
+    public bool OnHold { get; set; }
     public Guid? BuildingId { get; set; }
     public Guid? UnitId { get; set; }
     public CreditApplyMode? ApplyMode { get; set; }

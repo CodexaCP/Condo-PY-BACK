@@ -1,6 +1,6 @@
 # Nota de crédito de proveedor sobre un gasto del edificio — Especificación
 
-Estado: **fases 1 y 2 implementadas (2026-10-05)**; fases 4 y 5 pendientes de "procesa" de Tony; la 3 CERRADA sin hacer (decisión de Tony). Ver la sección 15 (estado de implementación).
+Estado: **fases 1, 2 y 4 implementadas (2026-10-05)**; la 5 pendiente de "procesa" de Tony; la 3 CERRADA sin hacer (decisión de Tony). Guía de pruebas manuales: `docs/GUIA_PRUEBAS_NC_PROVEEDOR.md`. Ver la sección 15 (estado de implementación).
 Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel), `CondoPY-APP` (solo aviso al propietario, ya cubierto por las notificaciones).
 
 > **Para quien implemente:** leer la sección 3 (lo que ya existe) y verificar cada punto marcado **[verificar]** antes de tocar código. Los puntos de la sección 12 son decisiones abiertas: preguntarlas, no asumirlas. Commits solo a nombre de Tony, sin `Co-Authored-By` y sin push.
@@ -199,7 +199,7 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 1. **Datos y borrador** — ✅ HECHA (2026-10-05): entidades, migración + script SQL, NC `Netted`, base de reparto neta, conciliación y bloqueo en cerrado. Tests.
 2. **Publicado** — ✅ HECHA (2026-10-05): preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
 3. ~~**Crédito por edificio**~~ — **CERRADA, no se hace** (Tony, 2026-10-05): el saldo a favor va al propietario y se usa como hoy, en cualquier edificio de la empresa. El edificio y la unidad quedan guardados en cada lote solo para trazabilidad.
-4. **Cambio de propietario**: validación de deuda, retención y traspaso de lotes.
+4. **Cambio de propietario** — ✅ HECHA (2026-10-05, sin pruebas automáticas por pedido de Tony; ver la guía de pruebas): validación de deuda, retención y traspaso de lotes.
 5. **Reportes y pantallas**: libro/Excel (solo lo de `Credited`), anexo de liquidación, UI web, aviso en app.
 
 Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla de pagos del más antiguo al más nuevo y "comprobante completo, sin pagos parciales" (memoria `feedback_commits_and_payment_rule`).
@@ -250,3 +250,20 @@ Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla
 - **No cambia** (a propósito): el consumo del saldo a favor; los aportes de reserva y extraordinario del período publicado (se dejan como se cobraron); la mora ya cobrada.
 - **Pendiente para la fase 5**: libro de movimientos / estado de resultados con las NC de período publicado (movimiento negativo con la fecha de la NC) y devolución al fondo de reserva.
 - **Riesgo conocido**: dos NC simultáneas sobre el mismo gasto podrían superar el tope a la vez (sin control de concurrencia en el gasto).
+
+### Fase 4 — hecha (2026-10-05, backend + web; compila sin errores; **sin pruebas automáticas** a pedido de Tony, ver `docs/GUIA_PRUEBAS_NC_PROVEEDOR.md`)
+
+- **Regla** (decisiones de Tony): cambiar de propietario principal exige liquidar antes las deudas de la unidad; el saldo a favor que vino de esa unidad pasa al nuevo propietario principal.
+- **Baja del propietario principal** (`DELETE /api/unit-owners/{id}`):
+  - Si es el **único principal**: se bloquea (400) si la unidad tiene **deuda pendiente** (todo lo pendiente de los períodos publicados, expensas y mora, con la misma cuenta del pago de propietarios: `OwnerCreditService.LoadPendingChargesAsync`). El mensaje dice el monto y los períodos. Defaults asumidos (Tony no respondió): cuenta **todo lo pendiente**, no solo lo vencido.
+  - Si **queda otro principal**: no se exige deuda y el saldo de la unidad pasa **directo** a ese principal (el más antiguo) con aviso.
+  - Un copropietario **no principal**: se quita sin más.
+  - El saldo de la unidad (lotes `Generated` con `UnitId` de la unidad, del propietario saliente, con saldo por usar) queda **retenido**: `OnHold = true`, se descuenta del `OwnerCredit` del saliente y no se consume (`EnsureLotsAsync` los excluye). Todo en la misma transacción que la baja.
+  - Respuesta: 204 como siempre; 200 con `{ heldCredit, transferredCredit }` solo si hubo saldo retenido o traspasado.
+- **Alta del nuevo principal** (`POST /api/unit-owners` con `isPrimary` y sin otro principal): los lotes retenidos de la unidad pasan a él (`OwnerId`, `OnHold = false`), se suman a su `OwnerCredit`, se agrega una nota en la descripción del lote ("Traspasado a … el dd/mm/aaaa") y se le avisa (`SupplierCreditApplied`, entidad `Unit`). La respuesta trae `transferredCredit`.
+- **Lotes sin unidad de origen** (excedentes de pagos o de NC al propietario): **se quedan con el propietario saliente** (default asumido).
+- **Vista previa**: `GET /api/unit-owners/{id}/removal-preview` → `canRemove`, `pendingDebt`, `debtPeriods`, `creditToHold`, `creditToTransfer`, `message`. El web la usa antes de quitar: si hay deuda lo impide con el mensaje; si hay saldo pide confirmación explicando que queda retenido.
+- **Anular una NC con lote retenido o traspasado**: `RevertCredits` resta del saldo de **quien tiene hoy el lote** (no del propietario original de la asignación); un lote retenido solo se pone en 0 (no está en el saldo de nadie).
+- **Migración**: `20261005123940_OwnerCreditMovementOnHold` (+ .sql): columna `OnHold bit NOT NULL DEFAULT 0` en `OwnerCreditMovements`. Va DESPUÉS de las otras tres.
+- **Corrección de la fase 2 incluida**: la referencia (100) y la descripción (500) del lote y el título/cuerpo (200/1000) del aviso se recortan al largo de la columna (`OwnerCreditService.Clip` / `AppendDescription`); antes podían pasarse en SQL Server con proveedor o descripción largos.
+- **Prueba existente tocada**: `MarketplaceHandoverServiceTests` solo cambia el constructor de `UnitOwnersController` (ahora recibe `OwnerCreditService` y `PushDispatcher`).

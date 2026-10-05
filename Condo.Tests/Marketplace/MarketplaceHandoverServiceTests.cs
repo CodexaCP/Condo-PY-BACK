@@ -333,7 +333,7 @@ public class MarketplaceHandoverServiceTests : IDisposable
         var listings = new MarketplaceListingService(db, _h.Tenant, scope, audit);
         var push = new PushDispatcher(db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance);
         var handover = new MarketplaceHandoverService(db, _h.Tenant, scope, audit, push, listings);
-        return new UnitOwnersController(db, _h.Access, new NoSync(), handover, NullLogger<UnitOwnersController>.Instance);
+        return new UnitOwnersController(db, _h.Access, new NoSync(), handover, NullLogger<UnitOwnersController>.Instance, new OwnerCreditService(db), push);
     }
 
     private void LoginAsAdmin()
