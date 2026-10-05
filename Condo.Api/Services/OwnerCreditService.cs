@@ -65,13 +65,14 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
             {
                 p.UnitId,
                 p.Amount,
-                Allocated = p.Allocations.Where(a => !a.IsDeleted).Sum(a => (decimal?)a.AllocatedAmount) ?? 0m
+                // Los montos se traen y se suman en memoria: la suma de decimales no se traduce en todos los proveedores (SQLite de las pruebas).
+                Allocations = p.Allocations.Where(a => !a.IsDeleted).Select(a => a.AllocatedAmount).ToList()
             })
             .ToListAsync(ct);
 
         var unallocatedByUnit = payments
             .GroupBy(p => p.UnitId)
-            .ToDictionary(g => g.Key, g => g.Sum(p => decimal.Max(p.Amount - p.Allocated, 0m)));
+            .ToDictionary(g => g.Key, g => g.Sum(p => decimal.Max(p.Amount - p.Allocations.Sum(), 0m)));
 
         foreach (var unitGroup in charges.GroupBy(c => c.UnitId))
         {
