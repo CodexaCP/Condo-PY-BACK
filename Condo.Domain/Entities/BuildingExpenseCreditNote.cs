@@ -11,9 +11,16 @@ public class BuildingExpenseCreditNote : CompanyScopedEntity
     public Guid BuildingId { get; set; }
     public Guid BuildingExpenseId { get; set; }
     public Guid ExpensePeriodId { get; set; }
+    // Proveedor del documento (copia del gasto al momento de registrarla).
+    public string SupplierName { get; set; } = string.Empty;
     // Numero del documento del proveedor.
     public string Numero { get; set; } = string.Empty;
     public string? Timbrado { get; set; }
+    // Llaves normalizadas (mayusculas, sin acentos, espacios ni guiones) para que una misma nota no se registre dos veces aunque se
+    // escriba distinto: ver BuildingExpenseCreditNoteKeys. Un indice unico las protege entre las notas aplicadas.
+    public string SupplierKey { get; set; } = string.Empty;
+    public string NumeroKey { get; set; } = string.Empty;
+    public string TimbradoKey { get; set; } = string.Empty;
     public DateOnly IssueDate { get; set; }
     public decimal Amount { get; set; }
     public string Reason { get; set; } = string.Empty;

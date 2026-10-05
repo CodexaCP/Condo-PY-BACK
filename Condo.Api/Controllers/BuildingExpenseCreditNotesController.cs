@@ -1,5 +1,6 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
+using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -84,11 +85,16 @@ public class BuildingExpenseCreditNotesController(
                               "Si el proveedor anuló el gasto completo, eliminá el gasto.");
         }
 
-        var duplicated = await dbContext.BuildingExpenseCreditNotes.AsNoTracking().AnyAsync(
-            x => !x.IsDeleted && x.Status == BuildingExpenseCreditNoteStatus.Applied && x.BuildingId == expense.BuildingId
-                 && x.Numero == numero && x.BuildingExpense!.SupplierName == expense.SupplierName, cancellationToken);
-        if (duplicated)
-            return Conflict("Ya hay una nota de crédito de este proveedor con ese número en el edificio.");
+        // Una misma nota (proveedor + numero, y timbrado si se carga) no se registra dos veces: el control mira toda la empresa (la
+        // nota puede haberse cargado en otro gasto u otro edificio) y reconoce el numero aunque se escriba distinto.
+        var supplierKey = BuildingExpenseCreditNoteKeys.Normalize(expense.SupplierName);
+        var numeroKey = BuildingExpenseCreditNoteKeys.Normalize(numero);
+        var timbradoKey = BuildingExpenseCreditNoteKeys.Normalize(timbrado);
+        if (numeroKey.Length == 0)
+            return BadRequest("El número de la nota de crédito no es válido.");
+
+        var existing = await FindDuplicateAsync(expense.CompanyId, supplierKey, timbradoKey, numeroKey, cancellationToken);
+        if (existing is not null) return Conflict(DuplicateMessage(existing));
 
         expense.OriginalAmount ??= expense.Amount;
         expense.Amount -= amount;
@@ -99,6 +105,10 @@ public class BuildingExpenseCreditNotesController(
             BuildingId = expense.BuildingId,
             BuildingExpenseId = expense.Id,
             ExpensePeriodId = expense.ExpensePeriodId,
+            SupplierName = expense.SupplierName,
+            SupplierKey = supplierKey,
+            NumeroKey = numeroKey,
+            TimbradoKey = timbradoKey,
             Numero = numero,
             Timbrado = timbrado,
             IssueDate = request.IssueDate,
@@ -110,7 +120,17 @@ public class BuildingExpenseCreditNotesController(
             CreatedByUserId = tenantContext.UserId
         };
         dbContext.BuildingExpenseCreditNotes.Add(note);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Otra persona la registro justo ahora: el indice unico de la base la rechazo.
+            var raced = await FindDuplicateAsync(expense.CompanyId, supplierKey, timbradoKey, numeroKey, cancellationToken);
+            if (raced is null) throw;
+            return Conflict(DuplicateMessage(raced));
+        }
 
         return Ok(await BuildResultAsync(note, expense, period, cancellationToken));
     }
@@ -158,6 +178,25 @@ public class BuildingExpenseCreditNotesController(
         return Ok(await BuildResultAsync(note, expense, period, cancellationToken));
     }
 
+    private sealed record DuplicateInfo(string Numero, string SupplierName, DateOnly IssueDate, string ExpenseDescription, string BuildingName);
+
+    // Misma nota aplicada: mismo proveedor y numero, y mismo timbrado (si alguna de las dos no lo trae, no se puede distinguir por
+    // timbrado y se considera la misma).
+    private async Task<DuplicateInfo?> FindDuplicateAsync(
+        Guid companyId, string supplierKey, string timbradoKey, string numeroKey, CancellationToken cancellationToken) =>
+        await dbContext.BuildingExpenseCreditNotes.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Status == BuildingExpenseCreditNoteStatus.Applied && x.CompanyId == companyId
+                        && x.SupplierKey == supplierKey && x.NumeroKey == numeroKey
+                        && (x.TimbradoKey == timbradoKey || x.TimbradoKey == "" || timbradoKey == ""))
+            .Select(x => new DuplicateInfo(x.Numero, x.SupplierName, x.IssueDate,
+                x.BuildingExpense != null ? x.BuildingExpense.Description : string.Empty,
+                x.Building != null ? x.Building.Name : string.Empty))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    private static string DuplicateMessage(DuplicateInfo d) =>
+        $"Esta nota de crédito ya está registrada: NC {d.Numero} de {d.SupplierName}, del {d.IssueDate:dd/MM/yyyy} " +
+        $"(gasto «{d.ExpenseDescription}», {d.BuildingName}). No se puede registrar dos veces.";
+
     // Solo con el periodo en borrador: es la unica etapa en la que el gasto se puede cambiar y la liquidacion recalcular.
     private static string? PeriodStatusError(ExpensePeriodStatus status) => status switch
     {
@@ -203,6 +242,7 @@ public class BuildingExpenseCreditNotesController(
         BuildingId = x.BuildingId,
         BuildingExpenseId = x.BuildingExpenseId,
         ExpensePeriodId = x.ExpensePeriodId,
+        SupplierName = x.SupplierName,
         Numero = x.Numero,
         Timbrado = x.Timbrado,
         IssueDate = x.IssueDate,

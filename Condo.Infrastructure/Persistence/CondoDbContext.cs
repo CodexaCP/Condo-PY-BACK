@@ -242,6 +242,15 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
 
         // ── Nota de credito del proveedor sobre un gasto ──────────────────────
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.SupplierKey).HasMaxLength(200);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.NumeroKey).HasMaxLength(50);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.TimbradoKey).HasMaxLength(20);
+        // Una misma nota (proveedor + timbrado + numero) no puede estar aplicada dos veces en la empresa. Anulada se puede volver a registrar.
+        modelBuilder.Entity<BuildingExpenseCreditNote>()
+            .HasIndex(x => new { x.CompanyId, x.SupplierKey, x.TimbradoKey, x.NumeroKey })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Status] = 'Applied'");
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Numero).HasMaxLength(50);
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Timbrado).HasMaxLength(20);
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Reason).HasMaxLength(500);

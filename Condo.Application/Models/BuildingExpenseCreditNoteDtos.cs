@@ -25,6 +25,7 @@ public class BuildingExpenseCreditNoteDto
     public Guid BuildingId { get; set; }
     public Guid BuildingExpenseId { get; set; }
     public Guid ExpensePeriodId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
     public string Numero { get; set; } = string.Empty;
     public string? Timbrado { get; set; }
     public DateOnly IssueDate { get; set; }

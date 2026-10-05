@@ -424,4 +424,144 @@ public class BuildingExpenseCreditNotesTests : IDisposable
         Assert.Equal(1_000_000m, dto.OriginalAmount);
         Assert.Equal(0m, dto.CreditedAmount);
     }
+
+    // ── Una misma nota no puede existir dos veces ─────────────────────────────
+
+    private BuildingExpense AddExpenseOf(string supplier, Building? building = null, ExpensePeriod? period = null, decimal amount = 1_000_000m)
+    {
+        var b = building ?? _env.Building;
+        var expense = new BuildingExpense
+        {
+            CompanyId = _env.Company.Id, BuildingId = b.Id, ExpensePeriodId = (period ?? _env.Period).Id,
+            Category = BuildingExpenseCategory.Other, SupplierName = supplier, Description = $"Gasto de {supplier}",
+            ExpenseDate = new DateOnly(2026, 10, 3), Amount = amount
+        };
+        _env.T.Db.BuildingExpenses.Add(expense);
+        _env.T.Db.SaveChanges();
+        return expense;
+    }
+
+    [Theory]
+    [InlineData("001 001 0000123")]
+    [InlineData("0010010000123")]
+    [InlineData("001.001.0000123")]
+    [InlineData(" 001-001-0000123 ")]
+    public async Task ElMismoNumeroEscritoDistintoEsLaMismaNota(string otraForma)
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+        FinanceEnv.Ok(await Create(expense, Req(100_000m, "001-001-0000123")));
+
+        var again = await Create(expense, Req(100_000m, otraForma));
+
+        var conflict = Assert.IsType<ConflictObjectResult>(again.Result);
+        Assert.Contains("ya está registrada", (string)conflict.Value!);
+        Assert.Contains("No se puede registrar dos veces", (string)conflict.Value!);
+        Assert.Equal(900_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == expense.Id).Amount);
+        Assert.Single(_env.T.NewContext().BuildingExpenseCreditNotes);
+    }
+
+    [Fact]
+    public async Task ElProveedorSeReconoceAunqueSeEscribaDistinto()
+    {
+        var first = AddExpenseOf("Ferretería López S.A.");
+        var second = AddExpenseOf("FERRETERIA LOPEZ SA");
+        FinanceEnv.Ok(await Create(first, Req(100_000m, "NC-55")));
+
+        Assert.IsType<ConflictObjectResult>((await Create(second, Req(50_000m, "NC-55"))).Result);
+        Assert.Equal(1_000_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == second.Id).Amount);
+    }
+
+    [Fact]
+    public async Task LaMismaNotaNoSePuedeCargarEnOtroGastoNiEnOtroEdificioDeLaEmpresa()
+    {
+        var other = _env.T.AddBuilding(_env.Company, "Otro edificio");
+        var otherPeriod = new ExpensePeriod
+        {
+            CompanyId = _env.Company.Id, BuildingId = other.Id, Year = 2026, Month = 10, Name = "Octubre 2026",
+            StartDate = new DateOnly(2026, 10, 1), EndDate = new DateOnly(2026, 10, 31), DueDate = new DateOnly(2026, 11, 10)
+        };
+        _env.T.Db.ExpensePeriods.Add(otherPeriod);
+        _env.T.Db.SaveChanges();
+        var here = AddExpenseOf("Proveedor Común");
+        var there = AddExpenseOf("Proveedor Común", other, otherPeriod);
+        FinanceEnv.Ok(await Create(here, Req(100_000m, "NC-9")));
+
+        var again = await Create(there, Req(100_000m, "NC-9"));
+
+        var conflict = Assert.IsType<ConflictObjectResult>(again.Result);
+        Assert.Contains(_env.Building.Name, (string)conflict.Value!); // dice donde ya esta registrada
+        Assert.Equal(1_000_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == there.Id).Amount);
+    }
+
+    [Fact]
+    public async Task OtroProveedorPuedeTenerElMismoNumero()
+    {
+        var a = AddExpenseOf("Proveedor A");
+        var b = AddExpenseOf("Proveedor B");
+        FinanceEnv.Ok(await Create(a, Req(100_000m, "NC-1")));
+
+        FinanceEnv.Ok(await Create(b, Req(100_000m, "NC-1")));
+
+        Assert.Equal(2, _env.T.NewContext().BuildingExpenseCreditNotes.Count());
+    }
+
+    [Fact]
+    public async Task ElTimbradoDistingueNotasConElMismoNumero()
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+        var first = Req(100_000m, "NC-1");
+        first.Timbrado = "12345678";
+        FinanceEnv.Ok(await Create(expense, first));
+
+        var sameTimbrado = Req(10_000m, "NC-1");
+        sameTimbrado.Timbrado = "1234 5678";
+        Assert.IsType<ConflictObjectResult>((await Create(expense, sameTimbrado)).Result);
+
+        var otherTimbrado = Req(10_000m, "NC-1");
+        otherTimbrado.Timbrado = "99999999";
+        FinanceEnv.Ok(await Create(expense, otherTimbrado)); // otro timbrado: otra nota (la numeracion se reinicia)
+
+        var noTimbrado = Req(10_000m, "NC-1");
+        Assert.IsType<ConflictObjectResult>((await Create(expense, noTimbrado)).Result); // sin timbrado no se puede distinguir
+    }
+
+    [Fact]
+    public async Task UnaNotaAnuladaSePuedeVolverARegistrar()
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+        var created = FinanceEnv.Ok(await Create(expense, Req(100_000m, "NC-1")));
+        FinanceEnv.Ok(await _api.Void(created.CreditNote.Id, new VoidBuildingExpenseCreditNoteRequest { Reason = "Monto mal cargado" }, default));
+
+        var again = FinanceEnv.Ok(await Create(expense, Req(150_000m, "NC-1")));
+
+        Assert.Equal(850_000m, again.Expense.Amount);
+    }
+
+    [Fact]
+    public async Task UnNumeroSoloDeSimbolosNoEsValido()
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+
+        Assert.Contains("número", FinanceEnv.BadRequestText(await Create(expense, Req(100_000m, "---"))));
+    }
+
+    [Fact]
+    public async Task LaBaseTambienLoGarantiza_NoHayDosNotasAplicadasIguales()
+    {
+        var expense = _env.AddExpense(null, 1_000_000m);
+        FinanceEnv.Ok(await Create(expense, Req(100_000m, "NC-1")));
+        var original = _env.T.NewContext().BuildingExpenseCreditNotes.Single();
+
+        // Salteando la validacion del controlador (por ejemplo, dos personas guardando a la vez).
+        using var db = _env.T.NewContext();
+        db.BuildingExpenseCreditNotes.Add(new BuildingExpenseCreditNote
+        {
+            CompanyId = original.CompanyId, BuildingId = original.BuildingId, BuildingExpenseId = original.BuildingExpenseId,
+            ExpensePeriodId = original.ExpensePeriodId, SupplierName = original.SupplierName, SupplierKey = original.SupplierKey,
+            NumeroKey = original.NumeroKey, TimbradoKey = original.TimbradoKey, Numero = "NC-1", IssueDate = original.IssueDate,
+            Amount = 1m, Reason = "x", CreatedByUserId = original.CreatedByUserId
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
 }
