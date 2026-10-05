@@ -205,11 +205,15 @@ public class AdCampaignsController(
         campaign.IsActive          = req.IsActive;
         campaign.NotifyBeforeExpiry = req.NotifyBeforeExpiry;
 
-        // Sync buildings: replace all
-        dbContext.AdCampaignBuildings.RemoveRange(campaign.Buildings);
-        campaign.Buildings = req.BuildingIds
-            .Select(bid => new AdCampaignBuilding { AdCampaignId = id, BuildingId = bid })
-            .ToList();
+        // Edificios: se quitan los que ya no están y se agregan los nuevos; los que siguen no se tocan.
+        // Las filas nuevas se agregan por el DbSet (no asignando la colección): como el Id ya viene generado, EF las
+        // tomaría por filas existentes y trataría de actualizarlas, y el guardado fallaba.
+        var wanted = req.BuildingIds.ToHashSet();
+        var current = campaign.Buildings.Select(b => b.BuildingId).ToHashSet();
+
+        dbContext.AdCampaignBuildings.RemoveRange(campaign.Buildings.Where(b => !wanted.Contains(b.BuildingId)).ToList());
+        foreach (var buildingId in wanted.Where(b => !current.Contains(b)))
+            dbContext.AdCampaignBuildings.Add(new AdCampaignBuilding { AdCampaignId = id, BuildingId = buildingId });
 
         await dbContext.SaveChangesAsync(ct);
 
