@@ -1,6 +1,6 @@
 # Nota de crédito de proveedor sobre un gasto del edificio — Especificación
 
-Estado: **fase 1 implementada (2026-10-05)**; fases 2 en adelante pendientes de "procesa" de Tony. Ver la sección 15 (estado de implementación).
+Estado: **fases 1 y 2 implementadas (2026-10-05)**; fases 4 y 5 pendientes de "procesa" de Tony; la 3 en pausa. Ver la sección 15 (estado de implementación).
 Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel), `CondoPY-APP` (solo aviso al propietario, ya cubierto por las notificaciones).
 
 > **Para quien implemente:** leer la sección 3 (lo que ya existe) y verificar cada punto marcado **[verificar]** antes de tocar código. Los puntos de la sección 12 son decisiones abiertas: preguntarlas, no asumirlas. Commits solo a nombre de Tony, sin `Co-Authored-By` y sin push.
@@ -197,7 +197,7 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 ## 13. Fases sugeridas
 
 1. **Datos y borrador** — ✅ HECHA (2026-10-05): entidades, migración + script SQL, NC `Netted`, base de reparto neta, conciliación y bloqueo en cerrado. Tests.
-2. **Publicado**: preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
+2. **Publicado** — ✅ HECHA (2026-10-05): preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
 3. ~~**Crédito por edificio**~~ — **en pausa**: pregunta pendiente (sección 12, punto 8). No hacer sin que Tony lo confirme.
 4. **Cambio de propietario**: validación de deuda, retención y traspaso de lotes.
 5. **Reportes y pantallas**: libro/Excel (solo lo de `Credited`), anexo de liquidación, UI web, aviso en app.
@@ -233,3 +233,20 @@ Cada fase compila limpio y se commitea por separado como Tony. Respetar la regla
 - **Formulario web (hecho)**: en Gastos y cargos › Gastos, cada gasto tiene el botón "Notas de crédito del proveedor" (ícono de menos). Abre una ventana con el resumen (facturado / NC aplicadas / monto que se reparte), las notas registradas (con enlace al documento y botón Anular con motivo) y el formulario: número, timbrado, fecha de emisión, monto, motivo y adjunto. Con el período cerrado o publicado la ventana solo muestra la lista y el aviso correspondiente. La fila del gasto muestra "facturado − NC" cuando tiene notas. Componente: `building-expense-credit-notes-dialog.component.ts` en el WEB.
 - **No hecho en fase 1 (a propósito)**: notificaciones, reparto del periodo publicado, cambio de propietario.
 - **Riesgo conocido**: dos NC simultáneas sobre el mismo gasto podrían pisarse (no hay control de concurrencia en `BuildingExpense`); es una operación manual poco frecuente.
+
+### Fase 2 — hecha (2026-10-05, backend + formulario web; suite completa 756/756)
+
+- **Período publicado**: `POST /api/building-expenses/{id}/credit-notes` crea la NC con `Mode = Credited`. No cambia `Amount` del gasto (ya está repartido y cobrado) ni toca comprobantes, cargos, mora ni facturas.
+- **Reparto**: se prorratea sobre lo realmente cobrado de ese gasto a cada unidad (`ExpenseCharge.SourceBuildingExpenseId`, sin reversos), con tope en lo que le queda por acreditar a cada unidad. La suma de los créditos es exactamente el monto de la NC (el centavo de redondeo va a la unidad con más margen). Dos NC del mismo gasto se reparten con la misma proporción.
+- **Tope**: lo ya acreditado por NC de período publicado + la nueva ≤ monto del gasto (se puede acreditar el gasto completo, no más).
+- **Saldo a favor**: un lote por unidad (`OwnerCreditMovement`, `Kind = Generated`, con `SupplierCreditNoteId`, `BuildingId` y `UnitId` solo de trazabilidad) y suma al `OwnerCredit` del **propietario principal**. **Se consume exactamente como hoy** (decisión de Tony): el flujo de pagos no se tocó. Un propietario con varias unidades en la misma NC recibe un solo saldo (y un solo aviso con la suma).
+- **Unidad sin propietario principal**: se rechaza toda la NC con la lista de unidades ("asignalas al dueño del edificio si no se vendieron"); no se guarda nada.
+- **Gastos que no se reparten** (pagado por el fondo de reserva, no distribuido): la NC se registra sin saldo a favor (el efecto en el libro queda para la fase 5).
+- **Vista previa**: `POST /api/building-expenses/{id}/credit-notes/preview` { amount } — en borrador dice cómo queda el gasto; en publicado devuelve el reparto por unidad (unidad, propietario, cobrado, saldo a favor), las unidades sin propietario y un mensaje. No guarda nada.
+- **Aviso al propietario**: nuevo `NotificationType.SupplierCreditApplied = 38` (bandeja + push). Entidad `ExpensePeriod`: en la app abre el estado de cuenta del período. También se avisa al anular. **Falta** sumarlo a `notification-visuals.ts` y al tipo `NotificationType` de `core/models.ts` en la APP (hoy se ve con el ícono genérico): se hace en la rama de la app donde viven las notificaciones (feature/marketplace); el web ya lo tiene.
+- **Anular una NC de período publicado**: solo si todos sus lotes siguen sin consumir y el saldo del propietario alcanza; quita el saldo (lote en 0 y resta del `OwnerCredit`) y avisa. Si ya se usó parte, 400 con la unidad ("un saldo ya aplicado a un pago no se revierte desde acá"). Una NC de borrador ya publicada no se anula (ya se tuvo en cuenta en la liquidación).
+- **Migración**: `20261005121441_BuildingExpenseCreditNoteAllocations` (+ .sql): tabla `BuildingExpenseCreditNoteAllocations` y columnas `BuildingId`, `UnitId`, `SupplierCreditNoteId` en `OwnerCreditMovements`. Va DESPUÉS de las dos anteriores.
+- **Web**: con el período publicado, la ventana de notas de crédito muestra el formulario con un paso de **"Ver reparto por unidad"** (tabla con propietario, cobrado y saldo a favor; las unidades sin propietario salen en rojo y bloquean la confirmación) y luego **"Confirmar y acreditar saldo a favor"**. La lista de notas muestra a quién se acreditó cada parte.
+- **No cambia** (a propósito): el consumo del saldo a favor; los aportes de reserva y extraordinario del período publicado (se dejan como se cobraron); la mora ya cobrada.
+- **Pendiente para la fase 5**: libro de movimientos / estado de resultados con las NC de período publicado (movimiento negativo con la fecha de la NC) y devolución al fondo de reserva.
+- **Riesgo conocido**: dos NC simultáneas sobre el mismo gasto podrían superar el tope a la vez (sin control de concurrencia en el gasto).
