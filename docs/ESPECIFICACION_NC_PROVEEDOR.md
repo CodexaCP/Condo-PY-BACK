@@ -1,6 +1,6 @@
 # Nota de crédito de proveedor sobre un gasto del edificio — Especificación
 
-Estado: **fases 1 y 2 implementadas (2026-10-05)**; fases 4 y 5 pendientes de "procesa" de Tony; la 3 en pausa. Ver la sección 15 (estado de implementación).
+Estado: **fases 1 y 2 implementadas (2026-10-05)**; fases 4 y 5 pendientes de "procesa" de Tony; la 3 CERRADA sin hacer (decisión de Tony). Ver la sección 15 (estado de implementación).
 Repos: `Condo-PY-BACK` (API .NET), `Condo-PY-WEB` (panel), `CondoPY-APP` (solo aviso al propietario, ya cubierto por las notificaciones).
 
 > **Para quien implemente:** leer la sección 3 (lo que ya existe) y verificar cada punto marcado **[verificar]** antes de tocar código. Los puntos de la sección 12 son decisiones abiertas: preguntarlas, no asumirlas. Commits solo a nombre de Tony, sin `Co-Authored-By` y sin push.
@@ -184,7 +184,7 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 
 ## 12. Decisiones abiertas
 
-8. **(PENDIENTE — Tony la dejó como pregunta)** ¿El saldo a favor de una NC de proveedor solo debe usarse en el edificio de origen, o en cualquier edificio de la empresa como hoy? Por ahora se consume **como hoy** (cualquier edificio de la empresa). Si algún día se decide restringirlo, ver la sección 6.
+8. **CERRADA (Tony, 2026-10-05):** el saldo a favor de una NC de proveedor se consume **como hoy** (cualquier edificio de la empresa). No se restringe por edificio. Si algún día cambia, ver la sección 6.
 
 1. **Fiscal**: la factura al propietario sigue por el monto original y el ajuste llega como crédito. **Confirmar con el contador** si corresponde NC fiscal al propietario (el sistema ya sabe emitirla con `CreditNote`) o basta el registro interno.
 2. **Mora ya cobrada**: por defecto **no se recalcula**. Confirmar.
@@ -198,7 +198,7 @@ Solo el aviso `SupplierCreditApplied` (banner y push ya funcionan) y que el prop
 
 1. **Datos y borrador** — ✅ HECHA (2026-10-05): entidades, migración + script SQL, NC `Netted`, base de reparto neta, conciliación y bloqueo en cerrado. Tests.
 2. **Publicado** — ✅ HECHA (2026-10-05): preview + reparto + lotes de saldo a favor (con `BuildingId`/`UnitId` solo de trazabilidad) + notificación + anular. El consumo del saldo NO cambia.
-3. ~~**Crédito por edificio**~~ — **en pausa**: pregunta pendiente (sección 12, punto 8). No hacer sin que Tony lo confirme.
+3. ~~**Crédito por edificio**~~ — **CERRADA, no se hace** (Tony, 2026-10-05): el saldo a favor va al propietario y se usa como hoy, en cualquier edificio de la empresa. El edificio y la unidad quedan guardados en cada lote solo para trazabilidad.
 4. **Cambio de propietario**: validación de deuda, retención y traspaso de lotes.
 5. **Reportes y pantallas**: libro/Excel (solo lo de `Credited`), anexo de liquidación, UI web, aviso en app.
 
