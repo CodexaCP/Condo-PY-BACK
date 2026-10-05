@@ -19,6 +19,11 @@ public class OwnerCreditMovement : CompanyScopedEntity
     public Guid? CreditNoteId { get; set; }
     // Reserva del marketplace de la que sale este lote de saldo (un solo lote por reserva).
     public Guid? MarketplaceReservationId { get; set; }
+    // Nota de credito de proveedor sobre un gasto de la que sale este lote, con el edificio y la unidad de origen. Solo trazabilidad:
+    // el lote se consume igual que cualquier otro (no se restringe por edificio).
+    public Guid? SupplierCreditNoteId { get; set; }
+    public Guid? BuildingId { get; set; }
+    public Guid? UnitId { get; set; }
     public CreditApplyMode? ApplyMode { get; set; }
     public Guid? PaymentId { get; set; }
     public Guid? ExpenseChargeId { get; set; }

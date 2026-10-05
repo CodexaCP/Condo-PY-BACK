@@ -37,4 +37,5 @@ public class BuildingExpenseCreditNote : CompanyScopedEntity
     public Building? Building { get; set; }
     public BuildingExpense? BuildingExpense { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
+    public ICollection<BuildingExpenseCreditNoteAllocation> Allocations { get; set; } = new List<BuildingExpenseCreditNoteAllocation>();
 }

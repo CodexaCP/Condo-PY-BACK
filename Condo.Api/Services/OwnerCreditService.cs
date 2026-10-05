@@ -266,6 +266,46 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
         });
     }
 
+    /// <summary>
+    /// Saldo a favor por una nota de credito del PROVEEDOR sobre un gasto de un periodo ya publicado: la parte que le toco a la unidad.
+    /// Suma al OwnerCredit del propietario y registra un lote con el proveedor y el numero de la nota como referencia; el edificio y la
+    /// unidad quedan solo como trazabilidad (el lote se consume como cualquier otro). No guarda: lo hace quien llama.
+    /// </summary>
+    public async Task<OwnerCreditMovement> AddSupplierCreditLotAsync(
+        Guid ownerId, Guid companyId, decimal amount, Guid supplierCreditNoteId, Guid buildingId, Guid unitId,
+        string reference, string description, CancellationToken ct)
+    {
+        // Un propietario con varias unidades en la misma nota: el saldo recien creado aun no esta guardado, se busca primero ahi.
+        var credit = dbContext.OwnerCredits.Local
+                .FirstOrDefault(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId)
+            ?? await dbContext.OwnerCredits
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct);
+
+        if (credit is null)
+        {
+            credit = new OwnerCredit { CompanyId = companyId, OwnerId = ownerId, Amount = 0 };
+            dbContext.OwnerCredits.Add(credit);
+        }
+
+        credit.Amount += amount;
+
+        var lot = new OwnerCreditMovement
+        {
+            CompanyId = companyId,
+            OwnerId = ownerId,
+            Kind = OwnerCreditMovementKind.Generated,
+            Amount = amount,
+            RemainingAmount = amount,
+            SourceReference = reference,
+            SupplierCreditNoteId = supplierCreditNoteId,
+            BuildingId = buildingId,
+            UnitId = unitId,
+            Description = description
+        };
+        dbContext.OwnerCreditMovements.Add(lot);
+        return lot;
+    }
+
     /// <summary>Consume el monto de los lotes (mas antiguo primero) y registra cada porcion aplicada.
     /// chargeId es null cuando el credito cubre un comprobante completo (varios cargos a la vez).</summary>
     public List<(string? Reference, decimal Amount)> ConsumeLots(

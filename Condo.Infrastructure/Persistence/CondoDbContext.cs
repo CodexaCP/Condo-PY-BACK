@@ -16,6 +16,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Building> Buildings => Set<Building>();
     public DbSet<BuildingExpense> BuildingExpenses => Set<BuildingExpense>();
     public DbSet<BuildingExpenseCreditNote> BuildingExpenseCreditNotes => Set<BuildingExpenseCreditNote>();
+    public DbSet<BuildingExpenseCreditNoteAllocation> BuildingExpenseCreditNoteAllocations => Set<BuildingExpenseCreditNoteAllocation>();
     public DbSet<RecurringBuildingExpense> RecurringBuildingExpenses => Set<RecurringBuildingExpense>();
     public DbSet<BuildingIncome> BuildingIncomes => Set<BuildingIncome>();
     public DbSet<ExpenseCharge> ExpenseCharges => Set<ExpenseCharge>();
@@ -268,6 +269,22 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.BuildingExpense).WithMany(x => x.CreditNotes).HasForeignKey(x => x.BuildingExpenseId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BuildingExpenseCreditNote>()
             .HasOne(x => x.ExpensePeriod).WithMany().HasForeignKey(x => x.ExpensePeriodId).OnDelete(DeleteBehavior.Restrict);
+
+        // Reparto por unidad de una nota de credito de proveedor sobre un periodo publicado.
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>().HasIndex(x => x.CreditNoteId);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>().HasIndex(x => x.UnitId);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>().HasIndex(x => x.OwnerCreditMovementId);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne(x => x.CreditNote).WithMany(x => x.Allocations).HasForeignKey(x => x.CreditNoteId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne(x => x.Unit).WithMany().HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne(x => x.OwnerCreditMovement).WithMany().HasForeignKey(x => x.OwnerCreditMovementId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
 
         // ── RecurringBuildingExpense ───────────────────────────────────────────
         modelBuilder.Entity<RecurringBuildingExpense>()

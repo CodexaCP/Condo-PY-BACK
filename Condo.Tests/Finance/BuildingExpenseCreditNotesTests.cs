@@ -8,19 +8,24 @@ using Condo.Tests.Support;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Condo.Tests.Finance;
 
 /// <summary>Nota de credito del proveedor sobre un gasto, fase 1: periodo en borrador (baja el gasto), cerrado y publicado (se rechaza).</summary>
-public class BuildingExpenseCreditNotesTests : IDisposable
+public partial class BuildingExpenseCreditNotesTests : IDisposable
 {
     private readonly FinanceEnv _env = new();
     private readonly BuildingExpenseCreditNotesController _api;
 
     public BuildingExpenseCreditNotesTests()
     {
-        _api = new BuildingExpenseCreditNotesController(_env.T.Db, _env.Access, _env.Tenant);
+        _api = Controller(_env.Access, _env.Tenant);
     }
+
+    private BuildingExpenseCreditNotesController Controller(FakeAccessScope access, FakeTenantContext tenant) => new(
+        _env.T.Db, access, tenant, new OwnerCreditService(_env.T.Db),
+        new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance));
 
     public void Dispose() => _env.Dispose();
 
@@ -48,7 +53,7 @@ public class BuildingExpenseCreditNotesTests : IDisposable
         var tenant = new FakeTenantContext { CompanyId = _env.Company.Id, Role = role };
         var access = new FakeAccessScope(tenant);
         foreach (var b in buildings) access.Buildings.Add(b);
-        return new BuildingExpenseCreditNotesController(_env.T.Db, access, tenant);
+        return Controller(access, tenant);
     }
 
     private BuildingExpensesController Expenses() => new(
@@ -242,19 +247,6 @@ public class BuildingExpenseCreditNotesTests : IDisposable
         Assert.Contains("cerrado", text);
         Assert.Contains("Anulá la liquidación", text);
         Assert.Equal(1_000_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == expense.Id).Amount);
-    }
-
-    [Fact]
-    public async Task ConElPeriodoPublicado_AunNoSePermite()
-    {
-        var expense = _env.AddExpense(null, 1_000_000m);
-        SetPeriodStatus(ExpensePeriodStatus.Published);
-
-        var text = FinanceEnv.BadRequestText(await Create(expense, Req(100_000m)));
-
-        Assert.Contains("publicado", text);
-        Assert.Equal(1_000_000m, _env.T.NewContext().BuildingExpenses.Single(x => x.Id == expense.Id).Amount);
-        Assert.Empty(_env.T.NewContext().BuildingExpenseCreditNotes);
     }
 
     // ── Anular ────────────────────────────────────────────────────────────────
