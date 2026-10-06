@@ -142,7 +142,7 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
 
         var paymentsQuery = dbContext.Payments
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriod != null && x.ExpensePeriod.Status != ExpensePeriodStatus.Draft);
+            .Where(x => !x.IsDeleted && !x.IsReversed && x.ExpensePeriod != null && x.ExpensePeriod.Status != ExpensePeriodStatus.Draft);
 
         if (!accessScope.IsSuperAdmin)
         {
