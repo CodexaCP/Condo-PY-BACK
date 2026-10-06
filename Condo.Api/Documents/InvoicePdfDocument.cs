@@ -309,8 +309,12 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         // la casilla del documento con su propio titulo. Sin tipo guardado (facturas viejas) se adivina: con guion es RUC (8540611-2).
         var type = invoice.ClienteTipoDocumento?.Trim();
         var hasType = !string.IsNullOrEmpty(type);
-        var isRuc = hasType ? string.Equals(type, "RUC", StringComparison.OrdinalIgnoreCase) : document.Contains('-');
-        var isOtherDocument = hasType && !isRuc && !string.Equals(type, "CedulaParaguaya", StringComparison.OrdinalIgnoreCase);
+        // Una cedula nunca lleva guion: un documento con guion cargado como cedula (datos viejos) es en realidad un RUC.
+        var isCedulaType = hasType && string.Equals(type, "CedulaParaguaya", StringComparison.OrdinalIgnoreCase);
+        var isRuc = hasType
+            ? string.Equals(type, "RUC", StringComparison.OrdinalIgnoreCase) || (isCedulaType && document.Contains('-'))
+            : document.Contains('-');
+        var isOtherDocument = hasType && !isRuc && !isCedulaType;
 
         Text(l, 45, 645, 8.5f, "FECHA DE EMISION:", color: p.Label, key: "fechaLabel", label: true);
         Text(l, 148, 645, 8.5f, DateInWords(date), bold: true, width: 160, key: "fechaEmision");

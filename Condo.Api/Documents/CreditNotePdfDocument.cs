@@ -330,8 +330,13 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
     {
         var value = (document ?? string.Empty).Trim();
         if (value.Length == 0) return (null, null);
+        // Una cedula nunca lleva guion: con guion y tipo cedula (datos viejos) es un RUC.
         if (!string.IsNullOrWhiteSpace(type))
-            return string.Equals(type.Trim(), "RUC", StringComparison.OrdinalIgnoreCase) ? (null, value) : (value, null);
+        {
+            var isRuc = string.Equals(type.Trim(), "RUC", StringComparison.OrdinalIgnoreCase)
+                        || (string.Equals(type.Trim(), "CedulaParaguaya", StringComparison.OrdinalIgnoreCase) && value.Contains('-'));
+            return isRuc ? (null, value) : (value, null);
+        }
         return value.Contains('-') ? (null, value) : (value, null);
     }
 

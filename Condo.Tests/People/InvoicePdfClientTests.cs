@@ -47,6 +47,7 @@ public class InvoicePdfClientTests
     [InlineData("RUC", "80012345-0")]
     [InlineData("Pasaporte", "AB-123456")]
     [InlineData("DocumentoExtranjero", "X123456")]
+    [InlineData("CedulaParaguaya", "8000000-0")]
     [InlineData(null, "80012345-0")]
     public void La_factura_se_genera_con_cada_tipo_de_documento(string? type, string document)
     {
