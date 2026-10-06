@@ -178,6 +178,8 @@ public class InvoiceLedgerRowDto
     public string UnitCode { get; set; } = string.Empty;
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
+    // true = el cliente se completo despues, con el propietario vigente al migrar (no es necesariamente el de la emision).
+    public bool ClienteReconstruido { get; set; }
 
     // Comprobante (unidad + periodo) y liquidacion
     public Guid ExpensePeriodId { get; set; }
@@ -266,4 +268,15 @@ public class InvoiceFunnelPaymentItemDto
     public decimal Amount { get; set; }
     public DateOnly PaymentDate { get; set; }
     public string Reference { get; set; } = string.Empty;
+}
+
+// Cliente de una factura despues de actualizarlo con los datos actuales del propietario.
+public class InvoiceClientDto
+{
+    public string? ClienteNombre { get; set; }
+    public string? ClienteDocumento { get; set; }
+    public string? ClienteTipoDocumento { get; set; }
+    public string? ClienteDireccion { get; set; }
+    public string? ClienteEmail { get; set; }
+    public bool ClienteReconstruido { get; set; }
 }

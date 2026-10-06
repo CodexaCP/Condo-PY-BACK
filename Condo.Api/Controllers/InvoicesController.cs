@@ -254,7 +254,7 @@ public class InvoicesController(
             {
                 x.Id, x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.CreatedAtUtc,
-                x.ClientName, x.ClientDocument,
+                x.ClientName, x.ClientDocument, x.ClientReconstructed,
                 x.OwnerPaymentId, x.PaymentId, x.UnitId, x.BuildingId, x.CompanyId,
                 BuildingName = x.Building != null ? x.Building.Name : string.Empty,
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
@@ -331,7 +331,7 @@ public class InvoicesController(
                 SeriesRazonSocial = r.SeriesRazonSocial, SeriesRuc = r.SeriesRuc, SeriesNumeroTimbrado = r.SeriesNumeroTimbrado,
                 SeriesEstablecimiento = r.SeriesEstablecimiento, SeriesPuntoExpedicion = r.SeriesPuntoExpedicion,
                 BuildingId = r.BuildingId, BuildingName = r.BuildingName, UnitId = r.UnitId, UnitCode = r.UnitCode,
-                ClienteNombre = clientName, ClienteDocumento = clientDoc,
+                ClienteNombre = clientName, ClienteDocumento = clientDoc, ClienteReconstruido = r.ClientReconstructed,
                 ExpensePeriodId = r.ExpensePeriodId, PeriodYear = r.PeriodYear, PeriodMonth = r.PeriodMonth,
                 PeriodName = r.PeriodName, PeriodStatus = r.PeriodStatus.ToString(), PeriodDueDate = r.PeriodDueDate,
                 ComprobanteTotal = comprobante?.Total ?? 0m,
@@ -624,6 +624,57 @@ public class InvoicesController(
 
         var row = await LoadRowAsync(id, cancellationToken);
         return Ok(ToDto(row!));
+    }
+
+    // Actualiza el cliente de una factura emitida cuyo cliente se completo al migrar (ClientReconstructed): vuelve a tomar los
+    // datos actuales del propietario (incluidos sus datos de facturacion) y la deja con el cliente "real", sin repetir la accion.
+    // Las facturas emitidas con el cliente guardado en el momento no se tocan: para cambiarlo se anula y se emite otra.
+    [HttpPost("{id:guid}/refresh-client")]
+    public async Task<ActionResult<InvoiceClientDto>> RefreshClient(Guid id, CancellationToken cancellationToken)
+    {
+        if (!CanManageInvoices()) return Forbid();
+
+        var invoice = await dbContext.Invoices.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (invoice is null) return NotFound();
+
+        if (!await accessScope.CanAccessBuildingAsync(invoice.BuildingId, cancellationToken)) return Forbid();
+
+        if (invoice.Status != InvoiceStatus.Issued)
+            return Conflict("Solo se actualiza el cliente de una factura emitida: el borrador siempre toma el cliente actual y la anulada no se modifica.");
+
+        if (!invoice.ClientReconstructed)
+            return Conflict("El cliente de esta factura quedó guardado al emitirla y no se puede cambiar. Para facturar a otro cliente, anulá la factura y emití otra.");
+
+        var client = await BillingClientResolver.LoadLiveAsync(dbContext, invoice.UnitId, cancellationToken);
+        if (client is null) return Conflict("La unidad no tiene propietario ni residente de donde tomar el cliente.");
+
+        var before = new { invoice.ClientName, invoice.ClientDocumentType, invoice.ClientDocument, invoice.ClientReconstructed };
+        BillingClientResolver.ApplySnapshot(invoice, client, reconstructed: false);
+
+        var detalle = $"Cliente de la factura {invoice.NumeroFormateado} actualizado con los datos actuales: «{before.ClientName}» ({before.ClientDocument}) → «{invoice.ClientName}» ({invoice.ClientDocument}).";
+        dbContext.InvoiceAuditLogs.Add(new InvoiceAuditLog
+        {
+            CompanyId = invoice.CompanyId,
+            InvoiceId = invoice.Id,
+            InvoiceSeriesId = invoice.InvoiceSeriesId,
+            Action = InvoiceAuditAction.ClientRefreshed,
+            UserId = tenantContext.UserId,
+            TimestampUtc = DateTime.UtcNow,
+            DatosAntesJson = JsonSerializer.Serialize(before),
+            DatosDespuesJson = JsonSerializer.Serialize(new { invoice.ClientName, invoice.ClientDocumentType, invoice.ClientDocument, invoice.ClientReconstructed }),
+            Detalle = detalle.Length <= 500 ? detalle : detalle[..500]
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new InvoiceClientDto
+        {
+            ClienteNombre = invoice.ClientName,
+            ClienteDocumento = invoice.ClientDocument,
+            ClienteTipoDocumento = invoice.ClientDocumentType,
+            ClienteDireccion = invoice.ClientAddress,
+            ClienteEmail = invoice.ClientEmail,
+            ClienteReconstruido = invoice.ClientReconstructed
+        });
     }
 
     [HttpPost("{id:guid}/void")]

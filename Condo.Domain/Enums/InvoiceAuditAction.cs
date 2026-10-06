@@ -7,5 +7,6 @@ public enum InvoiceAuditAction
     DraftCreated = 3,
     Issued = 4,
     Voided = 5,
-    Printed = 6
+    Printed = 6,
+    ClientRefreshed = 7
 }
