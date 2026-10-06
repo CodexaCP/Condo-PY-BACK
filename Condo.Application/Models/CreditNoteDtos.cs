@@ -41,6 +41,7 @@ public class CreditNoteDto
     public string? BuildingAddress { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
+    public string? ClienteTipoDocumento { get; set; }
     public string? EmisorRazonSocial { get; set; }
     public string? EmisorRuc { get; set; }
     public string? EmisorTimbrado { get; set; }

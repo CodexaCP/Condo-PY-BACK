@@ -24,6 +24,7 @@ public sealed record CreditNotePdfData(
     DateTime? InvoiceFechaEmisionUtc,
     string? ClienteNombre,
     string? ClienteDocumento,
+    string? ClienteTipoDocumento,
     string UnitCode,
     string Motivo,
     decimal Amount,
@@ -144,7 +145,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
 
     private void ComposeAdjustedDocument(IContainer container)
     {
-        var (ci, _) = SplitDocument(data.ClienteDocumento);
+        var (ci, ruc) = SplitDocument(data.ClienteDocumento, data.ClienteTipoDocumento);
 
         container.Border(0.7f).BorderColor(p.Border).Table(t =>
         {
@@ -158,7 +159,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
 
             Label(t, "Cliente");
             Value(t, Or(data.ClienteNombre));
-            Value(t, $"C.I. N° {ci ?? Dash}");
+            Value(t, ruc is not null ? $"RUC {ruc}" : $"{DocumentLabel} {ci ?? Dash}");
 
             Label(t, "Unidad");
             Value(t, data.UnitCode);
@@ -173,7 +174,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
 
     private void ComposeClient(IContainer container)
     {
-        var (ci, ruc) = SplitDocument(data.ClienteDocumento);
+        var (ci, ruc) = SplitDocument(data.ClienteDocumento, data.ClienteTipoDocumento);
 
         container.Border(0.7f).BorderColor(p.Border).Table(t =>
         {
@@ -181,7 +182,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
 
             Label(t, "NOMBRE O RAZÓN SOCIAL", bold: true);
             Value(t, Or(data.ClienteNombre));
-            Label(t, "C.I. N°", bold: true);
+            Label(t, DocumentLabel, bold: true);
             Value(t, ci ?? Dash);
 
             Label(t, "RUC", bold: true);
@@ -324,12 +325,23 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
     private void Value(TableDescriptor t, string text) => t.Cell().Element(Cell).Text(text);
 
     // Un documento con guion es RUC (8540611-2); sin guion es cedula. Mismo criterio que la factura.
-    private static (string? Ci, string? Ruc) SplitDocument(string? document)
+    // El tipo de documento de la ficha decide la casilla (RUC o la del documento); sin tipo guardado se adivina: con guion es RUC.
+    private static (string? Ci, string? Ruc) SplitDocument(string? document, string? type)
     {
         var value = (document ?? string.Empty).Trim();
         if (value.Length == 0) return (null, null);
+        if (!string.IsNullOrWhiteSpace(type))
+            return string.Equals(type.Trim(), "RUC", StringComparison.OrdinalIgnoreCase) ? (null, value) : (value, null);
         return value.Contains('-') ? (null, value) : (value, null);
     }
+
+    // Titulo de la casilla del documento: C.I. para cedula (o sin tipo); pasaporte y documento extranjero van como "DOC.".
+    private string DocumentLabel =>
+        !string.IsNullOrWhiteSpace(data.ClienteTipoDocumento)
+        && !string.Equals(data.ClienteTipoDocumento.Trim(), "RUC", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(data.ClienteTipoDocumento.Trim(), "CedulaParaguaya", StringComparison.OrdinalIgnoreCase)
+            ? "DOC. N°"
+            : "C.I. N°";
 
     private static string StatusLabel(CreditNoteStatus status) => status switch
     {

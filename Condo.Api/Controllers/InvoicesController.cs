@@ -68,7 +68,9 @@ public class InvoicesController(
                 x.Series != null ? x.Series.FieldPositionsJson : null,
                 x.Series != null && x.Series.HideFrame,
                 x.Series != null && x.Series.HalfPage,
-                null))
+                null,
+                x.Series != null ? x.Series.DireccionEstablecimiento : null,
+                x.Series != null ? x.Series.ActividadEconomica : null))
             .ToListAsync(cancellationToken);
 
         return Ok(rows.Select(ToDto).ToList());
@@ -800,7 +802,9 @@ public class InvoicesController(
                 x.Series != null ? x.Series.FieldPositionsJson : null,
                 x.Series != null && x.Series.HideFrame,
                 x.Series != null && x.Series.HalfPage,
-                x.Series != null ? x.Series.ReferenceScanUrl : null))
+                x.Series != null ? x.Series.ReferenceScanUrl : null,
+                x.Series != null ? x.Series.DireccionEstablecimiento : null,
+                x.Series != null ? x.Series.ActividadEconomica : null))
             .FirstOrDefaultAsync(cancellationToken);
 
     private static InvoiceDto ToDto(InvoiceRow row) => new()
@@ -820,6 +824,8 @@ public class InvoicesController(
         SeriesPuntoExpedicion = row.SeriesPuntoExpedicion,
         SeriesVigenciaDesde = row.SeriesVigenciaDesde,
         SeriesVigenciaHasta = row.SeriesVigenciaHasta,
+        SeriesDireccionEstablecimiento = row.SeriesDireccionEstablecimiento,
+        SeriesActividadEconomica = row.SeriesActividadEconomica,
         BuildingAddress = row.BuildingAddress,
         BuildingPhone = row.BuildingPhone,
         PeriodDueDate = row.PeriodDueDate,
@@ -851,7 +857,8 @@ public class InvoicesController(
         InvoiceStatus Status, long? Numero, string? NumeroFormateado, decimal MontoTotal, string DetalleSnapshotJson,
         DateTime? FechaEmisionUtc, DateTime? FechaAnulacionUtc, string? MotivoAnulacion, Guid? ReemplazadaPorInvoiceId, DateTime CreatedAtUtc,
         DateOnly? PeriodDueDate, Guid? PeriodId, int? PeriodYear, int? PeriodMonth, decimal UnitCoefficient,
-        string? FieldPositionsJson, bool HideFrame, bool HalfPage, string? SeriesReferenceScanUrl);
+        string? FieldPositionsJson, bool HideFrame, bool HalfPage, string? SeriesReferenceScanUrl,
+        string? SeriesDireccionEstablecimiento, string? SeriesActividadEconomica);
 
     // Mismo mecanismo que la calibracion del timbrado (InvoiceSeriesController.TryReadReferenceScan): si el
     // timbrado tiene un escaneo de referencia calibrado, la factura real tambien se imprime sobre ese papel.

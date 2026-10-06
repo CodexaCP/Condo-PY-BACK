@@ -505,7 +505,7 @@ public class CreditNotesController(
             return Forbid();
 
         var lines = await LoadLinesAsync(id, cancellationToken);
-        var (clienteNombre, clienteDocumento) = await LoadClientAsync(creditNote.InvoiceId, creditNote.UnitId, cancellationToken);
+        var (clienteNombre, clienteDocumento, clienteTipoDocumento) = await LoadClientAsync(creditNote.InvoiceId, creditNote.UnitId, cancellationToken);
 
         var data = new CreditNotePdfData(
             creditNote.BuildingName, creditNote.BuildingAddress, creditNote.BuildingPhone,
@@ -513,7 +513,7 @@ public class CreditNotesController(
             creditNote.VigenciaDesde, creditNote.VigenciaHasta,
             creditNote.FiscalNumero, creditNote.FiscalFechaEmisionUtc, creditNote.CreatedAtUtc,
             creditNote.InvoiceNumero, creditNote.InvoiceFecha,
-            clienteNombre, clienteDocumento, creditNote.UnitCode,
+            clienteNombre, clienteDocumento, clienteTipoDocumento, creditNote.UnitCode,
             creditNote.Motivo, creditNote.Amount, creditNote.Status,
             creditNote.RejectionReason, creditNote.VoidReason, creditNote.FiscalCdc, creditNote.FiscalEstado,
             lines.Select(l => new CreditNotePdfLine(string.IsNullOrWhiteSpace(l.Concept) ? l.ChargeConcept : l.Concept, l.Amount)).ToList());
@@ -700,10 +700,10 @@ public class CreditNotesController(
     }
 
     // Cliente de la NC: el mismo de la factura que ajusta (el que quedo guardado al emitirla; si no lo tiene, el actual de la unidad).
-    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid invoiceId, Guid unitId, CancellationToken cancellationToken)
+    private async Task<(string? Nombre, string? Documento, string? TipoDocumento)> LoadClientAsync(Guid invoiceId, Guid unitId, CancellationToken cancellationToken)
     {
         var (client, _) = await BillingClientResolver.LoadForInvoiceAsync(dbContext, invoiceId, unitId, cancellationToken);
-        return (client?.Name, client?.Document);
+        return (client?.Name, client?.Document, client?.DocumentType);
     }
 
     private async Task AddCreditNoteApprovedNotificationAsync(CreditNote creditNote, CancellationToken cancellationToken)
@@ -881,9 +881,10 @@ public class CreditNotesController(
     // no pagar estos joins extra en cada fila de la tabla.
     private async Task EnrichWithInvoiceDataAsync(CreditNoteDto dto, CancellationToken cancellationToken)
     {
-        var (clienteNombre, clienteDocumento) = await LoadClientAsync(dto.InvoiceId, dto.UnitId, cancellationToken);
+        var (clienteNombre, clienteDocumento, clienteTipoDocumento) = await LoadClientAsync(dto.InvoiceId, dto.UnitId, cancellationToken);
         dto.ClienteNombre = clienteNombre;
         dto.ClienteDocumento = clienteDocumento;
+        dto.ClienteTipoDocumento = clienteTipoDocumento;
 
         var extra = await dbContext.CreditNotes.AsNoTracking()
             .Where(x => x.Id == dto.Id)

@@ -96,6 +96,9 @@ public class InvoiceDto
     public string? SeriesPuntoExpedicion { get; set; }
     public DateOnly? SeriesVigenciaDesde { get; set; }
     public DateOnly? SeriesVigenciaHasta { get; set; }
+    // Direccion del establecimiento y actividad economica declaradas en el timbrado (salen en el encabezado del emisor).
+    public string? SeriesDireccionEstablecimiento { get; set; }
+    public string? SeriesActividadEconomica { get; set; }
     public string? BuildingAddress { get; set; }
     public string? BuildingPhone { get; set; }
     public DateOnly? PeriodDueDate { get; set; }

@@ -25,7 +25,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     public static readonly IReadOnlySet<string> CalibratableKeys = new HashSet<string>
     {
         "edificioLabel", "headerEdificio", "headerEmisor", "headerTimbradoNumero", "vigenciaDesde", "vigenciaHasta",
-        "seriesRuc", "docTitulo", "numeroCondicion", "headerNumero",
+        "headerActividad", "seriesRuc", "docTitulo", "numeroCondicion", "headerNumero",
         "fechaLabel", "fechaEmision", "condicionLabel", "contadoLabel", "marcaContado", "creditoLabel",
         "nombreLabel", "clienteNombre", "ciLabel", "clienteDocumento", "rucLabel", "clienteRuc", "unidadLabel", "unidad",
         "itemLabel", "conceptoLabel", "valorVentaLabel", "exentasLabel", "pct5Label", "pct10Label",
@@ -237,12 +237,21 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
                 if (!string.IsNullOrWhiteSpace(invoice.SeriesRazonSocial))
                     col.Item().AlignCenter().Text(invoice.SeriesRazonSocial.ToUpperInvariant()).FontSize(emisorSize).Bold();
 
-                if (!string.IsNullOrWhiteSpace(invoice.BuildingAddress))
-                    col.Item().PaddingTop(8).AlignCenter().Text(invoice.BuildingAddress).FontSize(emisorSize * 0.8f).Bold();
+                // Direccion del establecimiento declarada en el timbrado (la fiscal del edificio); si no la tiene, la del edificio.
+                var emisorAddress = !string.IsNullOrWhiteSpace(invoice.SeriesDireccionEstablecimiento)
+                    ? invoice.SeriesDireccionEstablecimiento
+                    : invoice.BuildingAddress;
+                if (!string.IsNullOrWhiteSpace(emisorAddress))
+                    col.Item().PaddingTop(8).AlignCenter().Text(emisorAddress).FontSize(emisorSize * 0.8f).Bold();
 
                 if (!string.IsNullOrWhiteSpace(invoice.BuildingPhone))
                     col.Item().PaddingTop(1).AlignCenter().Text($"Tel.: {invoice.BuildingPhone}").FontSize(emisorSize * 0.8f).Bold();
             });
+
+        // Actividad economica del emisor, debajo del telefono. Es un titulo-dato (label): con papel que trae su propio marco
+        // arranca sin dibujar porque ese papel ya la imprime; se activa desde la calibracion.
+        if (!string.IsNullOrWhiteSpace(invoice.SeriesActividadEconomica))
+            Text(l, 182, 712, 7.5f, invoice.SeriesActividadEconomica, width: 164f, align: Align.Center, key: "headerActividad", label: true);
 
         // Caja derecha: timbrado, vigencia, RUC, tipo de documento y numero.
         const float boxX = 362.8346f, boxW = 198.4252f;
@@ -296,8 +305,12 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
     {
         var date = (invoice.FechaEmisionUtc ?? invoice.CreatedAtUtc).ToLocalTime();
         var document = (invoice.ClienteDocumento ?? string.Empty).Trim();
-        // Un documento con guion es RUC (8540611-2); sin guion es cedula.
-        var isRuc = document.Contains('-');
+        // El tipo de documento de la ficha decide la casilla: RUC va en RUC, cedula en C.I. y pasaporte o documento extranjero en
+        // la casilla del documento con su propio titulo. Sin tipo guardado (facturas viejas) se adivina: con guion es RUC (8540611-2).
+        var type = invoice.ClienteTipoDocumento?.Trim();
+        var hasType = !string.IsNullOrEmpty(type);
+        var isRuc = hasType ? string.Equals(type, "RUC", StringComparison.OrdinalIgnoreCase) : document.Contains('-');
+        var isOtherDocument = hasType && !isRuc && !string.Equals(type, "CedulaParaguaya", StringComparison.OrdinalIgnoreCase);
 
         Text(l, 45, 645, 8.5f, "FECHA DE EMISION:", color: p.Label, key: "fechaLabel", label: true);
         Text(l, 148, 645, 8.5f, DateInWords(date), bold: true, width: 160, key: "fechaEmision");
@@ -309,9 +322,9 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
 
         Text(l, 45, 619, 8.5f, "NOMBRE O RAZON SOCIAL:", color: p.Label, key: "nombreLabel", label: true);
         Text(l, 172, 619, 9, invoice.ClienteNombre ?? string.Empty, width: 280, key: "clienteNombre");
-        Text(l, 470, 619, 8.5f, "C.I. Nº", color: p.Label, key: "ciLabel", label: true);
+        Text(l, 470, 619, 8.5f, isOtherDocument ? "DOC. Nº" : "C.I. Nº", color: p.Label, key: "ciLabel", label: true);
         if (!string.IsNullOrEmpty(document) && !isRuc)
-            Text(l, 497, 619, 9, document, width: 60, key: "clienteDocumento");
+            Text(l, isOtherDocument ? 500 : 497, 619, 9, document, width: isOtherDocument ? 61 : 60, key: "clienteDocumento");
 
         Text(l, 45, 593, 8.5f, "RUC:", color: p.Label, key: "rucLabel", label: true);
         if (!string.IsNullOrEmpty(document) && isRuc)
