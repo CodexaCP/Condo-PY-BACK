@@ -50,6 +50,8 @@ public class Building : BaseEntity
     // Interruptor del modulo "Publicidad" (banners en la app del propietario y del residente). Solo lo opera el SuperAdmin.
     // Apagado, el edificio no muestra anuncios ni puede recibir campanas; apagarlo conserva las campanas ya cargadas.
     public bool AdsEnabled { get; set; }
+    // Segundos que se muestra cada banner antes de pasar al siguiente en la app (3 a 60). Lo fija el SuperAdmin por edificio.
+    public int AdsRotationSeconds { get; set; } = 10;
 
     // Modelos de documentos (factura, nota de credito y liquidacion). Con UseStandardTemplates los PDF
     // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus

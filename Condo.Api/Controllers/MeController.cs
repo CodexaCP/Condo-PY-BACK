@@ -325,7 +325,7 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
         var building = await dbContext.Buildings
             .AsNoTracking()
             .Where(b => !b.IsDeleted && b.Id == buildingId)
-            .Select(b => new { b.AdsEnabled, b.ContactPhonePrefix, b.ContactPhone })
+            .Select(b => new { b.AdsEnabled, b.AdsRotationSeconds, b.ContactPhonePrefix, b.ContactPhone })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (building is null || !building.AdsEnabled)
@@ -364,7 +364,7 @@ public class MeController(ICondoDbContext dbContext, ITenantContext tenantContex
                 : $"{building.ContactPhonePrefix.Trim()}{building.ContactPhone.Trim()}";
         }
 
-        return Ok(new BuildingAdsDto { Slots = slots, ManagerPhone = managerPhone });
+        return Ok(new BuildingAdsDto { Slots = slots, ManagerPhone = managerPhone, RotationSeconds = building.AdsRotationSeconds });
     }
 
     private static bool IsValidClaimCategory(string? category) =>

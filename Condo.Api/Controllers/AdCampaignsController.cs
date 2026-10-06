@@ -70,6 +70,12 @@ public class AdCampaignsController(
         if (building is null) return NotFound();
 
         building.AdsEnabled = req.Enabled;
+        if (req.RotationSeconds.HasValue)
+        {
+            if (req.RotationSeconds.Value is < 3 or > 60)
+                return BadRequest("La rotacion debe estar entre 3 y 60 segundos.");
+            building.AdsRotationSeconds = req.RotationSeconds.Value;
+        }
         await dbContext.SaveChangesAsync(ct);
 
         return Ok((await BuildRowsAsync(buildingId, ct)).Single());
@@ -275,7 +281,8 @@ public class AdCampaignsController(
                     ? x.Company.Name
                     : (x.Condominium != null && x.Condominium.Company != null ? x.Condominium.Company.Name : string.Empty),
                 CondominiumName = x.Condominium != null ? x.Condominium.Name : string.Empty,
-                AdsEnabled = x.AdsEnabled
+                AdsEnabled = x.AdsEnabled,
+                AdsRotationSeconds = x.AdsRotationSeconds
             })
             .ToListAsync(ct);
 

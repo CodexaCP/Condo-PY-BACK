@@ -78,6 +78,8 @@ public class BuildingAdsDto
     public List<AdSlotDto> Slots { get; set; } = [];
     // Teléfono de contacto del edificio (para el banner de fallback cuando no hay campañas)
     public string? ManagerPhone { get; set; }
+    // Segundos que la app muestra cada banner antes de pasar al siguiente.
+    public int RotationSeconds { get; set; } = 10;
 }
 
 // Fila del listado de edificios para activar o apagar el modulo de publicidad (solo SuperAdmin).
@@ -89,6 +91,7 @@ public class AdBuildingDto
     public string CompanyName { get; set; } = string.Empty;
     public string CondominiumName { get; set; } = string.Empty;
     public bool AdsEnabled { get; set; }
+    public int AdsRotationSeconds { get; set; } = 10;
     // Campañas activas y no eliminadas asignadas al edificio (vigentes o no por fecha).
     public int CampaignCount { get; set; }
 }
@@ -96,4 +99,6 @@ public class AdBuildingDto
 public class AdBuildingUpdateRequest
 {
     public bool Enabled { get; set; }
+    // Segundos por banner en la app (3 a 60). Si no viene, se conserva el valor actual.
+    public int? RotationSeconds { get; set; }
 }
