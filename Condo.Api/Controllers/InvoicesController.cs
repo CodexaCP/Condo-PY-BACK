@@ -252,6 +252,7 @@ public class InvoicesController(
             {
                 x.Id, x.Status, x.Numero, x.NumeroFormateado, x.MontoTotal, x.DetalleSnapshotJson,
                 x.FechaEmisionUtc, x.FechaAnulacionUtc, x.MotivoAnulacion, x.CreatedAtUtc,
+                x.ClientName, x.ClientDocument,
                 x.OwnerPaymentId, x.PaymentId, x.UnitId, x.BuildingId, x.CompanyId,
                 BuildingName = x.Building != null ? x.Building.Name : string.Empty,
                 UnitCode = x.Unit != null ? x.Unit.Code : string.Empty,
@@ -299,10 +300,8 @@ public class InvoicesController(
             })
             .ToListAsync(cancellationToken);
 
-        var owners = await dbContext.UnitOwners.AsNoTracking()
-            .Where(o => !o.IsDeleted && unitIds.Contains(o.UnitId) && o.Owner != null)
-            .Select(o => new { o.UnitId, o.IsPrimary, o.CreatedAtUtc, Name = o.Owner!.FullName, Doc = o.Owner.DocumentNumber })
-            .ToListAsync(cancellationToken);
+        // Cliente: el guardado al emitir la factura; en borrador, el actual de la unidad.
+        var liveClients = await BillingClientResolver.LoadLiveAsync(dbContext, unitIds, cancellationToken);
 
         var comprobantes = await dbContext.ExpenseCharges.AsNoTracking()
             .Where(c => !c.IsDeleted && unitIds.Contains(c.UnitId) && periodIds.Contains(c.ExpensePeriodId))
@@ -316,7 +315,8 @@ public class InvoicesController(
             var settlement = settlements.FirstOrDefault(s => s.ExpensePeriodId == r.ExpensePeriodId);
             var ownerPayment = (r.OwnerPaymentId.HasValue ? ownerPayments.FirstOrDefault(o => o.Id == r.OwnerPaymentId.Value) : null)
                                ?? ownerPayments.FirstOrDefault(o => o.Reference == r.PaymentReference && o.CompanyId == r.CompanyId);
-            var client = owners.Where(o => o.UnitId == r.UnitId).OrderByDescending(o => o.IsPrimary).ThenBy(o => o.CreatedAtUtc).FirstOrDefault();
+            var clientName = !string.IsNullOrWhiteSpace(r.ClientName) ? r.ClientName : liveClients.GetValueOrDefault(r.UnitId)?.Name;
+            var clientDoc = !string.IsNullOrWhiteSpace(r.ClientName) ? r.ClientDocument : liveClients.GetValueOrDefault(r.UnitId)?.Document;
             var comprobante = comprobantes.FirstOrDefault(c => c.UnitId == r.UnitId && c.ExpensePeriodId == r.ExpensePeriodId);
 
             return new InvoiceLedgerRowDto
@@ -329,7 +329,7 @@ public class InvoicesController(
                 SeriesRazonSocial = r.SeriesRazonSocial, SeriesRuc = r.SeriesRuc, SeriesNumeroTimbrado = r.SeriesNumeroTimbrado,
                 SeriesEstablecimiento = r.SeriesEstablecimiento, SeriesPuntoExpedicion = r.SeriesPuntoExpedicion,
                 BuildingId = r.BuildingId, BuildingName = r.BuildingName, UnitId = r.UnitId, UnitCode = r.UnitCode,
-                ClienteNombre = client?.Name, ClienteDocumento = client?.Doc,
+                ClienteNombre = clientName, ClienteDocumento = clientDoc,
                 ExpensePeriodId = r.ExpensePeriodId, PeriodYear = r.PeriodYear, PeriodMonth = r.PeriodMonth,
                 PeriodName = r.PeriodName, PeriodStatus = r.PeriodStatus.ToString(), PeriodDueDate = r.PeriodDueDate,
                 ComprobanteTotal = comprobante?.Total ?? 0m,
@@ -478,7 +478,13 @@ public class InvoicesController(
             return Forbid();
 
         var dto = ToDto(row);
-        (dto.ClienteNombre, dto.ClienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
+        var (client, reconstructed) = await BillingClientResolver.LoadForInvoiceAsync(dbContext, dto.Id, dto.UnitId, cancellationToken);
+        dto.ClienteNombre = client?.Name;
+        dto.ClienteDocumento = client?.Document;
+        dto.ClienteTipoDocumento = client?.DocumentType;
+        dto.ClienteDireccion = client?.Address;
+        dto.ClienteEmail = client?.Email;
+        dto.ClienteReconstruido = reconstructed;
         var buildingTemplate = await dbContext.Buildings.AsNoTracking()
             .Where(x => x.Id == dto.BuildingId)
             .Select(x => new { x.UseStandardTemplates, x.InvoiceTemplateUrl })
@@ -586,6 +592,10 @@ public class InvoicesController(
             tracked.Status = InvoiceStatus.Issued;
             tracked.FechaEmisionUtc = DateTime.UtcNow;
 
+            // El cliente queda guardado en la factura: un documento fiscal emitido no cambia aunque despues se edite o cambie el propietario.
+            var issuedClient = await BillingClientResolver.LoadLiveAsync(dbContext, tracked.UnitId, cancellationToken);
+            if (issuedClient is not null) BillingClientResolver.ApplySnapshot(tracked, issuedClient);
+
             dbContext.InvoiceAuditLogs.Add(new InvoiceAuditLog
             {
                 CompanyId = tracked.CompanyId,
@@ -691,24 +701,6 @@ public class InvoicesController(
     }
 
     // Cliente de la factura: propietario principal de la unidad (o el primero); si no hay, el residente actual.
-    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid unitId, CancellationToken cancellationToken)
-    {
-        var owner = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.Owner != null)
-            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
-            .Select(x => new { x.Owner!.FullName, x.Owner.DocumentNumber })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (owner is not null) return (owner.FullName, owner.DocumentNumber);
-
-        var resident = await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null && x.Resident != null)
-            .Select(x => new { x.Resident!.FullName, x.Resident.DocumentNumber })
-            .FirstOrDefaultAsync(cancellationToken);
-        return (resident?.FullName, resident?.DocumentNumber);
-    }
-
     private bool CanManageInvoices() =>
         accessScope.IsSuperAdmin ||
         accessScope.IsCompanyAdmin ||

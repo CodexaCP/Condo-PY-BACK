@@ -103,6 +103,9 @@ public class OwnersController(
         if (await UsernameExistsAsync(companyId, normalizedUsername, null, cancellationToken))
             return Conflict("Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
 
+        if (await DocumentExistsAsync(companyId, request.DocumentNumber, null, cancellationToken))
+            return Conflict("Ya existe un propietario con ese documento dentro de la empresa.");
+
         var firstName = request.FirstName.Trim();
         var lastName  = request.LastName.Trim();
 
@@ -127,6 +130,7 @@ public class OwnersController(
             IsActive         = request.IsActive,
             MustChangePassword = true
         };
+        OwnerProfileRules.Apply(owner, request);
 
         dbContext.ApplicationUsers.Add(owner);
         try
@@ -163,7 +167,7 @@ public class OwnersController(
 
         var companyId = owner.CompanyId ?? accessScope.CompanyId!.Value;
 
-        var validationError = ValidateRequest(request);
+        var validationError = ValidateRequest(request, owner);
         if (validationError is not null) return validationError;
 
         var normalizedEmail    = request.Email.Trim().ToLowerInvariant();
@@ -185,6 +189,11 @@ public class OwnersController(
         if (await UsernameExistsAsync(companyId, normalizedUsername, owner.Id, cancellationToken))
             return Conflict("Ya existe un usuario con ese nombre de usuario dentro de la empresa.");
 
+        var newDocument = PersonRules.TrimOrNull(request.DocumentNumber);
+        if (newDocument != PersonRules.TrimOrNull(owner.DocumentNumber)
+            && await DocumentExistsAsync(companyId, newDocument, owner.Id, cancellationToken))
+            return Conflict("Ya existe un propietario con ese documento dentro de la empresa.");
+
         var firstName = request.FirstName.Trim();
         var lastName  = request.LastName.Trim();
 
@@ -202,6 +211,7 @@ public class OwnersController(
         owner.Address        = request.Address?.Trim() ?? null;
         owner.IsResident     = request.IsResident;
         owner.IsActive       = request.IsActive;
+        OwnerProfileRules.Apply(owner, request);
 
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
@@ -423,7 +433,7 @@ public class OwnersController(
             || string.Equals(role, "CompanyOperator", StringComparison.OrdinalIgnoreCase);
     }
 
-    private ActionResult? ValidateRequest(OwnerUpsertRequest request)
+    private ActionResult? ValidateRequest(OwnerUpsertRequest request, ApplicationUser? current = null)
     {
         if (request is null) return BadRequest("La solicitud es obligatoria.");
 
@@ -455,6 +465,9 @@ public class OwnersController(
         if (!EmailRegex.IsMatch(email))
             return BadRequest("El correo no tiene un formato válido.");
 
+        var profileError = OwnerProfileRules.Validate(request, current);
+        if (profileError is not null) return BadRequest(profileError);
+
         return null;
     }
 
@@ -468,6 +481,16 @@ public class OwnersController(
         await dbContext.ApplicationUsers.AnyAsync(
             x => !x.IsDeleted && x.CompanyId == companyId && x.Username == username
                  && (!excludeId.HasValue || x.Id != excludeId.Value), ct);
+
+    // El documento de un propietario es unico dentro de la empresa (se revisa solo al crear o cuando cambia).
+    private async Task<bool> DocumentExistsAsync(Guid companyId, string? documentNumber, Guid? excludeId, CancellationToken ct)
+    {
+        var number = PersonRules.TrimOrNull(documentNumber);
+        return number is not null &&
+               await dbContext.ApplicationUsers.AnyAsync(
+                   x => !x.IsDeleted && x.CompanyId == companyId && x.Role == UserRole.Owner && x.DocumentNumber == number
+                        && (!excludeId.HasValue || x.Id != excludeId.Value), ct);
+    }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is SqlException sql && (sql.Number == 2601 || sql.Number == 2627);
@@ -515,8 +538,10 @@ public class OwnersController(
                 g => g.Select(x => new OwnerPresidentBuildingDto { BuildingId = x.Id, BuildingName = x.Name }).ToList());
     }
 
-    private static OwnerDto ToDto(ApplicationUser u, Dictionary<Guid, List<OwnerPresidentBuildingDto>> presidencies) => new()
+    private static OwnerDto ToDto(ApplicationUser u, Dictionary<Guid, List<OwnerPresidentBuildingDto>> presidencies)
     {
+        var dto = new OwnerDto
+        {
         Id             = u.Id,
         CompanyId      = u.CompanyId,
         FirstName      = u.FirstName,
@@ -533,5 +558,8 @@ public class OwnersController(
         IsActive       = u.IsActive,
         SignatureUrl   = u.SignatureUrl,
         PresidentOfBuildings = presidencies.GetValueOrDefault(u.Id, new List<OwnerPresidentBuildingDto>())
-    };
+        };
+        OwnerProfileRules.Fill(dto, u);
+        return dto;
+    }
 }

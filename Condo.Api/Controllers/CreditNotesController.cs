@@ -481,7 +481,7 @@ public class CreditNotesController(
             .Where(x => !x.IsDeleted && x.Id == id)
             .Select(x => new
             {
-                x.Id, x.BuildingId, x.UnitId, x.Status, x.Motivo, x.Amount, x.CreatedAtUtc,
+                x.Id, x.InvoiceId, x.BuildingId, x.UnitId, x.Status, x.Motivo, x.Amount, x.CreatedAtUtc,
                 x.RejectionReason, x.VoidReason, x.FiscalNumero, x.FiscalTimbrado, x.FiscalFechaEmisionUtc,
                 x.FiscalCdc, x.FiscalEstado,
                 BuildingName = x.Building != null ? x.Building.Name : string.Empty,
@@ -505,7 +505,7 @@ public class CreditNotesController(
             return Forbid();
 
         var lines = await LoadLinesAsync(id, cancellationToken);
-        var (clienteNombre, clienteDocumento) = await LoadClientAsync(creditNote.UnitId, cancellationToken);
+        var (clienteNombre, clienteDocumento) = await LoadClientAsync(creditNote.InvoiceId, creditNote.UnitId, cancellationToken);
 
         var data = new CreditNotePdfData(
             creditNote.BuildingName, creditNote.BuildingAddress, creditNote.BuildingPhone,
@@ -699,23 +699,11 @@ public class CreditNotesController(
                            && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId == userId, cancellationToken);
     }
 
-    // Cliente de la NC: el mismo de la factura (propietario principal de la unidad; si no hay, el residente actual).
-    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid unitId, CancellationToken cancellationToken)
+    // Cliente de la NC: el mismo de la factura que ajusta (el que quedo guardado al emitirla; si no lo tiene, el actual de la unidad).
+    private async Task<(string? Nombre, string? Documento)> LoadClientAsync(Guid invoiceId, Guid unitId, CancellationToken cancellationToken)
     {
-        var owner = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.Owner != null)
-            .OrderByDescending(x => x.IsPrimary).ThenBy(x => x.CreatedAtUtc)
-            .Select(x => new { x.Owner!.FullName, x.Owner.DocumentNumber })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (owner is not null) return (owner.FullName, owner.DocumentNumber);
-
-        var resident = await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.EndDate == null && x.Resident != null)
-            .Select(x => new { x.Resident!.FullName, x.Resident.DocumentNumber })
-            .FirstOrDefaultAsync(cancellationToken);
-        return (resident?.FullName, resident?.DocumentNumber);
+        var (client, _) = await BillingClientResolver.LoadForInvoiceAsync(dbContext, invoiceId, unitId, cancellationToken);
+        return (client?.Name, client?.Document);
     }
 
     private async Task AddCreditNoteApprovedNotificationAsync(CreditNote creditNote, CancellationToken cancellationToken)
@@ -893,7 +881,7 @@ public class CreditNotesController(
     // no pagar estos joins extra en cada fila de la tabla.
     private async Task EnrichWithInvoiceDataAsync(CreditNoteDto dto, CancellationToken cancellationToken)
     {
-        var (clienteNombre, clienteDocumento) = await LoadClientAsync(dto.UnitId, cancellationToken);
+        var (clienteNombre, clienteDocumento) = await LoadClientAsync(dto.InvoiceId, dto.UnitId, cancellationToken);
         dto.ClienteNombre = clienteNombre;
         dto.ClienteDocumento = clienteDocumento;
 

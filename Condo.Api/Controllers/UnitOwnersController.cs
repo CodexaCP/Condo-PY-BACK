@@ -53,7 +53,8 @@ public class UnitOwnersController(
                 OwnerId = x.OwnerId,
                 OwnerName = x.Owner != null ? x.Owner.FullName : string.Empty,
                 IsPrimary = x.IsPrimary,
-                StartDate = x.StartDate
+                StartDate = x.StartDate,
+                OwnershipPercentage = x.OwnershipPercentage
             })
             .ToListAsync(cancellationToken);
 
@@ -98,13 +99,17 @@ public class UnitOwnersController(
 
         if (duplicate) return Conflict("Este propietario ya esta asignado a esta unidad.");
 
+        var percentageError = await ValidateOwnershipAsync(request.UnitId, null, request.OwnershipPercentage, cancellationToken);
+        if (percentageError is not null) return BadRequest(percentageError);
+
         var entity = new UnitOwner
         {
             UnitId = request.UnitId,
             OwnerId = request.OwnerId,
             IsPrimary = request.IsPrimary,
             StartDate = request.StartDate,
-            CompanyId = companyId
+            CompanyId = companyId,
+            OwnershipPercentage = request.OwnershipPercentage is > 0m ? decimal.Round(request.OwnershipPercentage.Value, 2) : null
         };
 
         // Otro propietario principal ya vigente: si el nuevo tambien es principal, la titularidad no queda sin principal.
@@ -157,8 +162,61 @@ public class UnitOwnersController(
             OwnerName = owner.FullName,
             IsPrimary = entity.IsPrimary,
             StartDate = entity.StartDate,
+            OwnershipPercentage = entity.OwnershipPercentage,
             TransferredCredit = transferred
         });
+    }
+
+    // Cambia el porcentaje de titularidad de un propietario de la unidad (vacio = sin informar).
+    [HttpPut("{id:guid}/ownership")]
+    public async Task<ActionResult<UnitOwnerDto>> UpdateOwnership(
+        Guid id, [FromBody] UpdateUnitOwnershipRequest request, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.UnitOwners
+            .Include(x => x.Owner)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+
+        var unit = await dbContext.Units.AsNoTracking()
+            .Include(x => x.Building)
+            .FirstOrDefaultAsync(x => x.Id == entity.UnitId, cancellationToken);
+        if (unit is null || !await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) return Forbid();
+
+        var error = await ValidateOwnershipAsync(entity.UnitId, entity.Id, request.OwnershipPercentage, cancellationToken);
+        if (error is not null) return BadRequest(error);
+
+        entity.OwnershipPercentage = request.OwnershipPercentage is > 0m ? decimal.Round(request.OwnershipPercentage.Value, 2) : null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new UnitOwnerDto
+        {
+            Id = entity.Id,
+            UnitId = entity.UnitId,
+            UnitCode = unit.Code,
+            BuildingId = unit.BuildingId,
+            BuildingName = unit.Building?.Name ?? string.Empty,
+            OwnerId = entity.OwnerId,
+            OwnerName = entity.Owner?.FullName ?? string.Empty,
+            IsPrimary = entity.IsPrimary,
+            StartDate = entity.StartDate,
+            OwnershipPercentage = entity.OwnershipPercentage
+        });
+    }
+
+    // El porcentaje es de 0 a 100 y los de los propietarios vigentes de la unidad no suman mas de 100.
+    private async Task<string?> ValidateOwnershipAsync(Guid unitId, Guid? excludeId, decimal? percentage, CancellationToken ct)
+    {
+        if (percentage is null or 0m) return null;
+        if (percentage is < 0m or > 100m) return "El porcentaje de titularidad debe estar entre 0 y 100.";
+
+        var others = await dbContext.UnitOwners.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && x.OwnershipPercentage != null && (!excludeId.HasValue || x.Id != excludeId.Value))
+            .Select(x => x.OwnershipPercentage!.Value)
+            .ToListAsync(ct);
+        var total = others.Sum() + percentage.Value;
+        return total > 100m
+            ? $"La suma de los porcentajes de titularidad de la unidad no puede superar 100% (los demás propietarios ya suman {others.Sum():0.##}%)."
+            : null;
     }
 
     // Que pasaria al dar de baja a este propietario, sin hacerlo: sirve para avisar de la deuda o del saldo antes de confirmar.
@@ -210,8 +268,11 @@ public class UnitOwnersController(
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken, [FromQuery] string? reason = null)
     {
+        var transferReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        if (transferReason is { Length: > 200 }) return BadRequest("El motivo no puede superar los 200 caracteres.");
+
         var entity = await dbContext.UnitOwners
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
@@ -242,6 +303,9 @@ public class UnitOwnersController(
         }
 
         entity.IsDeleted = true;
+        // La fila se conserva como historial de titularidad: queda la fecha de fin y, si se informo, el motivo del cambio.
+        entity.EndDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        entity.TransferReason = transferReason;
 
         // El saldo a favor que vino de esta unidad: queda retenido hasta que haya nuevo propietario principal, o pasa directo al otro
         // principal que sigue (en la misma transaccion que la baja).

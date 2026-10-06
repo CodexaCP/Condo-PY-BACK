@@ -11,6 +11,8 @@ public class UnitOwnerDto
     public string OwnerName { get; set; } = string.Empty;
     public bool IsPrimary { get; set; }
     public DateOnly StartDate { get; set; }
+    // Porcentaje de titularidad (copropietarios); vacio = no informado.
+    public decimal? OwnershipPercentage { get; set; }
     // Al asignar el nuevo propietario principal: saldo a favor de la unidad que se le traspaso (0 si no habia).
     public decimal TransferredCredit { get; set; }
 }
@@ -47,4 +49,10 @@ public class CreateUnitOwnerRequest
     public Guid OwnerId { get; set; }
     public bool IsPrimary { get; set; }
     public DateOnly StartDate { get; set; }
+    public decimal? OwnershipPercentage { get; set; }
+}
+
+public class UpdateUnitOwnershipRequest
+{
+    public decimal? OwnershipPercentage { get; set; }
 }

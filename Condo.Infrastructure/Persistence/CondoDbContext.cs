@@ -109,6 +109,16 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<ApplicationUser>().Property(x => x.Phone).HasMaxLength(30);
         modelBuilder.Entity<ApplicationUser>().Property(x => x.Address).HasMaxLength(300);
         modelBuilder.Entity<ApplicationUser>().Property(x => x.SignatureUrl).HasMaxLength(500);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.PersonType).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.LegalName).HasMaxLength(200);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.InvoiceName).HasMaxLength(200);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.InvoiceDocumentType).HasMaxLength(30);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.InvoiceDocument).HasMaxLength(40);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.InvoiceAddress).HasMaxLength(300);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.InvoiceEmail).HasMaxLength(160);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.SecondaryPhone).HasMaxLength(30);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.WhatsAppPhone).HasMaxLength(30);
+        modelBuilder.Entity<ApplicationUser>().Property(x => x.Nationality).HasMaxLength(60);
         modelBuilder.Entity<ApplicationUser>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Users)
@@ -567,6 +577,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Resident>().Property(x => x.DocumentNumber).HasMaxLength(30);
         modelBuilder.Entity<Resident>().Property(x => x.Email).HasMaxLength(160);
         modelBuilder.Entity<Resident>().Property(x => x.PhoneNumber).HasMaxLength(30);
+        modelBuilder.Entity<Resident>().Property(x => x.Relationship).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Resident>().Property(x => x.EmergencyContactName).HasMaxLength(200);
+        modelBuilder.Entity<Resident>().Property(x => x.EmergencyContactPhone).HasMaxLength(30);
+        modelBuilder.Entity<Resident>().Property(x => x.Nationality).HasMaxLength(60);
+        modelBuilder.Entity<Resident>().Property(x => x.LeaseUrl).HasMaxLength(500);
+        modelBuilder.Entity<Resident>().Property(x => x.LeaseFileName).HasMaxLength(200);
         modelBuilder.Entity<Resident>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Residents)
@@ -596,6 +612,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<UnitOwner>().HasIndex(x => new { x.UnitId, x.OwnerId }).IsUnique();
+        modelBuilder.Entity<UnitOwner>().Property(x => x.OwnershipPercentage).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<UnitOwner>().Property(x => x.TransferReason).HasMaxLength(200);
         modelBuilder.Entity<UnitOwner>()
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
@@ -880,6 +898,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Invoice>().Property(x => x.MontoTotal).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<Invoice>().Property(x => x.DetalleSnapshotJson).HasColumnType("nvarchar(max)");
         modelBuilder.Entity<Invoice>().Property(x => x.MotivoAnulacion).HasMaxLength(500);
+        modelBuilder.Entity<Invoice>().Property(x => x.ClientName).HasMaxLength(200);
+        modelBuilder.Entity<Invoice>().Property(x => x.ClientDocumentType).HasMaxLength(30);
+        modelBuilder.Entity<Invoice>().Property(x => x.ClientDocument).HasMaxLength(40);
+        modelBuilder.Entity<Invoice>().Property(x => x.ClientAddress).HasMaxLength(300);
+        modelBuilder.Entity<Invoice>().Property(x => x.ClientEmail).HasMaxLength(160);
         modelBuilder.Entity<Invoice>().HasIndex(x => new { x.InvoiceSeriesId, x.Numero }).IsUnique()
             .HasFilter("[Numero] IS NOT NULL");
         modelBuilder.Entity<Invoice>().HasIndex(x => x.PaymentId);

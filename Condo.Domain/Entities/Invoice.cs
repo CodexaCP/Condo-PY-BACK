@@ -27,6 +27,16 @@ public class Invoice : CompanyScopedEntity
 
     public Guid CreatedByUserId { get; set; }
 
+    // Cliente de la factura, guardado al emitirla: un documento fiscal emitido no cambia aunque despues se edite o cambie el
+    // propietario. En borrador estos campos van vacios y el cliente se toma del propietario actual de la unidad.
+    public string? ClientName { get; set; }
+    public string? ClientDocumentType { get; set; }
+    public string? ClientDocument { get; set; }
+    public string? ClientAddress { get; set; }
+    public string? ClientEmail { get; set; }
+    // true = el cliente se completo despues, con el propietario vigente al migrar, en facturas emitidas antes de guardar el cliente.
+    public bool ClientReconstructed { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public Unit? Unit { get; set; }

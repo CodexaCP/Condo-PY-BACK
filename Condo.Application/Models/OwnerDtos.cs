@@ -1,6 +1,27 @@
+using Condo.Domain.Enums;
+
 namespace Condo.Application.Models;
 
-public class OwnerUpsertRequest
+// Ficha ampliada del propietario (todo opcional): persona fisica o juridica, datos para facturarle y contacto adicional.
+public abstract class OwnerProfileData
+{
+    public PersonType? PersonType { get; set; }
+    // Razon social (persona juridica).
+    public string? LegalName { get; set; }
+    // Datos de facturacion propios: nombre y documento van juntos; sin ellos se factura con los datos personales.
+    public string? InvoiceName { get; set; }
+    public string? InvoiceDocumentType { get; set; }
+    public string? InvoiceDocument { get; set; }
+    public string? InvoiceAddress { get; set; }
+    public string? InvoiceEmail { get; set; }
+    // Telefonos completos con el prefijo del pais (+595981123456).
+    public string? SecondaryPhone { get; set; }
+    public string? WhatsAppPhone { get; set; }
+    public string? Nationality { get; set; }
+    public DateOnly? BirthDate { get; set; }
+}
+
+public class OwnerUpsertRequest : OwnerProfileData
 {
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
@@ -18,7 +39,7 @@ public class OwnerUpsertRequest
     public string? SignatureUrl { get; set; }
 }
 
-public class OwnerDto
+public class OwnerDto : OwnerProfileData
 {
     public Guid Id { get; set; }
     public Guid? CompanyId { get; set; }

@@ -68,7 +68,7 @@ public static partial class BuildingProfile
         // El RUC se valida solo si lo cambian: no se bloquea guardar otros datos por un RUC viejo ya cargado.
         var ruc = TrimOrNull(p.Ruc);
         if (ruc is not null && !string.Equals(ruc, TrimOrNull(currentRuc), StringComparison.Ordinal) && !IsValidRuc(ruc))
-            return "El RUC no es válido: usá el formato 80012345-6 con su dígito verificador correcto.";
+            return "El RUC no es válido: usá el formato 80012345-0 con su dígito verificador correcto.";
 
         var invoiceEmail = TrimOrNull(p.InvoiceEmail);
         if (invoiceEmail is not null && !EmailRegex().IsMatch(invoiceEmail))
@@ -99,7 +99,7 @@ public static partial class BuildingProfile
         return null;
     }
 
-    // Formato 80012345-6 (base de 5 a 9 digitos, guion y digito verificador).
+    // Formato 80012345-0 (base de 5 a 9 digitos, guion y digito verificador).
     // Digito verificador de la SET: modulo 11, pesos 2..11 de derecha a izquierda; resto > 1 => 11 - resto, si no 0.
     public static bool IsValidRuc(string ruc)
     {

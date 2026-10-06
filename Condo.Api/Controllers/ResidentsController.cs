@@ -44,7 +44,16 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             {
                 Id = x.Id,
                 FullName = x.FullName,
+                DocumentType = x.DocumentType,
                 DocumentNumber = x.DocumentNumber,
+                Relationship = x.Relationship,
+                LeaseEndDate = x.LeaseEndDate,
+                EmergencyContactName = x.EmergencyContactName,
+                EmergencyContactPhone = x.EmergencyContactPhone,
+                Nationality = x.Nationality,
+                BirthDate = x.BirthDate,
+                LeaseUrl = x.LeaseUrl,
+                LeaseFileName = x.LeaseFileName,
                 Email = x.Email,
                 PhoneNumber = x.PhoneNumber,
                 IsOwner = x.IsOwner,
@@ -96,7 +105,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return Forbid();
         }
 
-        var validationError = ValidateRequest(request);
+        var validationError = ValidateRequest(request, null);
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -151,6 +160,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             IsActive = request.IsActive,
             ApplicationUserId = linkedUserId
         };
+        ResidentProfileRules.Apply(entity, request);
 
         dbContext.Residents.Add(entity);
         try
@@ -198,7 +208,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             fullyInScope = PeopleScope.IsFullyInScope(linked, scope);
         }
 
-        var validationError = ValidateRequest(request);
+        var validationError = ValidateRequest(request, entity);
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -235,6 +245,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         entity.PhoneNumber = request.PhoneNumber.Trim();
         entity.IsOwner = request.IsOwner;
         entity.IsActive = request.IsActive;
+        ResidentProfileRules.Apply(entity, request);
 
         try
         {
@@ -292,7 +303,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
         return NoContent();
     }
 
-    private static string? ValidateRequest(ResidentUpsertRequest request)
+    private static string? ValidateRequest(ResidentUpsertRequest request, Resident? current)
     {
         if (string.IsNullOrWhiteSpace(request.FullName.Trim()))
         {
@@ -332,7 +343,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             return "El telefono solo puede contener numeros, espacios, parentesis, mas o guiones.";
         }
 
-        return null;
+        return ResidentProfileRules.Validate(request, current);
     }
 
     private async Task<Guid?> FindMatchingUserIdAsync(Guid companyId, string normalizedEmail, CancellationToken ct) =>
@@ -356,8 +367,9 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
     [GeneratedRegex("^[0-9+()\\-\\s]{6,20}$")]
     private static partial Regex PhoneRegex();
 
-    private static ResidentDto ToDto(Resident entity) =>
-        new()
+    private static ResidentDto ToDto(Resident entity)
+    {
+        var dto = new ResidentDto
         {
             Id = entity.Id,
             FullName = entity.FullName,
@@ -369,4 +381,7 @@ public partial class ResidentsController(ICondoDbContext dbContext, IAccessScope
             IsActive = entity.IsActive,
             HasLinkedAccount = entity.ApplicationUserId != null
         };
+        ResidentProfileRules.Fill(dto, entity);
+        return dto;
+    }
 }

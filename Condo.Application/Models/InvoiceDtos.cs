@@ -110,6 +110,11 @@ public class InvoiceDto
     public bool HalfPage { get; set; }
     public string? ClienteNombre { get; set; }
     public string? ClienteDocumento { get; set; }
+    public string? ClienteTipoDocumento { get; set; }
+    public string? ClienteDireccion { get; set; }
+    public string? ClienteEmail { get; set; }
+    // true = el cliente se completo despues con el propietario vigente al migrar (la factura se emitio antes de guardar el cliente).
+    public bool ClienteReconstruido { get; set; }
     public InvoiceStatus Status { get; set; }
     public long? Numero { get; set; }
     public string? NumeroFormateado { get; set; }
