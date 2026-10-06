@@ -66,9 +66,60 @@ public class Building : BaseEntity
     // El papel del edificio ya trae su propio marco/lineas impresas: la liquidacion dibuja solo el texto.
     public bool SettlementHideFrame { get; set; } = true;
 
+    // ── Ficha de registro del edificio (todo opcional salvo lo que ya era obligatorio) ──────────────────
+    // Datos generales
+    public BuildingPropertyType? PropertyType { get; set; }
+    public string? Department { get; set; }
+    public string? City { get; set; }
+    public string? Neighborhood { get; set; }
+    public string? LocationReference { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    public int? YearBuilt { get; set; }
+    public int? TowersCount { get; set; }
+    public int? FloorsCount { get; set; }
+    // Cantidad declarada de unidades (informativa: no reemplaza a las unidades realmente cargadas).
+    public int? UnitsCount { get; set; }
+    public string? LogoUrl { get; set; }
+    // Telefonos guardados completos, con el prefijo del pais (ej. +595981123456).
+    public string? WhatsAppPhone { get; set; }
+    public string? OfficeHours { get; set; }
+
+    // Legal y registral
+    public string? FincaNumber { get; set; }
+    public string? PadronNumber { get; set; }
+    public string? CadastralAccount { get; set; }
+    public string? LegalEntityNumber { get; set; }
+    public DateOnly? LegalEntityDate { get; set; }
+    public string? BylawsUrl { get; set; }
+    public string? BylawsFileName { get; set; }
+    public string? AdministratorName { get; set; }
+    public string? AdministratorPhone { get; set; }
+    public string? EmergencyContactName { get; set; }
+    public string? EmergencyContactPhone { get; set; }
+
+    // Datos fiscales (Facturacion). Las series de timbrado nuevas toman de aca el RUC, la razon social,
+    // la direccion y la actividad cuando no se los cargan a mano.
+    public string? Ruc { get; set; }
+    public string? LegalName { get; set; }
+    public TaxpayerType? TaxpayerType { get; set; }
+    public VatRegime? VatRegime { get; set; }
+    public string? EconomicActivity { get; set; }
+    public string? FiscalAddress { get; set; }
+    public string? InvoiceEmail { get; set; }
+
+    // Contabilidad y pagos: valores por defecto al crear un periodo de expensas (vacio = el sistema propone el dia 10).
+    public int? DefaultDueDay { get; set; }
+    public int? GraceDays { get; set; }
+    public string? PaymentInstructions { get; set; }
+
+    // Configuracion
+    public string? TimeZoneId { get; set; }
+
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
     public ApplicationUser? PresidentUser { get; set; }
+    public ICollection<BuildingBankAccount> BankAccounts { get; set; } = new List<BuildingBankAccount>();
     public ICollection<Unit> Units { get; set; } = new List<Unit>();
     public ICollection<BuildingExpense> BuildingExpenses { get; set; } = new List<BuildingExpense>();
     public ICollection<BuildingIncome> BuildingIncomes { get; set; } = new List<BuildingIncome>();

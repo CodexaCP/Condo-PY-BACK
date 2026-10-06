@@ -50,41 +50,11 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         }
 
         var buildings = await query
+            .Include(x => x.Condominium)
             .OrderBy(x => x.Name)
-            .Select(x => new BuildingDto
-            {
-                Id = x.Id,
-                CompanyId = x.CompanyId,
-                CondominiumId = x.CondominiumId,
-                CondominiumName = x.Condominium != null ? x.Condominium.Name : string.Empty,
-                Name = x.Name,
-                Code = x.Code,
-                Address = x.Address,
-                IsActive = x.IsActive,
-                Description = x.Description,
-                ContactPhonePrefix = x.ContactPhonePrefix,
-                ContactPhone = x.ContactPhone,
-                ContactEmail = x.ContactEmail,
-                LateFeeRatePercentage = x.LateFeeRatePercentage,
-                IncomeTreatment = x.IncomeTreatment,
-                ReserveFundPercentage = x.ReserveFundPercentage,
-                ExtraordinaryPercentage = x.ExtraordinaryPercentage,
-                LateFeeFrequency = x.LateFeeFrequency,
-                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
-                InvoicingMode = x.InvoicingMode,
-                UseStandardTemplates = x.UseStandardTemplates,
-                InvoiceTemplateUrl = x.InvoiceTemplateUrl,
-                InvoiceTemplateFileName = x.InvoiceTemplateFileName,
-                CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
-                CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
-                SettlementTemplateUrl = x.SettlementTemplateUrl,
-                SettlementTemplateFileName = x.SettlementTemplateFileName,
-                SettlementFieldPositionsJson = x.SettlementFieldPositionsJson,
-                SettlementHideFrame = x.SettlementHideFrame
-            })
             .ToListAsync(cancellationToken);
 
-        return Ok(buildings);
+        return Ok(buildings.Select(x => ToDto(x)).ToList());
     }
 
     [HttpGet("{id:guid}")]
@@ -97,41 +67,11 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         var building = await dbContext.Buildings
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.Id == id)
-            .Select(x => new BuildingDto
-            {
-                Id = x.Id,
-                CompanyId = x.CompanyId,
-                CondominiumId = x.CondominiumId,
-                CondominiumName = x.Condominium != null ? x.Condominium.Name : string.Empty,
-                Name = x.Name,
-                Code = x.Code,
-                Address = x.Address,
-                IsActive = x.IsActive,
-                Description = x.Description,
-                ContactPhonePrefix = x.ContactPhonePrefix,
-                ContactPhone = x.ContactPhone,
-                ContactEmail = x.ContactEmail,
-                LateFeeRatePercentage = x.LateFeeRatePercentage,
-                IncomeTreatment = x.IncomeTreatment,
-                ReserveFundPercentage = x.ReserveFundPercentage,
-                ExtraordinaryPercentage = x.ExtraordinaryPercentage,
-                LateFeeFrequency = x.LateFeeFrequency,
-                BlockOverdueAmenityReservations = x.BlockOverdueAmenityReservations,
-                InvoicingMode = x.InvoicingMode,
-                UseStandardTemplates = x.UseStandardTemplates,
-                InvoiceTemplateUrl = x.InvoiceTemplateUrl,
-                InvoiceTemplateFileName = x.InvoiceTemplateFileName,
-                CreditNoteTemplateUrl = x.CreditNoteTemplateUrl,
-                CreditNoteTemplateFileName = x.CreditNoteTemplateFileName,
-                SettlementTemplateUrl = x.SettlementTemplateUrl,
-                SettlementTemplateFileName = x.SettlementTemplateFileName,
-                SettlementFieldPositionsJson = x.SettlementFieldPositionsJson,
-                SettlementHideFrame = x.SettlementHideFrame
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+            .Include(x => x.Condominium)
+            .Include(x => x.BankAccounts.Where(a => !a.IsDeleted))
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
-        return building is null ? NotFound() : Ok(building);
+        return building is null ? NotFound() : Ok(ToDto(building, includeBankAccounts: true));
     }
 
     [HttpPost]
@@ -174,7 +114,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("El modo de facturación es obligatorio.");
         }
 
-        var validationError = ValidateRequest(request);
+        var validationError = ValidateRequest(request, currentRuc: null, canEditFinancial: true);
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -221,6 +161,11 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         dbContext.Buildings.Add(entity);
 
+        BuildingProfile.Apply(entity, request, canEditFinancial: true);
+        var bankAccountsCompanyId = companyId ?? condominium?.CompanyId;
+        if (request.BankAccounts is { Count: > 0 } && bankAccountsCompanyId.HasValue)
+            dbContext.BuildingBankAccounts.AddRange(BuildingProfile.SyncBankAccounts(entity, bankAccountsCompanyId.Value, request.BankAccounts));
+
         // Auto-assign demo plan — every new building starts with a 45-day free trial
         var demoPlanId = Guid.Parse("A0000000-0000-0000-0000-000000000001");
         var today = DateTime.UtcNow;
@@ -251,7 +196,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         }
 
         entity.Condominium = condominium;
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, includeBankAccounts: true));
     }
 
     [HttpPut("{id:guid}")]
@@ -259,6 +204,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
     {
         var entity = await dbContext.Buildings
             .Include(x => x.Condominium)
+            .Include(x => x.BankAccounts.Where(a => !a.IsDeleted))
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
 
         if (entity is null)
@@ -305,7 +251,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("El modo de facturación es obligatorio.");
         }
 
-        var validationError = ValidateRequest(request);
+        var validationError = ValidateRequest(request, entity.Ruc, canEditFinancial: !isBuildingManager);
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -359,6 +305,12 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         if (request.UseStandardTemplates.HasValue)
             ApplyTemplates(entity, request);
 
+        // La ficha de registro: el encargado del edificio edita lo general y lo legal; lo fiscal, los datos de cobro y
+        // los valores por defecto de cobranza los define quien administra (igual que los porcentajes de la liquidacion).
+        BuildingProfile.Apply(entity, request, canEditFinancial: !isBuildingManager);
+        if (!isBuildingManager && request.BankAccounts is not null && effectiveCompanyId.HasValue)
+            dbContext.BuildingBankAccounts.AddRange(BuildingProfile.SyncBankAccounts(entity, effectiveCompanyId.Value, request.BankAccounts));
+
         var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
         if (lateFeeChanged && effectiveCompanyId.HasValue)
         {
@@ -379,7 +331,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         }
 
         entity.Condominium = condominium;
-        return Ok(ToDto(entity));
+        return Ok(ToDto(entity, includeBankAccounts: true));
     }
 
     // Vacio o 0 = no aplica.
@@ -542,7 +494,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    private static string? ValidateRequest(BuildingUpsertRequest request)
+    private static string? ValidateRequest(BuildingUpsertRequest request, string? currentRuc, bool canEditFinancial)
     {
         if (string.IsNullOrWhiteSpace(request.Name.Trim()))
         {
@@ -593,7 +545,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return "Adjuntá los 3 modelos (factura, nota de crédito y liquidación) o marcá \"Usar modelos estándar de CONDOPY\".";
         }
 
-        return null;
+        return BuildingProfile.Validate(request, request.BankAccounts, currentRuc, canEditFinancial);
     }
 
     // Con modelos estandar no se guardan adjuntos: si el edificio vuelve al estandar se limpian los propios.
@@ -771,8 +723,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         return query.FirstOrDefaultAsync(cancellationToken);
     }
 
-    private static BuildingDto ToDto(Building entity) =>
-        new()
+    private static BuildingDto ToDto(Building entity, bool includeBankAccounts = false)
+    {
+        var dto = new BuildingDto
         {
             Id = entity.Id,
             CompanyId = entity.CompanyId,
@@ -801,6 +754,22 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             SettlementTemplateUrl = entity.SettlementTemplateUrl,
             SettlementTemplateFileName = entity.SettlementTemplateFileName,
             SettlementFieldPositionsJson = entity.SettlementFieldPositionsJson,
-            SettlementHideFrame = entity.SettlementHideFrame
+            SettlementHideFrame = entity.SettlementHideFrame,
+            FinanceModuleEnabled = entity.FinanceModuleEnabled,
+            MarketplaceEnabled = entity.MarketplaceEnabled,
+            AdsEnabled = entity.AdsEnabled
         };
+        BuildingProfile.Fill(dto, entity);
+
+        if (includeBankAccounts)
+        {
+            dto.BankAccounts = entity.BankAccounts
+                .Where(a => !a.IsDeleted)
+                .OrderBy(a => a.CreatedAtUtc)
+                .Select(BuildingProfile.ToDto)
+                .ToList();
+        }
+
+        return dto;
+    }
 }

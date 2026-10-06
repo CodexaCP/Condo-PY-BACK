@@ -53,6 +53,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<CreditNoteAuditLog> CreditNoteAuditLogs => Set<CreditNoteAuditLog>();
     public DbSet<FinanceSettings> FinanceSettings => Set<FinanceSettings>();
     public DbSet<FinancialAccount> FinancialAccounts => Set<FinancialAccount>();
+    public DbSet<BuildingBankAccount> BuildingBankAccounts => Set<BuildingBankAccount>();
     public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
     public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
@@ -170,6 +171,51 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>().Property(x => x.SettlementTemplateUrl).HasMaxLength(500);
         modelBuilder.Entity<Building>().Property(x => x.SettlementTemplateFileName).HasMaxLength(200);
+
+        // Ficha de registro del edificio
+        modelBuilder.Entity<Building>().Property(x => x.PropertyType).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<Building>().Property(x => x.Department).HasMaxLength(100);
+        modelBuilder.Entity<Building>().Property(x => x.City).HasMaxLength(100);
+        modelBuilder.Entity<Building>().Property(x => x.Neighborhood).HasMaxLength(100);
+        modelBuilder.Entity<Building>().Property(x => x.LocationReference).HasMaxLength(300);
+        modelBuilder.Entity<Building>().Property(x => x.Latitude).HasColumnType("decimal(9,6)");
+        modelBuilder.Entity<Building>().Property(x => x.Longitude).HasColumnType("decimal(9,6)");
+        modelBuilder.Entity<Building>().Property(x => x.LogoUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.WhatsAppPhone).HasMaxLength(30);
+        modelBuilder.Entity<Building>().Property(x => x.OfficeHours).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.FincaNumber).HasMaxLength(50);
+        modelBuilder.Entity<Building>().Property(x => x.PadronNumber).HasMaxLength(50);
+        modelBuilder.Entity<Building>().Property(x => x.CadastralAccount).HasMaxLength(50);
+        modelBuilder.Entity<Building>().Property(x => x.LegalEntityNumber).HasMaxLength(50);
+        modelBuilder.Entity<Building>().Property(x => x.BylawsUrl).HasMaxLength(500);
+        modelBuilder.Entity<Building>().Property(x => x.BylawsFileName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.AdministratorName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.AdministratorPhone).HasMaxLength(30);
+        modelBuilder.Entity<Building>().Property(x => x.EmergencyContactName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.EmergencyContactPhone).HasMaxLength(30);
+        modelBuilder.Entity<Building>().Property(x => x.Ruc).HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.LegalName).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.TaxpayerType).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.VatRegime).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.EconomicActivity).HasMaxLength(200);
+        modelBuilder.Entity<Building>().Property(x => x.FiscalAddress).HasMaxLength(300);
+        modelBuilder.Entity<Building>().Property(x => x.InvoiceEmail).HasMaxLength(160);
+        modelBuilder.Entity<Building>().Property(x => x.PaymentInstructions).HasMaxLength(1000);
+        modelBuilder.Entity<Building>().Property(x => x.TimeZoneId).HasMaxLength(60);
+
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.BankName).HasMaxLength(120);
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.AccountType).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.AccountNumber).HasMaxLength(40);
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.HolderName).HasMaxLength(200);
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.HolderDocument).HasMaxLength(30);
+        modelBuilder.Entity<BuildingBankAccount>().Property(x => x.Alias).HasMaxLength(60);
+        modelBuilder.Entity<BuildingBankAccount>().HasIndex(x => x.BuildingId);
+        modelBuilder.Entity<BuildingBankAccount>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingBankAccount>()
+            .HasOne(x => x.Building).WithMany(x => x.BankAccounts)
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Building>()
             .HasOne(x => x.Company)
             .WithMany(x => x.Buildings)

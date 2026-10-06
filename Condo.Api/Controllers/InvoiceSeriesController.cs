@@ -100,9 +100,9 @@ public class InvoiceSeriesController(
             return Forbid();
         }
 
-        if (!IsValidRequest(request, out var validationError))
+        if (request.BuildingId == Guid.Empty)
         {
-            return BadRequest(validationError);
+            return BadRequest("El edificio es obligatorio.");
         }
 
         var building = await dbContext.Buildings
@@ -117,6 +117,17 @@ public class InvoiceSeriesController(
         if (!await accessScope.CanAccessBuildingAsync(building.Id, cancellationToken))
         {
             return Forbid();
+        }
+
+        // Lo que no se cargó a mano se toma de los datos fiscales del edificio (ficha de registro).
+        if (string.IsNullOrWhiteSpace(request.Ruc)) request.Ruc = building.Ruc ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(request.RazonSocial)) request.RazonSocial = building.LegalName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(request.DireccionEstablecimiento)) request.DireccionEstablecimiento = building.FiscalAddress ?? building.Address;
+        if (string.IsNullOrWhiteSpace(request.ActividadEconomica)) request.ActividadEconomica = building.EconomicActivity ?? string.Empty;
+
+        if (!IsValidRequest(request, out var validationError))
+        {
+            return BadRequest(validationError);
         }
 
         var companyId = building.CompanyId ?? accessScope.CompanyId;
