@@ -206,8 +206,10 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken, [FromQuery] bool permanent = false)
     {
+        if (permanent) return await DeletePermanentlyAsync(id, cancellationToken);
+
         var entity = await dbContext.Units.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
         if (entity is null)
         {
@@ -392,6 +394,63 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
         result.Created = valid.Count;
         result.Message = $"Se crearon {valid.Count} unidades.";
         return Ok(result);
+    }
+
+    // Eliminacion definitiva (solo SuperAdmin), para una unidad creada por error: se borra la fila de la base y sus vinculos con
+    // propietarios y residentes. La eliminacion normal solo la marca como borrada y su codigo sigue reservado en el edificio, asi
+    // que esa unidad no se podria volver a crear con el mismo codigo. Si la unidad ya tiene movimientos (cargos, pagos, facturas...)
+    // no se borra: ese historial no se puede perder.
+    private async Task<IActionResult> DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (!accessScope.IsSuperAdmin) return Forbid();
+
+        // Incluye las que ya estaban "eliminadas" (borrado logico): siguen ocupando el codigo.
+        var entity = await dbContext.Units.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+
+        var blockers = new List<string>();
+        async Task Check(string label, Task<bool> exists)
+        {
+            if (await exists) blockers.Add(label);
+        }
+
+        await Check("cargos de expensas", dbContext.ExpenseCharges.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("pagos", dbContext.Payments.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("facturas", dbContext.Invoices.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("notas de crédito", dbContext.CreditNotes.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("comprobantes de pago de propietarios", dbContext.OwnerPaymentUnits.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("saldos a favor", dbContext.OwnerCreditMovements.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("gastos individuales", dbContext.BuildingExpenses.AnyAsync(x => x.TargetUnitId == id, cancellationToken));
+        await Check("gastos recurrentes individuales", dbContext.RecurringBuildingExpenses.AnyAsync(x => x.TargetUnitId == id, cancellationToken));
+        await Check("notas de crédito de proveedor", dbContext.BuildingExpenseCreditNoteAllocations.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("reclamos", dbContext.Claims.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("votos", dbContext.VoteCasts.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("publicaciones del Marketplace", dbContext.MarketplaceListings.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("reservas del Marketplace", dbContext.MarketplaceReservations.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("notas de cambio de propietario", dbContext.MarketplaceHandoverNotes.AnyAsync(x => x.UnitId == id, cancellationToken));
+
+        if (blockers.Count > 0)
+        {
+            return BadRequest(
+                $"No se puede eliminar definitivamente la unidad {entity.Code}: tiene {string.Join(", ", blockers)} asociados y ese historial no se puede perder. " +
+                "Si ya no se usa, desactivala en lugar de eliminarla.");
+        }
+
+        // Sus vinculos (aunque estén dados de baja) se borran con la unidad.
+        dbContext.UnitOwners.RemoveRange(await dbContext.UnitOwners.Where(x => x.UnitId == id).ToListAsync(cancellationToken));
+        dbContext.UnitResidents.RemoveRange(await dbContext.UnitResidents.Where(x => x.UnitId == id).ToListAsync(cancellationToken));
+        dbContext.Units.Remove(entity);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict("La unidad tiene datos asociados que impiden eliminarla definitivamente.");
+        }
+
+        return NoContent();
     }
 
     private static UnitDto ToDto(Unit entity, string buildingName) =>
