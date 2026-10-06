@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -242,6 +243,155 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
         entity.IsDeleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
+    }
+
+    // ─── Carga masiva desde Excel (solo SuperAdmin) ──────────────────────────
+
+    private const long MaxImportSizeBytes = 2 * 1024 * 1024; // 2 MB
+
+    // Edificios que se pueden elegir en la plantilla: todos los que tienen empresa (directa o por su condominio).
+    private async Task<List<UnitImportService.BuildingRef>> LoadImportBuildingsAsync(CancellationToken cancellationToken)
+    {
+        var rows = await dbContext.Buildings
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted)
+            .Select(x => new
+            {
+                x.Id, x.Name, x.Code,
+                CompanyId = x.CompanyId ?? (x.Condominium != null ? x.Condominium.CompanyId : null)
+            })
+            .ToListAsync(cancellationToken);
+
+        var companyIds = rows.Where(r => r.CompanyId.HasValue).Select(r => r.CompanyId!.Value).Distinct().ToList();
+        var companies = await dbContext.Companies
+            .AsNoTracking()
+            .Where(x => companyIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+
+        return rows
+            .Where(r => r.CompanyId.HasValue && companies.ContainsKey(r.CompanyId.Value))
+            .Select(r => new UnitImportService.BuildingRef(r.Id, r.CompanyId!.Value, r.Name, r.Code, companies[r.CompanyId!.Value]))
+            .ToList();
+    }
+
+    // Plantilla de Excel: una columna por dato de la unidad; el edificio se elige de una lista desplegable con todos los edificios.
+    [HttpGet("import-template")]
+    public async Task<IActionResult> DownloadImportTemplate(CancellationToken cancellationToken)
+    {
+        if (!accessScope.IsSuperAdmin) return Forbid();
+
+        var buildings = await LoadImportBuildingsAsync(cancellationToken);
+        if (buildings.Count == 0) return BadRequest("No hay edificios con empresa asignada para cargar unidades.");
+
+        return File(
+            UnitImportService.BuildTemplate(buildings),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "plantilla-unidades.xlsx");
+    }
+
+    // Sin "confirm" solo valida y devuelve la vista previa; con "confirm" guarda todo, y solo si no hay ningun error (todo o nada).
+    [HttpPost("import")]
+    [RequestSizeLimit(MaxImportSizeBytes)]
+    public async Task<ActionResult<UnitImportResultDto>> Import(IFormFile file, [FromForm] bool confirm, CancellationToken cancellationToken)
+    {
+        if (!accessScope.IsSuperAdmin) return Forbid();
+        if (file is null || file.Length == 0) return BadRequest("No se recibió ningún archivo.");
+        if (file.Length > MaxImportSizeBytes) return BadRequest("El archivo no puede superar los 2 MB.");
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Solo se permiten archivos Excel (.xlsx).");
+
+        List<UnitImportService.ParsedRow> parsed;
+        await using (var stream = file.OpenReadStream())
+        {
+            var (rows, parseError) = UnitImportService.Parse(stream);
+            if (rows is null) return BadRequest(parseError);
+            parsed = rows;
+        }
+
+        if (parsed.Count == 0) return BadRequest("El archivo no tiene filas para importar: completá la plantilla desde la fila 5.");
+
+        var buildings = await LoadImportBuildingsAsync(cancellationToken);
+        var byLabel = buildings.ToDictionary(b => UnitImportService.NormalizeLabel(b.Label), b => b);
+
+        var buildingIds = buildings.Select(b => b.Id).ToList();
+        var existing = await dbContext.Units
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && buildingIds.Contains(x.BuildingId))
+            .Select(x => new { x.BuildingId, x.Code, x.Coefficient })
+            .ToListAsync(cancellationToken);
+        var existingCodes = existing.Select(x => (x.BuildingId, x.Code.ToUpperInvariant())).ToHashSet();
+
+        var validated = UnitImportService.Validate(parsed, byLabel, existingCodes);
+        var valid = validated.Where(v => v.Error is null).ToList();
+
+        var result = new UnitImportResultDto
+        {
+            Confirmed = confirm,
+            TotalRows = validated.Count,
+            ValidRows = valid.Count,
+            ErrorRows = validated.Count - valid.Count,
+            Rows = validated.Select(v => new UnitImportRowDto
+            {
+                RowNumber = v.Row.RowNumber,
+                Building = v.Building?.Label ?? v.Row.Building,
+                Code = v.Code,
+                Floor = v.Floor,
+                Coefficient = v.Coefficient,
+                IsActive = v.IsActive,
+                Error = v.Error
+            }).ToList()
+        };
+
+        // Resumen por edificio: cuantas unidades se agregan y cuanto suman los coeficientes (suele ser 1).
+        foreach (var group in valid.GroupBy(v => v.Building!))
+        {
+            var existingForBuilding = existing.Where(e => e.BuildingId == group.Key.Id).ToList();
+            var total = existingForBuilding.Sum(e => e.Coefficient) + group.Sum(v => v.Coefficient);
+            result.Buildings.Add(new UnitImportBuildingSummaryDto
+            {
+                Building = group.Key.Label,
+                NewUnits = group.Count(),
+                ExistingUnits = existingForBuilding.Count,
+                CoefficientTotal = decimal.Round(total, 6),
+                Warning = Math.Abs(total - 1m) > 0.0001m
+                    ? $"Los coeficientes del edificio suman {total.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}; suelen sumar 1."
+                    : null
+            });
+        }
+
+        if (!confirm) return Ok(result);
+
+        if (result.ErrorRows > 0)
+        {
+            result.Message = "No se guardó ninguna unidad: corregí las filas con errores y volvé a importar.";
+            return Ok(result);
+        }
+
+        foreach (var v in valid)
+        {
+            dbContext.Units.Add(new Unit
+            {
+                CompanyId = v.Building!.CompanyId,
+                BuildingId = v.Building.Id,
+                Code = v.Code,
+                Floor = v.Floor,
+                Coefficient = v.Coefficient,
+                IsActive = v.IsActive
+            });
+        }
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueCodeViolation(exception))
+        {
+            return Conflict("Mientras se importaba se creó una unidad con el mismo código en un edificio. Volvé a validar el archivo.");
+        }
+
+        result.Created = valid.Count;
+        result.Message = $"Se crearon {valid.Count} unidades.";
+        return Ok(result);
     }
 
     private static UnitDto ToDto(Unit entity, string buildingName) =>
