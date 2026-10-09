@@ -542,3 +542,25 @@ Decisiones de Tony para esta fase: los asientos se arman sobre la **base percibi
 **Alcance que quedó afuera (a propósito):** base devengada (asientos de la expensa cargada, de la factura de proveedor y de la mora a cobrar); retenciones de IVA/renta; libro de ventas; asientos de apertura y de transferencias; copiar las asignaciones al copiar el plan de otro edificio.
 
 **Pruebas:** 24 pruebas nuevas (`ConfigCenterPhase6Tests`): el armado puro (cobro, gasto con IVA, exento, nota de crédito, cobro partido, cuentas financieras distintas, cuentas faltantes, redondeo del IVA, sumas por cuenta), sugerencias y validaciones de la asignación, cuentas inactivas, historial, permisos, edificio ajeno, resumen del Centro, rango de fechas y, con SQL Server real, los asientos del libro (cuadran y el banco coincide con el movimiento neto del libro), los incompletos, el Excel y el paquete del contador. Se ajustó el test de secciones por rol de la fase 1. Suite completa con SQL Server: 1079 pasan, 0 omitidas.
+
+### 12.7 Fase 7 — Informe de asamblea (backend, hecha 2026-10-09)
+
+Decisiones de Tony para esta fase: la morosidad va **solo agregada por antigüedad** (ninguna unidad ni propietario figura en el documento, que circula entre todos los propietarios); las **notas del administrador son texto libre que se escribe al generar** (no se guardan: no hay tabla ni migración); lo generan **los cuatro roles administrativos**, como el paquete del contador.
+
+**API** (`/api/finance/assembly-report`; exige la configuración inicial de Finanzas completa; un edificio ajeno responde 404): `POST` devuelve los datos del informe en JSON (para mostrarlos en pantalla antes de bajar el PDF) y `POST /pdf` el documento (`informe_asamblea_desdeYYYYMMDD_hastaYYYYMMDD.pdf`). Se piden por POST porque llevan las notas. Cuerpo: `buildingId`, `from`, `to` y `notes`. Sin fechas, va del comienzo del ejercicio de hoy hasta hoy; un `from` anterior a la fecha de arranque se acota a esa fecha. Errores en 400: fecha hasta futura, desde posterior a hasta, rango anterior al arranque, más de 400 días, notas de más de 4.000 caracteres.
+
+**Contenido** (`AssemblyReportService`; usa los mismos servicios que las pantallas, así los números coinciden):
+1. **Resumen**: saldo inicial, ingresos, egresos y saldo final del rango.
+2. **Saldos por cuenta** del rango (inicial, entradas, salidas y final de cada cuenta; una fila aparte si hay movimientos sin cuenta asignada, para que el total cuadre con el libro). Saldo final = saldo inicial + ingresos − egresos, y coincide con la pantalla de saldos.
+3. **Estado de resultados por rubro**, criterio de caja (lo cobrado y pagado en el rango), con superávit o déficit. Los totales coinciden con el libro de movimientos.
+4. **Ejecución presupuestaria**: la acumulada del ejercicio hasta el mes de cierre del rango (la de la pantalla de presupuesto vs. real). Si no se cargó presupuesto, la sección no sale y el informe lo avisa en *Observaciones*.
+5. **Fondo de reserva** (si el edificio tiene su cuenta): saldo inicial, aportes, usos y saldo final del rango, y el porcentaje de aporte previsto.
+6. **Morosidad por antigüedad**: cobrado, pendiente, vencido, unidades en mora (solo la cantidad) y los tramos 1-30, 31-60, 61-90 y más de 90 días.
+7. **Cuentas por pagar**: a pagar, vencido, vence en 7 días y antigüedad.
+8. **Notas del administrador** (si las hay; se limpian de caracteres de control y saltos de línea raros).
+
+**Fecha de situación:** la morosidad y las cuentas por pagar son siempre la **situación a la fecha de emisión** (el sistema no guarda su historia), y el PDF lo dice en cada sección aunque el rango termine antes.
+
+**Alcance que quedó afuera (a propósito):** detalle de morosidad por unidad (Tony eligió que no); notas guardadas como borrador; firma del administrador; gráficos; comparación con el período anterior; el estado de resultados por criterio devengado.
+
+**Pruebas:** 17 pruebas nuevas (`ConfigCenterPhase7Tests`): el PDF se genera con todas las secciones, sin presupuesto, sin fondo, sin notas, vacío y con muchas filas y notas largas; validación del rango y las notas; el controlador (400, edificio ajeno, sin configuración inicial, los cuatro roles); y, con SQL Server real, que saldos, movimientos, presupuesto, fondo, morosidad y cuentas por pagar coinciden con las pantallas de origen. Se revisó el PDF generado página por página. Suite completa con SQL Server: 1096 pasan, 0 omitidas. No hay migración en esta fase.
