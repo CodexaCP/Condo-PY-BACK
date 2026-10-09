@@ -30,6 +30,8 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             .CountAsync(x => !x.IsDeleted && x.Activo && x.BuildingId == buildingId
                              && x.VigenciaDesde <= today && x.VigenciaHasta >= today, cancellationToken);
         var finance = await gate.GetStateAsync(buildingId, cancellationToken);
+        var exemptUnits = await dbContext.Units.AsNoTracking()
+            .CountAsync(x => !x.IsDeleted && x.BuildingId == buildingId && x.LateFeeExempt, cancellationToken);
 
         var sections = new List<ConfigSectionDto>();
         foreach (var definition in ConfigSections.All.OrderBy(x => x.Order))
@@ -43,12 +45,13 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             {
                 ConfigSectionKeys.Identity => Identity(building, currentSeries),
                 ConfigSectionKeys.Collection => Collection(building, activeBankAccounts),
-                ConfigSectionKeys.LateFee => LateFee(building),
+                ConfigSectionKeys.LateFee => LateFee(building, exemptUnits),
                 ConfigSectionKeys.PaymentRule => PaymentRule(),
                 ConfigSectionKeys.Funds => Funds(building),
                 ConfigSectionKeys.Chart => await ChartAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Closing => await ClosingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
                 _ => null
             };
 
@@ -136,22 +139,28 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
     }
 
     // ── 3. Política de mora ──────────────────────────────────────────────────
-    // Hasta que exista la confirmacion explicita de "sin mora" (fase 3), un edificio sin mora queda como opcional y no como incompleto.
+    // Completa si hay tasa y frecuencia, o si el administrador confirmó expresamente que el edificio no cobra mora.
 
-    private static ConfigSectionDto LateFee(Building b)
+    private static ConfigSectionDto LateFee(Building b, int exemptUnits)
     {
         var configured = b.LateFeeRatePercentage is > 0m && b.LateFeeFrequency is not null;
+        var complete = configured || b.LateFeePolicyConfirmed;
         return new ConfigSectionDto
         {
-            Status = configured ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
-            Reasons = configured ? [] : ["El edificio no cobra interés por mora."],
+            Status = complete ? ConfigSectionStatus.Complete : ConfigSectionStatus.Incomplete,
+            Reasons = complete ? [] : ["Falta revisar la política de mora: definila o confirmá que este edificio no cobra mora."],
             Summary =
             [
-                Item("Tasa de interés", b.LateFeeRatePercentage is > 0m ? $"{b.LateFeeRatePercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null),
-                Item("Frecuencia", LateFeeFrequencyLabel(b.LateFeeFrequency))
+                Item("Interés por mora", configured
+                    ? $"{b.LateFeeRatePercentage!.Value.ToString("0.##", CultureInfo.InvariantCulture)} % {LateFeeFrequencyLabel(b.LateFeeFrequency)?.ToLowerInvariant()}"
+                    : b.LateFeePolicyConfirmed ? "No cobra mora" : null),
+                Item("Días de gracia", b.GraceDays?.ToString(CultureInfo.InvariantCulture)),
+                Item("Tope de la mora", b.LateFeeCapPercentage is > 0m ? $"{b.LateFeeCapPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} % de la base" : "Sin tope"),
+                Item("Mora mínima por intervalo", b.LateFeeMinAmount is > 0m ? $"Gs. {b.LateFeeMinAmount.Value.ToString("N0", CultureInfo.InvariantCulture)}" : "Sin mínimo"),
+                Item("Unidades exoneradas", exemptUnits.ToString(CultureInfo.InvariantCulture))
             ],
-            LinkKind = "building",
-            LinkTab = "accounting"
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.LateFee
         };
     }
 
@@ -170,24 +179,61 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
     };
 
     // ── 5. Fondos ────────────────────────────────────────────────────────────
+    // Completa si hay algún aporte, o si el administrador confirmó expresamente que el edificio no tiene aportes a fondos.
 
     private static ConfigSectionDto Funds(Building b)
     {
         var configured = b.ReserveFundPercentage is > 0m || b.ExtraordinaryPercentage is > 0m;
+        var complete = configured || b.FundPolicyConfirmed;
         return new ConfigSectionDto
         {
-            Status = configured ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
-            Reasons = configured ? [] : ["No hay aporte al fondo de reserva ni aporte extraordinario configurado."],
+            Status = complete ? ConfigSectionStatus.Complete : ConfigSectionStatus.Incomplete,
+            Reasons = complete ? [] : ["Falta revisar los fondos: definí los aportes o confirmá que este edificio no tiene aportes a fondos."],
             Summary =
             [
                 Item("Tratamiento de los ingresos", b.IncomeTreatment == IncomeTreatment.ToReserveFund ? "Van al fondo de reserva" : "Se acreditan a los propietarios"),
                 Item("Aporte al fondo de reserva", b.ReserveFundPercentage is > 0m ? $"{b.ReserveFundPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null),
-                Item("Aporte extraordinario", b.ExtraordinaryPercentage is > 0m ? $"{b.ExtraordinaryPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null)
+                Item("Aporte extraordinario", b.ExtraordinaryPercentage is > 0m ? $"{b.ExtraordinaryPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null),
+                Item("Uso del fondo de reserva", ReserveUsePolicyLabel(b.ReserveUsePolicy)
+                    + (b.ReserveUseThreshold is > 0m ? $" desde Gs. {b.ReserveUseThreshold.Value.ToString("N0", CultureInfo.InvariantCulture)}" : string.Empty))
             ],
-            LinkKind = "building",
-            LinkTab = "accounting"
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Funds
         };
     }
+
+    private static string ReserveUsePolicyLabel(ReserveUsePolicy policy) => policy switch
+    {
+        ReserveUsePolicy.RequiresPresidentApproval => "Requiere aprobación del presidente",
+        ReserveUsePolicy.RequiresAssemblyApproval => "Requiere aprobación de la asamblea",
+        _ => "Uso libre"
+    };
+
+    // ── 12. Documentos y comunicación ────────────────────────────────────────
+
+    private async Task<ConfigSectionDto> DocumentsAsync(Building b, CancellationToken cancellationToken)
+    {
+        var rules = await dbContext.BuildingNoticeRules.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => new { x.Kind, x.IsActive })
+            .ToListAsync(cancellationToken);
+        var kinds = new[] { NoticeKind.BeforeDue, NoticeKind.OnDue, NoticeKind.LateFeeApplied, NoticeKind.PaymentReceived, NoticeKind.PeriodPublished };
+        var activeCount = kinds.Count(kind => rules.FirstOrDefault(r => r.Kind == kind)?.IsActive ?? NoticeRules.DefaultActive(kind));
+
+        return new ConfigSectionDto
+        {
+            Status = rules.Count > 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = rules.Count > 0 ? [] : ["Los avisos automáticos están con su configuración por defecto (solo pago recibido y período publicado)."],
+            Summary =
+            [
+                Item("Modelos de documentos", b.UseStandardTemplates ? "Estándar de CONDOPY" : "Propios del edificio"),
+                Item("Avisos automáticos encendidos", $"{activeCount} de {kinds.Length}")
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Documents
+        };
+    }
+
 
     // ── 6. Plan de cuentas y cuentas financieras ─────────────────────────────
 
@@ -285,12 +331,20 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
 
         var lines = await dbContext.BudgetLines.AsNoTracking()
             .CountAsync(x => !x.IsDeleted && x.BuildingId == b.Id && x.Amount != 0m, cancellationToken);
+        var warn = await dbContext.FinanceSettings.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => (int?)x.BudgetWarnPercent)
+            .FirstOrDefaultAsync(cancellationToken) ?? 10;
 
         return new ConfigSectionDto
         {
             Status = lines > 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
             Reasons = lines > 0 ? [] : ["Todavía no hay presupuesto cargado."],
-            Summary = [Item("Renglones de presupuesto con importe", lines.ToString(CultureInfo.InvariantCulture))],
+            Summary =
+            [
+                Item("Renglones de presupuesto con importe", lines.ToString(CultureInfo.InvariantCulture)),
+                Item("Umbral del semáforo", $"{warn.ToString(CultureInfo.InvariantCulture)} %")
+            ],
             LinkKind = "finance",
             LinkTab = "budget"
         };

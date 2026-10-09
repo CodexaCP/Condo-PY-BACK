@@ -96,11 +96,23 @@ public sealed class BuildingConfigSnapshot
         // Mora
         s.Add("lateFeeRatePercentage", ConfigSectionKeys.LateFee, "Tasa de mora (%)", Percent(b.LateFeeRatePercentage));
         s.Add("lateFeeFrequency", ConfigSectionKeys.LateFee, "Frecuencia de la mora", b.LateFeeFrequency?.ToString());
+        s.Add("lateFeeCapPercentage", ConfigSectionKeys.LateFee, "Tope de la mora (%)", Percent(b.LateFeeCapPercentage));
+        s.Add("lateFeeMinAmount", ConfigSectionKeys.LateFee, "Mora mínima por intervalo", b.LateFeeMinAmount?.ToString("0.##", CultureInfo.InvariantCulture));
+        s.Add("lateFeeAppliesToReserve", ConfigSectionKeys.LateFee, "Mora sobre el aporte al fondo de reserva", YesNo(b.LateFeeAppliesToReserve));
+        s.Add("lateFeeAppliesToExtraordinary", ConfigSectionKeys.LateFee, "Mora sobre aportes extraordinarios", YesNo(b.LateFeeAppliesToExtraordinary));
+        s.Add("lateFeeAppliesToIndividual", ConfigSectionKeys.LateFee, "Mora sobre cargos individuales", YesNo(b.LateFeeAppliesToIndividual));
+        s.Add("lateFeePolicyConfirmed", ConfigSectionKeys.LateFee, "Política de mora confirmada", YesNo(b.LateFeePolicyConfirmed));
 
         // Fondos
         s.Add("incomeTreatment", ConfigSectionKeys.Funds, "Tratamiento de los ingresos", b.IncomeTreatment.ToString());
         s.Add("reserveFundPercentage", ConfigSectionKeys.Funds, "Aporte al fondo de reserva (%)", Percent(b.ReserveFundPercentage));
         s.Add("extraordinaryPercentage", ConfigSectionKeys.Funds, "Aporte extraordinario (%)", Percent(b.ExtraordinaryPercentage));
+        s.Add("reserveUsePolicy", ConfigSectionKeys.Funds, "Política de uso del fondo de reserva", b.ReserveUsePolicy.ToString());
+        s.Add("reserveUseThreshold", ConfigSectionKeys.Funds, "Monto desde el que rige la política de uso", b.ReserveUseThreshold?.ToString("0.##", CultureInfo.InvariantCulture));
+        s.Add("fundPolicyConfirmed", ConfigSectionKeys.Funds, "Política de fondos confirmada", YesNo(b.FundPolicyConfirmed));
+
+        // Documentos y comunicacion
+        s.Add("useStandardTemplates", ConfigSectionKeys.Documents, "Modelos estándar de CONDOPY", YesNo(b.UseStandardTemplates));
 
         return s;
     }

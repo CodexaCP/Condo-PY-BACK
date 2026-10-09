@@ -38,6 +38,8 @@ public class ConfigCenterPhase1Tests : IDisposable
         b.VatRegime = VatRegime.General;
         b.DefaultDueDay = 10;
         b.PaymentInstructions = "Transferir al banco X";
+        b.LateFeePolicyConfirmed = true;   // decision explicita: sin mora
+        b.FundPolicyConfirmed = true;      // decision explicita: sin aportes a fondos
         _env.T.Db.InvoiceSeries.Add(new InvoiceSeries
         {
             CompanyId = _env.Company.Id, BuildingId = _env.Building.Id, Ruc = "80012345-6", RazonSocial = "Consorcio Prueba",
@@ -68,13 +70,13 @@ public class ConfigCenterPhase1Tests : IDisposable
         Assert.Equal(2, collection.Reasons.Count);
 
         Assert.Equal(ConfigSectionStatus.Complete, Section(o, ConfigSectionKeys.PaymentRule).Status);
-        Assert.Equal(ConfigSectionStatus.Optional, Section(o, ConfigSectionKeys.LateFee).Status);
-        Assert.Equal(ConfigSectionStatus.Optional, Section(o, ConfigSectionKeys.Funds).Status);
+        Assert.Equal(ConfigSectionStatus.Incomplete, Section(o, ConfigSectionKeys.LateFee).Status);   // fase 3: mora y fondos son obligatorios
+        Assert.Equal(ConfigSectionStatus.Incomplete, Section(o, ConfigSectionKeys.Funds).Status);
         Assert.Equal(ConfigSectionStatus.Incomplete, Section(o, ConfigSectionKeys.Chart).Status);
         Assert.Equal(ConfigSectionStatus.Optional, Section(o, ConfigSectionKeys.Budget).Status);
 
-        // Obligatorias: identidad, cobro, regla de pago y plan de cuentas (Finanzas esta disponible); solo la regla de pago esta completa.
-        Assert.Equal(4, o.RequiredCount);
+        // Obligatorias: identidad, cobro, mora, regla de pago, fondos y plan de cuentas (Finanzas esta disponible); solo la regla de pago esta completa.
+        Assert.Equal(6, o.RequiredCount);
         Assert.Equal(1, o.ReadyCount);
         Assert.False(o.ReadyToOperate);
         Assert.True(o.FinanceAvailable);
@@ -87,8 +89,8 @@ public class ConfigCenterPhase1Tests : IDisposable
 
         var o = await Overview();
 
-        Assert.Equal(4, o.RequiredCount);
-        Assert.Equal(4, o.ReadyCount);
+        Assert.Equal(6, o.RequiredCount);
+        Assert.Equal(6, o.ReadyCount);
         Assert.True(o.ReadyToOperate);
         Assert.All(o.Sections.Where(s => s.Required), s => Assert.Equal(ConfigSectionStatus.Complete, s.Status));
     }
@@ -125,7 +127,7 @@ public class ConfigCenterPhase1Tests : IDisposable
     }
 
     [Fact]
-    public async Task MoraYFondos_ConfiguradosSeVenCompletosPeroNoCuentanComoObligatorios()
+    public async Task MoraYFondos_ConfiguradosQuedanCompletos()
     {
         var b = _env.T.Db.Buildings.Single(x => x.Id == _env.Building.Id);
         b.LateFeeRatePercentage = 1.5m;
@@ -137,9 +139,9 @@ public class ConfigCenterPhase1Tests : IDisposable
 
         Assert.Equal(ConfigSectionStatus.Complete, Section(o, ConfigSectionKeys.LateFee).Status);
         Assert.Equal(ConfigSectionStatus.Complete, Section(o, ConfigSectionKeys.Funds).Status);
-        Assert.False(Section(o, ConfigSectionKeys.LateFee).Required);
-        Assert.Equal(4, o.RequiredCount);
-        Assert.Equal(1, o.ReadyCount);
+        Assert.True(Section(o, ConfigSectionKeys.LateFee).Required);
+        Assert.Equal(6, o.RequiredCount);
+        Assert.Equal(3, o.ReadyCount);   // regla de pago, mora y fondos
     }
 
     [Fact]
@@ -153,7 +155,7 @@ public class ConfigCenterPhase1Tests : IDisposable
         Assert.Equal(ConfigSectionStatus.NotAvailable, Section(o, ConfigSectionKeys.Chart).Status);
         Assert.Equal(ConfigSectionStatus.NotAvailable, Section(o, ConfigSectionKeys.Budget).Status);
         Assert.False(o.FinanceAvailable);
-        Assert.Equal(3, o.RequiredCount);
+        Assert.Equal(5, o.RequiredCount);
     }
 
     [Fact]
@@ -189,10 +191,10 @@ public class ConfigCenterPhase1Tests : IDisposable
         _env.Access.Buildings.Add(_env.Building.Id);
 
         _env.LoginAs("CompanyAdmin");
-        Assert.Equal(8, (await Overview()).Sections.Count);
+        Assert.Equal(9, (await Overview()).Sections.Count);
 
         _env.LoginAs("CompanyOperator");
-        Assert.Equal(8, (await Overview()).Sections.Count);
+        Assert.Equal(9, (await Overview()).Sections.Count);
 
         _env.LoginAs("BuildingManager");
         var manager = await Overview();

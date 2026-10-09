@@ -1,3 +1,5 @@
+using Condo.Domain.Enums;
+
 namespace Condo.Application.Models;
 
 // ── Centro de configuracion del edificio ──────────────────────────────────────
@@ -169,4 +171,126 @@ public class SetPeriodClosingRequest
 public class ReopenPeriodRequest
 {
     public string Reason { get; set; } = string.Empty;
+}
+
+// ── Politica de mora ──────────────────────────────────────────────────────────
+
+public class LateFeePolicyDto
+{
+    public Guid BuildingId { get; set; }
+
+    // Tasa de interes por intervalo (vacio = el edificio no cobra mora) y cada cuanto se suma.
+    public decimal? RatePercentage { get; set; }
+    public LateFeeFrequency? Frequency { get; set; }
+
+    // Dias de gracia: la mora arranca vencimiento + gracia en los periodos NUEVOS (los existentes conservan su fecha de corte).
+    public int? GraceDays { get; set; }
+
+    // Tope acumulado por unidad y periodo, en % de la base (vacio = sin tope), y mora minima por intervalo (vacio = sin minimo).
+    public decimal? CapPercentage { get; set; }
+    public decimal? MinAmount { get; set; }
+
+    // Que cargos entran en la base de calculo (las expensas ordinarias y los ajustes siempre entran).
+    public bool AppliesToReserve { get; set; } = true;
+    public bool AppliesToExtraordinary { get; set; } = true;
+    public bool AppliesToIndividual { get; set; } = true;
+
+    // El administrador reviso la politica. Con la tasa vacia significa "este edificio no cobra mora".
+    public bool Confirmed { get; set; }
+
+    // Unidades exoneradas de mora (informativo; se marcan desde la unidad).
+    public int ExemptUnitCount { get; set; }
+
+    public bool CanEdit { get; set; }
+}
+
+public class UpdateLateFeePolicyRequest
+{
+    public decimal? RatePercentage { get; set; }
+    public LateFeeFrequency? Frequency { get; set; }
+    public int? GraceDays { get; set; }
+    public decimal? CapPercentage { get; set; }
+    public decimal? MinAmount { get; set; }
+    public bool AppliesToReserve { get; set; } = true;
+    public bool AppliesToExtraordinary { get; set; } = true;
+    public bool AppliesToIndividual { get; set; } = true;
+}
+
+public class UnitLateFeeExemptionRequest
+{
+    public bool Exempt { get; set; }
+    // Obligatorio al exonerar (hasta 300 caracteres).
+    public string? Reason { get; set; }
+}
+
+// ── Fondos ────────────────────────────────────────────────────────────────────
+
+public class FundPolicyDto
+{
+    public Guid BuildingId { get; set; }
+    public IncomeTreatment IncomeTreatment { get; set; }
+    public decimal? ReserveFundPercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
+    public ReserveUsePolicy ReserveUsePolicy { get; set; }
+    public decimal? ReserveUseThreshold { get; set; }
+    // El administrador reviso la politica. Sin aportes configurados significa "este edificio no tiene aportes a fondos".
+    public bool Confirmed { get; set; }
+    public bool CanEdit { get; set; }
+}
+
+public class UpdateFundPolicyRequest
+{
+    public IncomeTreatment IncomeTreatment { get; set; } = IncomeTreatment.CreditToOwners;
+    public decimal? ReserveFundPercentage { get; set; }
+    public decimal? ExtraordinaryPercentage { get; set; }
+    public ReserveUsePolicy ReserveUsePolicy { get; set; } = ReserveUsePolicy.FreeUse;
+    public decimal? ReserveUseThreshold { get; set; }
+}
+
+// ── Alertas del presupuesto ───────────────────────────────────────────────────
+
+public class BudgetAlertsDto
+{
+    public Guid BuildingId { get; set; }
+    public bool FinanceAvailable { get; set; }
+    // Desvio (en %) hasta el cual el renglon queda en amarillo; mas alla, en rojo (1 a 100).
+    public int WarnPercent { get; set; } = 10;
+    public bool CanEdit { get; set; }
+}
+
+public class UpdateBudgetAlertsRequest
+{
+    public int WarnPercent { get; set; } = 10;
+}
+
+// ── Avisos automaticos ────────────────────────────────────────────────────────
+
+public class NoticeRuleDto
+{
+    public NoticeKind Kind { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    // Solo BeforeDue: dias de anticipacion (1 a 30).
+    public int? OffsetDays { get; set; }
+    // Sin regla guardada: se muestra el valor por defecto.
+    public bool IsDefault { get; set; }
+}
+
+public class NoticeRulesDto
+{
+    public Guid BuildingId { get; set; }
+    public IReadOnlyList<NoticeRuleDto> Rules { get; set; } = [];
+    public bool CanEdit { get; set; }
+}
+
+public class UpdateNoticeRuleItem
+{
+    public NoticeKind Kind { get; set; }
+    public bool IsActive { get; set; }
+    public int? OffsetDays { get; set; }
+}
+
+public class UpdateNoticeRulesRequest
+{
+    public List<UpdateNoticeRuleItem> Rules { get; set; } = [];
 }

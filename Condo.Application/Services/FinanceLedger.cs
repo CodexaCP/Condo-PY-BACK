@@ -211,6 +211,8 @@ public sealed class LedgerContext
     public required string BuildingName { get; init; }
     public required DateOnly StartDate { get; init; }
     public required int FiscalYearStartMonth { get; init; }
+    // Umbral del semaforo del presupuesto vs. real, en % de desvio (configurable por edificio en el Centro de configuracion).
+    public int BudgetWarnPercent { get; init; } = 10;
     public required IncomeTreatment IncomeTreatment { get; init; }
     public required IReadOnlyList<FinancialAccount> Accounts { get; init; }
     public required LedgerAccounts Resolved { get; init; }

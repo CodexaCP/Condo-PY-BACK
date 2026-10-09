@@ -14,6 +14,7 @@ public static class ConfigSectionKeys
     public const string Chart = "chart";
     public const string Budget = "budget";
     public const string Closing = "closing";
+    public const string Documents = "documents";
 }
 
 public sealed record ConfigSectionDefinition(
@@ -42,12 +43,13 @@ public static class ConfigSections
     [
         new(ConfigSectionKeys.Identity, 1, "Identidad y fiscal", true, NoManager, SuperAndAdmin),
         new(ConfigSectionKeys.Collection, 2, "Cobro y vencimientos", true, NoManager, SuperAndAdmin),
-        new(ConfigSectionKeys.LateFee, 3, "Política de mora", false, AllStaff, SuperAndAdmin),
+        new(ConfigSectionKeys.LateFee, 3, "Política de mora", true, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.PaymentRule, 4, "Regla de pago", true, NoManager, Nobody),
-        new(ConfigSectionKeys.Funds, 5, "Fondos", false, NoManager, SuperAndAdmin),
+        new(ConfigSectionKeys.Funds, 5, "Fondos", true, NoManager, SuperAndAdmin),
         new(ConfigSectionKeys.Chart, 6, "Plan de cuentas y cuentas financieras", true, AllStaff, SuperOnly),
         new(ConfigSectionKeys.Closing, 9, "Período y cierre", false, AllStaff, SuperAndAdmin),
-        new(ConfigSectionKeys.Budget, 10, "Presupuesto y alertas", false, AllStaff, SuperAndAdmin)
+        new(ConfigSectionKeys.Budget, 10, "Presupuesto y alertas", false, AllStaff, SuperAndAdmin),
+        new(ConfigSectionKeys.Documents, 12, "Documentos y comunicación", false, NoManager, SuperAndAdmin)
     ];
 
     public static ConfigSectionDefinition? Find(string key) =>

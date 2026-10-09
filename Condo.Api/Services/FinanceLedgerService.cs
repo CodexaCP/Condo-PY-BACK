@@ -48,6 +48,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             BuildingName = building.Name,
             StartDate = settings.FinanceStartDate.Value,
             FiscalYearStartMonth = settings.FiscalYearStartMonth,
+            BudgetWarnPercent = settings.BudgetWarnPercent is >= 1 and <= 100 ? settings.BudgetWarnPercent : 10,
             IncomeTreatment = building.IncomeTreatment,
             Accounts = accounts,
             Resolved = LedgerAccounts.Resolve(accounts, settings.DefaultAccountId),

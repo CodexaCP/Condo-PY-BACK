@@ -68,9 +68,10 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.ExpensePeriod != null && x.ExpensePeriod.Status != ExpensePeriodStatus.Draft);
 
+        // Un pago revertido no cuenta como cobrado.
         var paymentsQuery = dbContext.Payments
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriod != null && x.ExpensePeriod.Status != ExpensePeriodStatus.Draft);
+            .Where(x => !x.IsDeleted && !x.IsReversed && x.ExpensePeriod != null && x.ExpensePeriod.Status != ExpensePeriodStatus.Draft);
 
         if (!accessScope.IsSuperAdmin)
         {

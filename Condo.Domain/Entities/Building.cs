@@ -26,6 +26,24 @@ public class Building : BaseEntity
     public LateFeeFrequency? LateFeeFrequency { get; set; }
     public bool BlockOverdueAmenityReservations { get; set; } = false;
 
+    // Politica de mora (Centro de configuracion). Los valores por defecto reproducen el comportamiento de siempre.
+    // Tope: la mora acumulada de una unidad en un periodo no pasa de este % de lo que se le cobro (vacio = sin tope).
+    public decimal? LateFeeCapPercentage { get; set; }
+    // Mora minima por intervalo, en guaranies (vacio = sin minimo).
+    public decimal? LateFeeMinAmount { get; set; }
+    // Que cargos entran en la base de calculo de la mora (las expensas ordinarias y los ajustes siempre entran).
+    public bool LateFeeAppliesToReserve { get; set; } = true;
+    public bool LateFeeAppliesToExtraordinary { get; set; } = true;
+    public bool LateFeeAppliesToIndividual { get; set; } = true;
+    // El administrador revisó la politica de mora: con la tasa vacia significa "este edificio no cobra mora" (decision explicita).
+    public bool LateFeePolicyConfirmed { get; set; }
+
+    // Politica de uso del fondo de reserva (informativa) y confirmacion explicita de "este edificio no tiene aportes a fondos".
+    public ReserveUsePolicy ReserveUsePolicy { get; set; } = ReserveUsePolicy.FreeUse;
+    // Monto en guaranies desde el cual rige la politica de uso (vacio = rige siempre).
+    public decimal? ReserveUseThreshold { get; set; }
+    public bool FundPolicyConfirmed { get; set; }
+
     // Propietario marcado como presidente del consorcio. Unico por edificio; firma la liquidacion
     // de expensas antes de que el CompanyAdmin la publique.
     public Guid? PresidentUserId { get; set; }

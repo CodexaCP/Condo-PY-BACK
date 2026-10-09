@@ -41,8 +41,8 @@ Objetivo: que un edificio pueda quedar **listo para operar de punta a punta** (c
 
 ### 1.3 Defectos detectados en lo existente (corregir en la fase 3)
 
-1. **`Building.GraceDays` se guarda y se valida pero ningún cálculo lo usa.** La mora arranca en `ExpensePeriod.LateFeeDate ?? DueDate`. El administrador cree que configuró una gracia y no tiene efecto.
-2. **La mora no excluye pagos revertidos.** En `LateFeeAccrualService`, `paymentMap` suma `Payment.Amount` con `!IsDeleted` pero sin `!IsReversed`. Si se revierte un pago, el sistema sigue creyendo que la deuda está saldada y deja de acumular mora. Misma familia de error que la morosidad (que sí menciona `IsReversed`; verificar que quede completo).
+1. **`Building.GraceDays` no la usa el backend.** Corrección de lo que decía esta especificación: el web sí la usa al crear un período a mano (propone la fecha de corte de mora = vencimiento + días de gracia), pero el backend no la aplicaba y clonar o crear en lote no la tomaban. La mora arranca en `ExpensePeriod.LateFeeDate ?? DueDate`.
+2. **Los pagos revertidos seguían contando como pagados en cuatro lugares, no solo en la mora automática:** la mora automática (`LateFeeAccrualService`), el recargo manual (`ApplyLateFees`), el aviso de deuda que bloquea reservas de amenities (`UnitOverdueService`) y el reporte de Cobranza (`CollectionsController`). La morosidad (`MorosityController`) ya los excluía. Si se revertía un pago, la deuda seguía pareciendo saldada.
 3. **La mora tiene un solo parámetro global** (tasa y frecuencia): sin tope, sin mínimo, sin elegir qué cargos la generan, sin exoneración por unidad.
 4. **`Building.DefaultDueDay`** solo propone el día al crear un período; no hay forma de generar el período siguiente con esa regla automáticamente.
 
@@ -453,3 +453,30 @@ Decisiones de Tony para esta fase: el cierre **depende del módulo Finanzas** (s
 **Pruebas:** 46 pruebas nuevas (`ConfigCenterPhase2Tests`): pantalla del cierre (estados, orden, mes en curso, mes anterior al arranque, doble cierre, apagar y reabrir, motivo, rehacer un cierre, reabrir un mes intermedio, permisos y dependencia de Finanzas), la guarda (cierre apagado, módulo apagado, mes reabierto, aislamiento entre edificios) y cada punto protegido con su caso negativo y su caso permitido. Suite completa: 873 pasan, 15 omitidas.
 
 **No cubierto por pruebas automáticas:** la importación de gastos por Excel (la guarda está, pero no se armó un archivo de plantilla firmado) y el camino feliz del clonado de período (la base de pruebas SQLite no soporta la suma de decimales que usa el cálculo del saldo de arrastre).
+
+### 12.3 Fase 3 — Política de mora, fondos, avisos y umbral del presupuesto (backend, hecha 2026-10-09)
+
+Decisiones de Tony para esta fase: la **gracia se rellena al crear, solo en períodos nuevos** (nada se recalcula hacia atrás); se corrigen **los cuatro lugares** donde un pago revertido seguía contando como pagado; los **avisos son por pantalla y push**, con reglas por edificio (sin correo); del presupuesto, **solo el umbral del semáforo** configurable (sin avisos de desvío).
+
+**Datos** (migración `20261009171429_LateFeePolicyAndNotices` y su `.sql` idempotente; todos los valores por defecto reproducen el comportamiento actual): `Buildings` (`LateFeeCapPercentage`, `LateFeeMinAmount`, `LateFeeAppliesToReserve/Extraordinary/Individual`, `LateFeePolicyConfirmed`, `ReserveUsePolicy`, `ReserveUseThreshold`, `FundPolicyConfirmed`), `Units` (`LateFeeExempt` con motivo, quién y cuándo), `FinanceSettings.BudgetWarnPercent` (10) y tabla `BuildingNoticeRules`. Las columnas con valor por defecto no usan el centinela de EF (`ValueGeneratedNever`): guardar `false` o `0` se guarda de verdad.
+
+**Mora automática** (`LateFeeAccrualRunner`, separado del servicio programado para poder probarlo con una fecha dada):
+- Excluye pagos revertidos (la mora sigue corriendo si se revierte el pago).
+- Base de cálculo: la expensa ordinaria y los ajustes siempre entran; reserva, extraordinario e individual, según el edificio.
+- **Mora mínima** por intervalo y **tope** acumulado por unidad y período (% de la base; cuenta la mora automática **y la manual**). Al llegar al tope se cobra solo lo que falta y se deja de acumular; la nota del recargo lo dice.
+- **Unidades exoneradas** no acumulan mora (la que ya tenían se conserva).
+- Idempotente: correr dos veces no duplica.
+
+**Gracia:** `ExpensePeriodsController.ResolveLateFeeDate` completa la fecha de corte (vencimiento + días de gracia) al **crear, crear en lote y clonar** un período sin fecha de corte. Editar un período no la vuelve a aplicar y los períodos existentes no cambian.
+
+**Correcciones de pagos revertidos:** mora automática, recargo manual, aviso de deuda para bloquear reservas y reporte de Cobranza ya no cuentan los pagos revertidos. El recargo manual dejó de sumar montos en la base (se suman en memoria, como la mora automática).
+
+**Avisos automáticos** (`BuildingNoticeRule`, una fila por tipo y edificio; **sin fila rige el valor por defecto: nada cambia hasta que se configuren**): *antes del vencimiento* (1 a 30 días) y *el día del vencimiento* (apagados por defecto), *mora aplicada* (apagado), *pago recibido* y *período publicado* (los avisos que ya existían, encendidos por defecto; la regla permite apagarlos). `PaymentReminderRunner` (servicio horario, desde las 8 de la mañana de Paraguay) avisa a los propietarios actuales y residentes con usuario de las unidades que **todavía deben** el período (un pago revertido no cuenta como pago), **una sola vez por persona, tipo y período**. El aviso de mora se manda la primera vez que se aplica mora a la unidad en el período. Tipos de notificación nuevos: `PaymentDueSoon`, `PaymentDueToday`, `LateFeeApplied` (texto en la base: no hace falta migrar).
+
+**API** (`/api/building-config/{buildingId}`, `BuildingConfigPoliciesController`): `GET/PUT late-fee` (tasa, frecuencia, gracia, tope, mínimo, cargos incluidos; **guardar la política la deja confirmada**, y con la tasa vacía queda como decisión explícita de «sin mora»; un cambio de tasa avisa como siempre, y el push sale después de guardar), `GET/PUT fund-policy` (tratamiento de ingresos, aportes, política de uso del fondo informativa y su monto; guardar también la confirma), `GET/PUT budget-alerts` (umbral 1 a 100, requiere Finanzas y configuración inicial) y `GET/PUT notice-rules`; más `PUT /api/units/{id}/late-fee-exemption` (motivo obligatorio, hasta 300). Editan **SuperAdmin y Administrador de empresa**; el Encargado ve mora y presupuesto pero no fondos ni avisos; cada cambio queda en el historial del Centro. La ficha del edificio sigue pudiendo editar tasa, frecuencia, gracia y aportes (mismos campos); el historial registra las dos vías.
+
+**Resumen del Centro:** *Política de mora* y *Fondos* pasan a ser **obligatorias** (completas con la política definida o confirmada); nueva sección 12 *Documentos y comunicación* (modelos de documentos y avisos encendidos); la sección de presupuesto muestra el umbral. Los edificios sin mora ni fondos configurados aparecen «Incompletos» hasta que alguien los confirme: es el cambio de criterio previsto, pero baja el indicador «listo para operar» de los edificios existentes.
+
+**Alcance que quedó afuera (a propósito):** la política de uso del fondo de reserva es **informativa** (no obliga a cargar una referencia de aprobación al pagar un gasto con el fondo); no hay avisos por correo; los avisos de desvío del presupuesto no se hicieron. Para el web y la app: los tipos de notificación nuevos necesitan icono y texto en `notification-visuals.ts` (web y APP).
+
+**Pruebas:** 75 pruebas nuevas (`ConfigCenterPhase3Tests`) más las de la fase 1 ajustadas al nuevo criterio: mora (base, mínimo, tope, exoneración, idempotencia, pagos revertidos, gracia), avisos (una sola vez, solo a quien debe, horario, edificios, tipos), políticas y permisos, exoneración, umbral del semáforo y las correcciones de pagos revertidos. Suite completa: 948 pasan, 15 omitidas.

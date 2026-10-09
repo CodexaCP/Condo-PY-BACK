@@ -140,6 +140,11 @@ public class ExpensePeriodsController(
         return await accessScope.CanAccessBuildingAsync(period.BuildingId, cancellationToken) ? Ok(period) : Forbid();
     }
 
+    // Fecha desde la que corre la mora de un periodo NUEVO: la que se indico o, si no se indico ninguna, el vencimiento mas los dias de
+    // gracia del edificio. Solo rige al crear (alta, alta en lote y clonado): los periodos que ya existen no cambian.
+    public static DateOnly? ResolveLateFeeDate(DateOnly? requested, DateOnly dueDate, int? graceDays) =>
+        requested ?? (graceDays is > 0 ? dueDate.AddDays(graceDays.Value) : null);
+
     [HttpPost]
     public async Task<ActionResult<ExpensePeriodDto>> Create([FromBody] ExpensePeriodUpsertRequest request, CancellationToken cancellationToken)
     {
@@ -191,7 +196,7 @@ public class ExpensePeriodsController(
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             DueDate = request.DueDate,
-            LateFeeDate = request.LateFeeDate,
+            LateFeeDate = ResolveLateFeeDate(request.LateFeeDate, request.DueDate, building.GraceDays),
             Status = ExpensePeriodStatus.Draft,
             Notes = request.Notes.Trim()
         };
@@ -1210,9 +1215,12 @@ public class ExpensePeriodsController(
             return BadRequest("Los recargos por mora ya fueron registrados para este periodo.");
         }
 
-        var balances = await dbContext.ExpenseCharges
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+        // Los montos se traen y se suman en memoria (la suma de decimales no se traduce en todos los proveedores).
+        var balances = (await dbContext.ExpenseCharges
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+                .Select(x => new { x.UnitId, x.CompanyId, x.Amount })
+                .ToListAsync(cancellationToken))
             .GroupBy(x => new { x.UnitId, x.CompanyId })
             .Select(group => new
             {
@@ -1220,13 +1228,16 @@ public class ExpensePeriodsController(
                 group.Key.CompanyId,
                 TotalCharges = group.Sum(x => x.Amount)
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
 
-        var paymentMap = await dbContext.Payments
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.ExpensePeriodId == id)
+        // Un pago revertido ya no cuenta como pagado.
+        var paymentMap = (await dbContext.Payments
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && !x.IsReversed && x.ExpensePeriodId == id)
+                .Select(x => new { x.UnitId, x.Amount })
+                .ToListAsync(cancellationToken))
             .GroupBy(x => x.UnitId)
-            .ToDictionaryAsync(group => group.Key, group => group.Sum(x => x.Amount), cancellationToken);
+            .ToDictionary(group => group.Key, group => group.Sum(x => x.Amount));
 
         var charges = balances
             .Select(balance =>
@@ -2059,7 +2070,7 @@ public class ExpensePeriodsController(
                 StartDate = request.StartDate,
                 EndDate = request.EndDate,
                 DueDate = request.DueDate,
-                LateFeeDate = request.LateFeeDate,
+                LateFeeDate = ResolveLateFeeDate(request.LateFeeDate, request.DueDate, building.GraceDays),
                 Status = ExpensePeriodStatus.Draft,
                 Notes = request.Notes.Trim()
             });
@@ -2124,7 +2135,7 @@ public class ExpensePeriodsController(
 
         var endDate = source.EndDate.AddMonths(1);
         var dueDate = source.DueDate.AddMonths(1);
-        var lateFeeDate = source.LateFeeDate?.AddMonths(1);
+        var lateFeeDate = source.LateFeeDate?.AddMonths(1) ?? ResolveLateFeeDate(null, dueDate, source.Building?.GraceDays);
 
         var cloned = new ExpensePeriod
         {
@@ -2294,6 +2305,9 @@ public class ExpensePeriodsController(
 
     private async Task NotifyBuildingUsersAsync(ExpensePeriod period, CancellationToken ct)
     {
+        // El aviso de periodo publicado se puede apagar por edificio (Centro de configuracion); encendido es el comportamiento de siempre.
+        if (!await NoticeRules.IsActiveAsync(dbContext, period.BuildingId, NoticeKind.PeriodPublished, ct)) return;
+
         var recipientIds = await GetBuildingUserIdsAsync(period.BuildingId, ct);
         if (recipientIds.Count == 0) return;
 

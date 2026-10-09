@@ -53,7 +53,7 @@ public class UnitOverdueService(ICondoDbContext dbContext) : IUnitOverdueService
 
         var payments = await dbContext.Payments
             .AsNoTracking()
-            .Where(x => !x.IsDeleted && periodIds.Contains(x.ExpensePeriodId) && unitIds.Contains(x.UnitId))
+            .Where(x => !x.IsDeleted && !x.IsReversed && periodIds.Contains(x.ExpensePeriodId) && unitIds.Contains(x.UnitId))
             .Select(x => new { x.UnitId, x.ExpensePeriodId, x.Amount })
             .ToListAsync(ct);
 

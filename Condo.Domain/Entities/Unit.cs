@@ -10,6 +10,13 @@ public class Unit : CompanyScopedEntity
     public decimal Coefficient { get; set; }
     public bool IsActive { get; set; } = true;
 
+    // Exoneracion de mora (Centro de configuracion): la unidad no acumula mora automatica mientras este marcada. No borra la mora que
+    // ya tenia. Quien la marca, cuando y por que queda guardado.
+    public bool LateFeeExempt { get; set; }
+    public string? LateFeeExemptReason { get; set; }
+    public Guid? LateFeeExemptByUserId { get; set; }
+    public DateTime? LateFeeExemptAtUtc { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public ICollection<BuildingExpense> BuildingExpenses { get; set; } = new List<BuildingExpense>();

@@ -46,7 +46,9 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
                 Code = x.Code,
                 Floor = x.Floor,
                 Coefficient = x.Coefficient,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                LateFeeExempt = x.LateFeeExempt,
+                LateFeeExemptReason = x.LateFeeExemptReason
             })
             .ToListAsync(cancellationToken);
 
@@ -67,7 +69,9 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
                 Code = x.Code,
                 Floor = x.Floor,
                 Coefficient = x.Coefficient,
-                IsActive = x.IsActive
+                IsActive = x.IsActive,
+                LateFeeExempt = x.LateFeeExempt,
+                LateFeeExemptReason = x.LateFeeExemptReason
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -462,7 +466,9 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
             Code = entity.Code,
             Floor = entity.Floor,
             Coefficient = entity.Coefficient,
-            IsActive = entity.IsActive
+            IsActive = entity.IsActive,
+            LateFeeExempt = entity.LateFeeExempt,
+            LateFeeExemptReason = entity.LateFeeExemptReason
         };
 
     private static bool IsValidRequest(UnitUpsertRequest request, out string error)

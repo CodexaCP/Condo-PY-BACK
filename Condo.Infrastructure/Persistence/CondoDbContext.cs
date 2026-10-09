@@ -58,6 +58,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
     public DbSet<FinanceAuditLog> FinanceAuditLogs => Set<FinanceAuditLog>();
     public DbSet<FinancePeriodClosure> FinancePeriodClosures => Set<FinancePeriodClosure>();
+    public DbSet<BuildingNoticeRule> BuildingNoticeRules => Set<BuildingNoticeRule>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -177,6 +178,14 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.ReserveFundPercentage).HasColumnType("decimal(5,2)");
         modelBuilder.Entity<Building>().Property(x => x.ExtraordinaryPercentage).HasColumnType("decimal(5,2)");
         modelBuilder.Entity<Building>().Property(x => x.LateFeeFrequency).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeCapPercentage).HasColumnType("decimal(7,2)");
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeMinAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeAppliesToReserve).HasDefaultValue(true).ValueGeneratedNever();
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeAppliesToExtraordinary).HasDefaultValue(true).ValueGeneratedNever();
+        modelBuilder.Entity<Building>().Property(x => x.LateFeeAppliesToIndividual).HasDefaultValue(true).ValueGeneratedNever();
+        modelBuilder.Entity<Building>().Property(x => x.ReserveUsePolicy).HasConversion<string>().HasMaxLength(40).HasDefaultValue(ReserveUsePolicy.FreeUse).ValueGeneratedNever();
+        modelBuilder.Entity<FinanceSettings>().Property(x => x.BudgetWarnPercent).HasDefaultValue(10).ValueGeneratedNever();
+        modelBuilder.Entity<Building>().Property(x => x.ReserveUseThreshold).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateUrl).HasMaxLength(500);
         modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateUrl).HasMaxLength(500);
@@ -1103,6 +1112,19 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<FinanceAuditLog>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Centro de configuracion: mora por unidad y reglas de avisos ────────
+        modelBuilder.Entity<Unit>().Property(x => x.LateFeeExemptReason).HasMaxLength(300);
+
+        modelBuilder.Entity<BuildingNoticeRule>().Property(x => x.Kind).HasConversion<string>().HasMaxLength(30);
+        // Una regla por tipo de aviso y edificio.
+        modelBuilder.Entity<BuildingNoticeRule>().HasIndex(x => new { x.BuildingId, x.Kind }).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<BuildingNoticeRule>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingNoticeRule>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 

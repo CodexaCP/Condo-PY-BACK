@@ -41,5 +41,8 @@ public enum NotificationType
     MarketplaceHandoverNote = 37,
     SupplierCreditApplied = 38,
     AdCampaignExpiringSoon = 39,
-    AdCampaignPaused = 40
+    AdCampaignPaused = 40,
+    PaymentDueSoon = 41,
+    PaymentDueToday = 42,
+    LateFeeApplied = 43
 }

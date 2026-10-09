@@ -23,6 +23,9 @@ public class FinanceSettings : CompanyScopedEntity
     // cerrados no bloquean nada; no se puede apagar mientras haya meses cerrados (primero se reabren, con motivo).
     public bool PeriodClosingEnabled { get; set; }
 
+    // Umbral del semaforo del presupuesto vs. real, en % de desvio (1 a 100). Hasta ese desvio el renglon queda amarillo; mas alla, rojo.
+    public int BudgetWarnPercent { get; set; } = 10;
+
     public bool SetupCompleted { get; set; }
     public DateTime? SetupCompletedAtUtc { get; set; }
     public Guid? SetupCompletedByUserId { get; set; }

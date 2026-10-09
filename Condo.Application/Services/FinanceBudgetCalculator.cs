@@ -24,7 +24,7 @@ public static class FinanceBudgetCalculator
     /// <summary>Desvio (como fraccion de lo presupuestado) hasta el cual el semaforo queda en amarillo; mas alla, rojo.</summary>
     public const decimal AmberThreshold = 0.10m;
 
-    public static BudgetStatus Status(LedgerCategoryType type, decimal budget, decimal actual)
+    public static BudgetStatus Status(LedgerCategoryType type, decimal budget, decimal actual, decimal amberThreshold = AmberThreshold)
     {
         if (budget == 0m && actual == 0m)
         {
@@ -44,7 +44,7 @@ public static class FinanceBudgetCalculator
                 return BudgetStatus.Red;
             }
 
-            return (actual - budget) / budget <= AmberThreshold ? BudgetStatus.Amber : BudgetStatus.Red;
+            return (actual - budget) / budget <= amberThreshold ? BudgetStatus.Amber : BudgetStatus.Red;
         }
 
         // Ingresos: preocupa quedar por debajo de lo esperado. Sin ingreso esperado no hay nada que incumplir.
@@ -53,7 +53,7 @@ public static class FinanceBudgetCalculator
             return BudgetStatus.Green;
         }
 
-        return (budget - actual) / budget <= AmberThreshold ? BudgetStatus.Amber : BudgetStatus.Red;
+        return (budget - actual) / budget <= amberThreshold ? BudgetStatus.Amber : BudgetStatus.Red;
     }
 
     public static decimal? VariancePct(decimal budget, decimal actual) =>
@@ -137,6 +137,7 @@ public static class FinanceBudgetCalculator
         IReadOnlyCollection<BudgetCell> cells,
         IReadOnlyDictionary<(int Year, int Month, string RubroKey), decimal> actuals)
     {
+        var amber = ctx.BudgetWarnPercent / 100m;   // umbral del semaforo configurado por edificio
         var fiscalYear = FinancePeriods.FiscalYearOf(new DateOnly(year, month, 1), ctx.FiscalYearStartMonth);
         var (fiscalStart, fiscalEnd) = FinancePeriods.FiscalYearRange(fiscalYear, ctx.FiscalYearStartMonth);
 
@@ -178,12 +179,12 @@ public static class FinanceBudgetCalculator
                 MonthActual = monthActual,
                 MonthVariance = monthActual - monthBudget,
                 MonthVariancePct = VariancePct(monthBudget, monthActual),
-                MonthStatus = Status(c.Type, monthBudget, monthActual),
+                MonthStatus = Status(c.Type, monthBudget, monthActual, amber),
                 YtdBudget = ytdBudget,
                 YtdActual = ytdActual,
                 YtdVariance = ytdActual - ytdBudget,
                 YtdVariancePct = VariancePct(ytdBudget, ytdActual),
-                YtdStatus = Status(c.Type, ytdBudget, ytdActual)
+                YtdStatus = Status(c.Type, ytdBudget, ytdActual, amber)
             });
         }
 
@@ -212,12 +213,12 @@ public static class FinanceBudgetCalculator
                 MonthActual = monthActual,
                 MonthVariance = monthActual,
                 MonthVariancePct = null,
-                MonthStatus = Status(type, 0m, monthActual),
+                MonthStatus = Status(type, 0m, monthActual, amber),
                 YtdBudget = 0m,
                 YtdActual = ytdActual,
                 YtdVariance = ytdActual,
                 YtdVariancePct = null,
-                YtdStatus = Status(type, 0m, ytdActual)
+                YtdStatus = Status(type, 0m, ytdActual, amber)
             });
         }
 
@@ -231,8 +232,8 @@ public static class FinanceBudgetCalculator
                 YtdBudget = own.Sum(l => l.YtdBudget),
                 YtdActual = own.Sum(l => l.YtdActual)
             };
-            t.MonthStatus = Status(type, t.MonthBudget, t.MonthActual);
-            t.YtdStatus = Status(type, t.YtdBudget, t.YtdActual);
+            t.MonthStatus = Status(type, t.MonthBudget, t.MonthActual, amber);
+            t.YtdStatus = Status(type, t.YtdBudget, t.YtdActual, amber);
             return t;
         }
 
@@ -246,7 +247,7 @@ public static class FinanceBudgetCalculator
             FiscalYearStart = fiscalStart,
             FiscalYearEnd = fiscalEnd,
             AsOf = asOf,
-            AmberThresholdPct = AmberThreshold * 100m,
+            AmberThresholdPct = amber * 100m,
             IncomeLines = lines.Where(l => l.Type == LedgerCategoryType.Income).ToList(),
             ExpenseLines = lines.Where(l => l.Type == LedgerCategoryType.Expense).ToList(),
             IncomeTotals = Totals(LedgerCategoryType.Income),

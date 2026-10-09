@@ -641,19 +641,25 @@ public class OwnerPaymentsController(
         var approvedTitle = "Tu pago fue aprobado";
         var approvedBody = $"Tu pago {payment.Reference} fue aprobado exitosamente. Toca para ver más detalles.";
 
-        dbContext.Notifications.Add(new Notification
+        // El aviso de pago recibido se puede apagar por edificio (Centro de configuracion); encendido es el comportamiento de siempre.
+        var notifyApproved = await PaymentReceivedNoticeActiveAsync(payment, ct);
+        if (notifyApproved)
         {
-            CompanyId = companyId.Value,
-            RecipientId = payment.OwnerId,
-            Type = NotificationType.PaymentApproved,
-            Title = approvedTitle,
-            Body = approvedBody,
-            EntityType = "OwnerPayment",
-            EntityId = payment.Id
-        });
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = companyId.Value,
+                RecipientId = payment.OwnerId,
+                Type = NotificationType.PaymentApproved,
+                Title = approvedTitle,
+                Body = approvedBody,
+                EntityType = "OwnerPayment",
+                EntityId = payment.Id
+            });
+        }
 
         await dbContext.SaveChangesAsync(ct);
-        await pushDispatcher.NotifyUserAsync(payment.OwnerId, approvedTitle, approvedBody, "OwnerPayment", payment.Id, ct);
+        if (notifyApproved)
+            await pushDispatcher.NotifyUserAsync(payment.OwnerId, approvedTitle, approvedBody, "OwnerPayment", payment.Id, ct);
 
         // Genera de una vez los borradores de factura de este pago (uno por comprobante) — la emision
         // (elegir timbrado y numerar) sigue siendo un paso manual aparte, porque ahi se consume un
@@ -896,19 +902,25 @@ public class OwnerPaymentsController(
 
         var title = "Registramos tu pago";
         var body = $"Se registró tu pago {ownerPayment.Reference} por Gs. {ComprobanteService.Gs(request.Amount)}. Toca para ver más detalles.";
-        dbContext.Notifications.Add(new Notification
+        // El aviso de pago recibido se puede apagar por edificio (Centro de configuracion); encendido es el comportamiento de siempre.
+        var notifyRegistered = await PaymentReceivedNoticeActiveAsync(ownerPayment, ct);
+        if (notifyRegistered)
         {
-            CompanyId = companyId.Value,
-            RecipientId = owner.Id,
-            Type = NotificationType.PaymentApproved,
-            Title = title,
-            Body = body,
-            EntityType = "OwnerPayment",
-            EntityId = ownerPayment.Id
-        });
+            dbContext.Notifications.Add(new Notification
+            {
+                CompanyId = companyId.Value,
+                RecipientId = owner.Id,
+                Type = NotificationType.PaymentApproved,
+                Title = title,
+                Body = body,
+                EntityType = "OwnerPayment",
+                EntityId = ownerPayment.Id
+            });
+        }
 
         await dbContext.SaveChangesAsync(ct);
-        await pushDispatcher.NotifyUserAsync(owner.Id, title, body, "OwnerPayment", ownerPayment.Id, ct);
+        if (notifyRegistered)
+            await pushDispatcher.NotifyUserAsync(owner.Id, title, body, "OwnerPayment", ownerPayment.Id, ct);
         await invoiceDrafts.CreateDraftsFromOwnerPaymentAsync(ownerPayment, tenantContext.UserId, ct);
 
         var saved = await dbContext.OwnerPayments
@@ -1333,6 +1345,21 @@ public class OwnerPaymentsController(
     private sealed class PeriodClosedException(ClosedMonth month) : InvalidOperationException(FinancePeriodGuard.MessageFor(month))
     {
         public ClosedMonth Month { get; } = month;
+    }
+
+    // Aviso "pago recibido" del Centro de configuracion: encendido salvo que el edificio lo haya apagado. Un pago de varios edificios avisa
+    // si el aviso esta encendido en alguno de ellos.
+    private async Task<bool> PaymentReceivedNoticeActiveAsync(OwnerPayment payment, CancellationToken ct)
+    {
+        var unitIds = payment.Units.Where(u => !u.IsDeleted).Select(u => u.UnitId).Distinct().ToList();
+        var buildingIds = await dbContext.Units.AsNoTracking()
+            .Where(u => unitIds.Contains(u.Id))
+            .Select(u => u.BuildingId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (buildingIds.Count == 0) return true;
+
+        return (await NoticeRules.BuildingsWithActiveAsync(dbContext, buildingIds, NoticeKind.PaymentReceived, ct)).Count > 0;
     }
 
     // Cierre contable de un mes: el primer mes cerrado entre los pagos indicados (cada uno en el edificio de su periodo, con su fecha).

@@ -18,4 +18,7 @@ public class UnitDto
     public string Floor { get; set; } = string.Empty;
     public decimal Coefficient { get; set; }
     public bool IsActive { get; set; }
+    // Exoneracion de mora (Centro de configuracion): la unidad no acumula mora automatica mientras este marcada.
+    public bool LateFeeExempt { get; set; }
+    public string? LateFeeExemptReason { get; set; }
 }

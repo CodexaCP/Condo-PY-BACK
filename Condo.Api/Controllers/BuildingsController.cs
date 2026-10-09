@@ -331,9 +331,10 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         }
 
         var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
+        LateFeeChangeNotifier.PendingPush? lateFeePush = null;
         if (lateFeeChanged && effectiveCompanyId.HasValue)
         {
-            await QueueLateFeeChangeNotificationsAsync(
+            lateFeePush = await new LateFeeChangeNotifier(dbContext, tenantContext).QueueAsync(
                 entity, effectiveCompanyId.Value,
                 previousRate, previousFrequency,
                 newRate, newFrequency,
@@ -349,6 +350,12 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return Conflict("Ya existe un edificio con ese codigo dentro de la empresa.");
         }
 
+        // El push sale recien con el cambio guardado.
+        if (lateFeePush is not null)
+        {
+            await pushDispatcher.NotifyUsersAsync(lateFeePush.RecipientIds, lateFeePush.Title, lateFeePush.Body, "Building", entity.Id, cancellationToken);
+        }
+
         entity.Condominium = condominium;
         return Ok(ToDto(entity, includeBankAccounts: true));
     }
@@ -359,91 +366,6 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
     private static decimal? NormalizedLateFeeRate(BuildingUpsertRequest request) =>
         request.LateFeeRatePercentage is > 0m ? decimal.Round(request.LateFeeRatePercentage.Value, 2) : null;
-
-    private static string LateFeeConfigLabel(decimal? rate, LateFeeFrequency? frequency) =>
-        rate.HasValue && frequency.HasValue
-            ? $"{rate.Value:0.##}% {LateFeeFrequencyLabel(frequency.Value)}"
-            : "sin mora";
-
-    private static string LateFeeFrequencyLabel(LateFeeFrequency frequency) => frequency switch
-    {
-        LateFeeFrequency.Daily => "diario",
-        LateFeeFrequency.Weekly => "semanal",
-        LateFeeFrequency.Biweekly => "quincenal",
-        _ => frequency.ToString()
-    };
-
-    private async Task QueueLateFeeChangeNotificationsAsync(
-        Building building,
-        Guid companyId,
-        decimal? previousRate, LateFeeFrequency? previousFrequency,
-        decimal? newRate, LateFeeFrequency? newFrequency,
-        CancellationToken cancellationToken)
-    {
-        var actorId = tenantContext.UserId;
-        var actorName = await dbContext.ApplicationUsers
-            .AsNoTracking()
-            .Where(x => x.Id == actorId)
-            .Select(x => x.FullName)
-            .FirstOrDefaultAsync(cancellationToken) ?? "Un administrador";
-
-        var recipientIds = new HashSet<Guid>();
-
-        // Propietarios de unidades del edificio
-        recipientIds.UnionWith(await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == building.Id)
-            .Select(x => x.OwnerId)
-            .ToListAsync(cancellationToken));
-
-        // Residentes activos (vinculados directamente por Id de usuario)
-        recipientIds.UnionWith(await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.EndDate == null
-                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == building.Id
-                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId != null)
-            .Select(x => x.Resident!.ApplicationUserId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken));
-
-        // Managers con acceso al edificio
-        recipientIds.UnionWith(await dbContext.UserBuildingAccesses
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.BuildingId == building.Id)
-            .Select(x => x.ApplicationUserId)
-            .ToListAsync(cancellationToken));
-
-        // Admins y operadores de la empresa
-        recipientIds.UnionWith(await dbContext.ApplicationUsers
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.IsActive && x.CompanyId == companyId
-                     && (x.Role == UserRole.CompanyAdmin || x.Role == UserRole.CompanyOperator))
-            .Select(x => x.Id)
-            .ToListAsync(cancellationToken));
-
-        var previousLabel = LateFeeConfigLabel(previousRate, previousFrequency);
-        var newLabel = LateFeeConfigLabel(newRate, newFrequency);
-        var changedAt = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
-        var body = $"{actorName} cambió el interés por mora del edificio {building.Name} de «{previousLabel}» a «{newLabel}» el {changedAt}.";
-
-        const string title = "Cambio en interés por mora";
-
-        foreach (var recipientId in recipientIds)
-        {
-            dbContext.Notifications.Add(new Notification
-            {
-                CompanyId = companyId,
-                RecipientId = recipientId,
-                Type = NotificationType.LateFeeConfigChanged,
-                Title = title,
-                Body = body,
-                EntityType = "Building",
-                EntityId = building.Id
-            });
-        }
-
-        await pushDispatcher.NotifyUsersAsync(recipientIds, title, body, "Building", building.Id, cancellationToken);
-    }
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
