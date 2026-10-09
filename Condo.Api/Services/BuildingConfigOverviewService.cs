@@ -53,6 +53,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.Suppliers => await SuppliersAsync(building, cancellationToken),
                 ConfigSectionKeys.Closing => await ClosingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Reconciliation => await ReconciliationAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
                 _ => null
             };
@@ -364,6 +365,44 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "self",
             LinkTab = ConfigSectionKeys.Suppliers
+        };
+    }
+
+    // ── 11. Conciliación bancaria ────────────────────────────────────────────
+
+    private async Task<ConfigSectionDto> ReconciliationAsync(Building b, FinanceModuleState finance, CancellationToken cancellationToken)
+    {
+        var unavailable = FinanceUnavailable(finance);
+        if (unavailable is not null)
+        {
+            return unavailable;
+        }
+
+        var bankAccounts = await dbContext.FinancialAccounts.AsNoTracking()
+            .CountAsync(x => !x.IsDeleted && x.BuildingId == b.Id && x.Type == FinancialAccountType.Bank, cancellationToken);
+        var rows = await dbContext.BankReconciliations.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => new { x.Status, x.StatementDate })
+            .ToListAsync(cancellationToken);
+        var completed = rows.Where(x => x.Status == BankReconciliationStatus.Completed).ToList();
+        var last = completed.Count == 0 ? (DateOnly?)null : completed.Max(x => x.StatementDate);
+
+        var reason = bankAccounts == 0
+            ? "El edificio no tiene cuentas bancarias cargadas en Finanzas."
+            : completed.Count == 0 ? "Todavía no se concilió ninguna cuenta bancaria." : null;
+
+        return new ConfigSectionDto
+        {
+            Status = completed.Count > 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = reason is null ? [] : [reason],
+            Summary =
+            [
+                Item("Cuentas bancarias", bankAccounts.ToString(CultureInfo.InvariantCulture)),
+                Item("Última conciliación cerrada", last?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)),
+                Item("Conciliaciones abiertas", rows.Count(x => x.Status == BankReconciliationStatus.Open).ToString(CultureInfo.InvariantCulture))
+            ],
+            LinkKind = "finance",
+            LinkTab = "reconciliation"
         };
     }
 

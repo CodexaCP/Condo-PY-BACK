@@ -61,6 +61,8 @@ public interface ICondoDbContext
     DbSet<FinancePeriodClosure> FinancePeriodClosures { get; }
     DbSet<BuildingNoticeRule> BuildingNoticeRules { get; }
     DbSet<Supplier> Suppliers { get; }
+    DbSet<BankReconciliation> BankReconciliations { get; }
+    DbSet<BankReconciledMovement> BankReconciledMovements { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }

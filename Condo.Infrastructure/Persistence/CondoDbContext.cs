@@ -60,6 +60,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<FinancePeriodClosure> FinancePeriodClosures => Set<FinancePeriodClosure>();
     public DbSet<BuildingNoticeRule> BuildingNoticeRules => Set<BuildingNoticeRule>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
+    public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1115,6 +1117,45 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<FinanceAuditLog>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Finanzas: conciliacion bancaria manual ─────────────────────────────
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.StatementBalance).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.ReconciledBalanceAtCompletion).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.Notes).HasMaxLength(500);
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.ReopenReason).HasMaxLength(500);
+        modelBuilder.Entity<BankReconciliation>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BankReconciliation>().HasIndex(x => new { x.BuildingId, x.AccountId, x.StatementDate });
+        // A lo sumo una conciliacion abierta por cuenta.
+        modelBuilder.Entity<BankReconciliation>().HasIndex(x => x.AccountId).IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Status] = 'Open'");
+        modelBuilder.Entity<BankReconciliation>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankReconciliation>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankReconciliation>()
+            .HasOne(x => x.Account).WithMany()
+            .HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BankReconciledMovement>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BankReconciledMovement>().Property(x => x.Description).HasMaxLength(300);
+        // Un movimiento del libro no se concilia dos veces (entre las marcas vigentes).
+        modelBuilder.Entity<BankReconciledMovement>().HasIndex(x => new { x.BuildingId, x.AccountId, x.SourceType, x.SourceId }).IsUnique()
+            .HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<BankReconciledMovement>().HasIndex(x => x.ReconciliationId);
+        modelBuilder.Entity<BankReconciledMovement>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankReconciledMovement>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankReconciledMovement>()
+            .HasOne(x => x.Account).WithMany()
+            .HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BankReconciledMovement>()
+            .HasOne(x => x.Reconciliation).WithMany(x => x.Movements)
+            .HasForeignKey(x => x.ReconciliationId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Centro de configuracion: proveedores, cuentas por pagar e IVA ──────
         modelBuilder.Entity<Supplier>().Property(x => x.Name).HasMaxLength(200);

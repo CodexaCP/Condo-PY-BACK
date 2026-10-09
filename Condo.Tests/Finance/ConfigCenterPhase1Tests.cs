@@ -195,15 +195,15 @@ public class ConfigCenterPhase1Tests : IDisposable
         _env.Access.Buildings.Add(_env.Building.Id);
 
         _env.LoginAs("CompanyAdmin");
-        Assert.Equal(11, (await Overview()).Sections.Count);
+        Assert.Equal(12, (await Overview()).Sections.Count);
 
         _env.LoginAs("CompanyOperator");
-        Assert.Equal(11, (await Overview()).Sections.Count);
+        Assert.Equal(12, (await Overview()).Sections.Count);
 
         _env.LoginAs("BuildingManager");
         var manager = await Overview();
         Assert.Equal(
-            [ConfigSectionKeys.LateFee, ConfigSectionKeys.Chart, ConfigSectionKeys.Taxes, ConfigSectionKeys.Suppliers, ConfigSectionKeys.Closing, ConfigSectionKeys.Budget],
+            [ConfigSectionKeys.LateFee, ConfigSectionKeys.Chart, ConfigSectionKeys.Taxes, ConfigSectionKeys.Suppliers, ConfigSectionKeys.Closing, ConfigSectionKeys.Budget, ConfigSectionKeys.Reconciliation],
             manager.Sections.Select(s => s.Key).ToArray());
     }
 
