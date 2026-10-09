@@ -20,7 +20,9 @@ public class FinanceExportController(
     ITenantContext tenantContext,
     FinanceModuleGate gate,
     FinanceLedgerService ledgerService,
-    FinanceReportService reports) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
+    FinanceReportService reports,
+    FinanceVatService vat,
+    AccountingEntriesService accounting) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
     // Hora local de Paraguay (UTC-3), la misma que usa el libro para decidir "hoy".
     private static DateTime NowLocal() => DateTime.UtcNow.AddHours(-3);
@@ -158,7 +160,7 @@ public class FinanceExportController(
         return Excel(workbook, FinanceExcelExporter.FileName("plan-de-cuentas", ctx!.BuildingName, FinancePeriods.Today().ToString("yyyyMMdd")));
     }
 
-    /// <summary>Paquete para el contador: resumen, plan de cuentas, saldos, movimientos, flujo de caja, presupuesto, presupuesto vs. real y fondo, del ejercicio.</summary>
+    /// <summary>Paquete para el contador: resumen, plan de cuentas, saldos, movimientos, asientos sugeridos, libro de compras, flujo de caja, presupuesto, presupuesto vs. real y fondo, del ejercicio.</summary>
     [HttpGet("accountant-pack")]
     public async Task<IActionResult> AccountantPack([FromQuery] Guid buildingId, [FromQuery] int? fiscalYear, CancellationToken cancellationToken)
     {
@@ -210,8 +212,24 @@ public class FinanceExportController(
 
         var (fund, _) = await reports.ReserveFundAsync(ctx, fiscalStart, asOf, cancellationToken, unpagedMovements: true);
 
+        // Asientos sugeridos y libro de compras (IVA credito) del ejercicio, hasta la misma fecha que el resto.
+        var (entries, entriesError) = await accounting.EntriesAsync(ctx, fiscalStart, asOf, cancellationToken);
+        if (entriesError is not null)
+        {
+            return BadRequest(entriesError);
+        }
+
+        var (purchases, purchasesError) = await vat.PurchasesAsync(buildingId, ctx.BuildingName, fiscalStart, asOf, cancellationToken);
+        if (purchasesError is not null)
+        {
+            return BadRequest(purchasesError);
+        }
+
         using var workbook = new XLWorkbook();
-        var sheets = new List<string> { "Plan de cuentas", "Saldos", "Movimientos", "Flujo de caja", "Presupuesto", "Presupuesto vs real" };
+        var sheets = new List<string>
+        {
+            "Plan de cuentas", "Saldos", "Movimientos", "Asientos", "Sumas por cuenta", "Libro de compras", "Flujo de caja", "Presupuesto", "Presupuesto vs real"
+        };
         if (fund is { HasFundAccount: true }) sheets.Add("Fondo de reserva");
 
         FinanceExcelExporter.AddSummary(
@@ -219,6 +237,8 @@ public class FinanceExportController(
         FinanceExcelExporter.AddChart(workbook, ctx);
         FinanceExcelExporter.AddBalances(workbook, balances);
         FinanceExcelExporter.AddMovements(workbook, ctx, movements!);
+        FinanceExcelExporter.AddAccountingEntries(workbook, entries!);
+        FinanceExcelExporter.AddVatPurchases(workbook, purchases!);
         FinanceExcelExporter.AddCashFlow(workbook, ctx, flow!);
         FinanceExcelExporter.AddBudget(workbook, ctx, budget);
         FinanceExcelExporter.AddBudgetVsActual(workbook, ctx, vs!);

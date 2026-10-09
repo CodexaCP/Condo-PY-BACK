@@ -271,6 +271,76 @@ public static class FinanceExcelExporter
         }
     }
 
+    /// <summary>
+    /// Asientos sugeridos (partida doble, criterio de caja): un renglon por cuenta del asiento, con debe y haber, y una hoja de sumas por cuenta.
+    /// Los asientos a los que les falta una cuenta del plan se rotulan «Incompleto» para que el contador no los tome por cuadrados.
+    /// </summary>
+    public static void AddAccountingEntries(XLWorkbook wb, AccountingEntriesDto entries)
+    {
+        var ws = Sheet(wb, "Asientos", $"Asientos sugeridos — {entries.BuildingName}",
+            $"Del {entries.From:dd/MM/yyyy} al {entries.To:dd/MM/yyyy}. Criterio de caja: un asiento por cada movimiento del libro. Son sugeridos, no asentados.");
+        string[] headers = ["N°", "Fecha", "Código", "Código del contador", "Cuenta", "Debe", "Haber", "Descripción", "Tercero", "Referencia", "Estado"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var entry in entries.Entries)
+        {
+            foreach (var line in entry.Lines)
+            {
+                ws.Cell(row, 1).Value = entry.Number;
+                ws.Cell(row, 2).Value = entry.Date.ToDateTime(TimeOnly.MinValue);
+                ws.Cell(row, 2).Style.DateFormat.Format = DateFormat;
+                ws.Cell(row, 3).Value = line.Code;
+                ws.Cell(row, 4).Value = line.ExternalCode ?? string.Empty;
+                ws.Cell(row, 5).Value = line.Name;
+                if (line.Debit != 0m) Amount(ws, row, 6, line.Debit);
+                if (line.Credit != 0m) Amount(ws, row, 7, line.Credit);
+                ws.Cell(row, 8).Value = entry.Description;
+                ws.Cell(row, 9).Value = entry.ThirdParty;
+                ws.Cell(row, 10).Value = entry.Reference;
+                ws.Cell(row, 11).Value = entry.IsComplete ? "Completo" : "Incompleto";
+                if (!entry.IsComplete) ws.Range(row, 1, row, headers.Length).Style.Font.SetFontColor(XLColor.Red);
+                row++;
+            }
+        }
+
+        ws.Cell(row, 1).Value = "Total";
+        Amount(ws, row, 6, entries.TotalDebit);
+        Amount(ws, row, 7, entries.TotalCredit);
+        ws.Range(row, 1, row, headers.Length).Style.Font.SetBold();
+        ws.Range(row, 1, row, headers.Length).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [7, 12, 12, 20, 40, 16, 16, 50, 26, 20, 12]);
+
+        if (entries.IncompleteCount > 0)
+        {
+            ws.Cell(row + 2, 1).Value =
+                $"Atención: {entries.IncompleteCount} asientos están incompletos porque falta la cuenta del plan de: {string.Join(", ", entries.Pending)}. Asignala en el Centro de configuración.";
+            ws.Cell(row + 2, 1).Style.Font.SetFontColor(XLColor.Red);
+        }
+
+        var sums = Sheet(wb, "Sumas por cuenta", $"Sumas por cuenta — {entries.BuildingName}",
+            $"Del {entries.From:dd/MM/yyyy} al {entries.To:dd/MM/yyyy}. Suma del debe y del haber de cada cuenta en los asientos sugeridos.");
+        Header(sums, 4, "Código", "Código del contador", "Cuenta", "Debe", "Haber", "Saldo (debe − haber)");
+        var line2 = 5;
+        foreach (var t in entries.Totals)
+        {
+            sums.Cell(line2, 1).Value = t.Code;
+            sums.Cell(line2, 2).Value = t.ExternalCode ?? string.Empty;
+            sums.Cell(line2, 3).Value = t.Missing ? $"{t.Name} (sin cuenta del plan)" : t.Name;
+            Amount(sums, line2, 4, t.Debit);
+            Amount(sums, line2, 5, t.Credit);
+            Amount(sums, line2, 6, t.Debit - t.Credit);
+            line2++;
+        }
+
+        sums.Cell(line2, 1).Value = "Total";
+        Amount(sums, line2, 4, entries.TotalDebit);
+        Amount(sums, line2, 5, entries.TotalCredit);
+        sums.Range(line2, 1, line2, 6).Style.Font.SetBold();
+        sums.Range(line2, 1, line2, 6).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+        Finish(sums, 4, Math.Max(line2 - 1, 4), 6, [12, 20, 48, 18, 18, 22]);
+    }
+
     /// <summary>Flujo de caja del ejercicio: un renglon por rubro con un importe por mes.</summary>
     public static void AddCashFlow(XLWorkbook wb, LedgerContext ctx, FinanceCashFlowDto flow)
     {

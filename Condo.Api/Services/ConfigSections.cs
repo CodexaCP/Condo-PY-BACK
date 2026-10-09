@@ -14,6 +14,7 @@ public static class ConfigSectionKeys
     public const string Chart = "chart";
     public const string Budget = "budget";
     public const string Reconciliation = "reconciliation";
+    public const string Accounting = "accounting";
     public const string Taxes = "taxes";
     public const string Suppliers = "suppliers";
     public const string Closing = "closing";
@@ -55,7 +56,8 @@ public static class ConfigSections
         new(ConfigSectionKeys.Closing, 9, "Período y cierre", false, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.Budget, 10, "Presupuesto y alertas", false, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.Reconciliation, 11, "Conciliación bancaria", false, AllStaff, SuperAndAdmin),
-        new(ConfigSectionKeys.Documents, 12, "Documentos y comunicación", false, NoManager, SuperAndAdmin)
+        new(ConfigSectionKeys.Accounting, 12, "Asientos contables", false, AllStaff, SuperAndAdmin),
+        new(ConfigSectionKeys.Documents, 13, "Documentos y comunicación", false, NoManager, SuperAndAdmin)
     ];
 
     public static ConfigSectionDefinition? Find(string key) =>

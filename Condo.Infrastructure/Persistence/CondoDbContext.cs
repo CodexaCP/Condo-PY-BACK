@@ -62,6 +62,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
+    public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1156,6 +1157,25 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BankReconciledMovement>()
             .HasOne(x => x.Reconciliation).WithMany(x => x.Movements)
             .HasForeignKey(x => x.ReconciliationId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Finanzas: contrapartidas de los asientos sugeridos ─────────────────
+        modelBuilder.Entity<LedgerAccountRole>().Property(x => x.Role).HasConversion<string>().HasMaxLength(30);
+        // Una cuenta financiera tiene una sola cuenta del plan, y el IVA credito una por edificio (el NULL del IVA cuenta como un valor).
+        modelBuilder.Entity<LedgerAccountRole>().HasIndex(x => new { x.BuildingId, x.Role, x.FinancialAccountId }).IsUnique()
+            .HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<LedgerAccountRole>().HasIndex(x => x.LedgerCategoryId);
+        modelBuilder.Entity<LedgerAccountRole>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<LedgerAccountRole>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<LedgerAccountRole>()
+            .HasOne(x => x.FinancialAccount).WithMany()
+            .HasForeignKey(x => x.FinancialAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<LedgerAccountRole>()
+            .HasOne(x => x.LedgerCategory).WithMany()
+            .HasForeignKey(x => x.LedgerCategoryId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Centro de configuracion: proveedores, cuentas por pagar e IVA ──────
         modelBuilder.Entity<Supplier>().Property(x => x.Name).HasMaxLength(200);

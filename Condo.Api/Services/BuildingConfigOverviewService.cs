@@ -54,6 +54,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.Closing => await ClosingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Reconciliation => await ReconciliationAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Accounting => await AccountingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
                 _ => null
             };
@@ -403,6 +404,46 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "finance",
             LinkTab = "reconciliation"
+        };
+    }
+
+    // ── 12. Asientos contables ───────────────────────────────────────────────
+
+    private async Task<ConfigSectionDto> AccountingAsync(Building b, FinanceModuleState finance, CancellationToken cancellationToken)
+    {
+        var unavailable = FinanceUnavailable(finance);
+        if (unavailable is not null)
+        {
+            return unavailable;
+        }
+
+        var accountIds = await dbContext.FinancialAccounts.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id && x.IsActive)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        var roles = await dbContext.LedgerAccountRoles.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => new { x.Role, x.FinancialAccountId })
+            .ToListAsync(cancellationToken);
+        var assigned = accountIds.Count(id => roles.Any(r => r.Role == LedgerAccountRoleKind.FinancialAccount && r.FinancialAccountId == id));
+        var hasVat = roles.Any(r => r.Role == LedgerAccountRoleKind.VatCredit);
+
+        var reasons = new List<string>();
+        if (accountIds.Count == 0) reasons.Add("El edificio no tiene cuentas financieras activas en Finanzas.");
+        else if (assigned < accountIds.Count) reasons.Add($"Faltan asignar {accountIds.Count - assigned} cuentas financieras a una cuenta del plan.");
+        if (!hasVat) reasons.Add("Falta la cuenta del plan para el IVA crédito fiscal.");
+
+        return new ConfigSectionDto
+        {
+            Status = accountIds.Count > 0 && reasons.Count == 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = reasons,
+            Summary =
+            [
+                Item("Cuentas financieras con cuenta del plan", $"{assigned} de {accountIds.Count}"),
+                Item("IVA crédito fiscal", hasVat ? "Asignado" : "Sin asignar")
+            ],
+            LinkKind = "finance",
+            LinkTab = "accounting"
         };
     }
 

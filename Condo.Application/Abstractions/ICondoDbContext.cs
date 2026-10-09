@@ -63,6 +63,7 @@ public interface ICondoDbContext
     DbSet<Supplier> Suppliers { get; }
     DbSet<BankReconciliation> BankReconciliations { get; }
     DbSet<BankReconciledMovement> BankReconciledMovements { get; }
+    DbSet<LedgerAccountRole> LedgerAccountRoles { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }
