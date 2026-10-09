@@ -19,6 +19,10 @@ namespace Condo.Api.Controllers;
 [Route("api/buildings")]
 public partial class BuildingsController(ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, PushDispatcher pushDispatcher, IWebHostEnvironment env) : ControllerBase
 {
+    // Historial de cambios del Centro de configuracion; solo agrega filas al contexto (las guarda el SaveChanges del endpoint).
+    private ConfigAuditWriter? _configAudit;
+    private ConfigAuditWriter configAudit => _configAudit ??= new ConfigAuditWriter(dbContext, tenantContext);
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingDto>>> GetAll(CancellationToken cancellationToken)
     {
@@ -273,6 +277,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             }
         }
 
+        // Foto de la configuracion antes de aplicar los cambios, para dejar en el historial lo que cambio de verdad.
+        var configBefore = BuildingConfigSnapshot.Capture(entity, entity.BankAccounts);
+
         var previousRate = entity.LateFeeRatePercentage;
         var previousFrequency = entity.LateFeeFrequency;
         var newRate = NormalizedLateFeeRate(request);
@@ -308,8 +315,20 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
         // La ficha de registro: el encargado del edificio edita lo general y lo legal; lo fiscal, los datos de cobro y
         // los valores por defecto de cobranza los define quien administra (igual que los porcentajes de la liquidacion).
         BuildingProfile.Apply(entity, request, canEditFinancial: !isBuildingManager);
+        var addedBankAccounts = new List<BuildingBankAccount>();
         if (!isBuildingManager && request.BankAccounts is not null && effectiveCompanyId.HasValue)
-            dbContext.BuildingBankAccounts.AddRange(BuildingProfile.SyncBankAccounts(entity, effectiveCompanyId.Value, request.BankAccounts));
+        {
+            addedBankAccounts = BuildingProfile.SyncBankAccounts(entity, effectiveCompanyId.Value, request.BankAccounts);
+            dbContext.BuildingBankAccounts.AddRange(addedBankAccounts);
+        }
+
+        // Historial de cambios del Centro de configuracion: queda en el mismo guardado que el cambio.
+        if (effectiveCompanyId.HasValue)
+        {
+            // Las cuentas nuevas pueden estar ya en la coleccion (EF las engancha al agregarlas): Distinct evita contarlas dos veces.
+            var configAfter = BuildingConfigSnapshot.Capture(entity, entity.BankAccounts.Concat(addedBankAccounts).Distinct());
+            configAudit.AddBuildingChanges(effectiveCompanyId.Value, entity.Id, configBefore, configAfter);
+        }
 
         var lateFeeChanged = previousRate != newRate || previousFrequency != newFrequency;
         if (lateFeeChanged && effectiveCompanyId.HasValue)

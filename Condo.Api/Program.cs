@@ -36,6 +36,7 @@ builder.Services.AddScoped<Condo.Api.Services.ComprobanteService>();
 builder.Services.AddScoped<Condo.Api.Services.InvoiceDraftService>();
 builder.Services.AddScoped<Condo.Api.Services.PushDispatcher>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceModuleGate>();
+builder.Services.AddScoped<Condo.Api.Services.BuildingConfigOverviewService>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceScope>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceAudit>();

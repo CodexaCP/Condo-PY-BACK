@@ -121,6 +121,12 @@ public class FinanceBudgetController(
             }
         }
 
+        if (affected > 0)
+        {
+            Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Budget, "Updated",
+                $"Presupuesto del ejercicio {fiscalYear}: se modificaron {affected} celdas.", "BudgetLine", null);
+        }
+
         var conflict = await SaveOrConflictAsync(cancellationToken);
         if (conflict is not null)
         {
@@ -181,6 +187,13 @@ public class FinanceBudgetController(
             {
                 affected++;
             }
+        }
+
+        if (affected > 0)
+        {
+            Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Budget, "Copied",
+                $"Presupuesto del ejercicio {fiscalYear}: se copió del ejercicio anterior ({affected} celdas{(overwrite ? ", reemplazando las cargadas" : string.Empty)}).",
+                "BudgetLine", null);
         }
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
@@ -260,6 +273,13 @@ public class FinanceBudgetController(
                     affected++;
                 }
             }
+        }
+
+        if (affected > 0)
+        {
+            Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Budget, "Filled",
+                $"Presupuesto del ejercicio {fiscalYear}: se completó con el promedio real de los últimos {window.Count} meses ({affected} celdas{(overwrite ? ", reemplazando las cargadas" : string.Empty)}).",
+                "BudgetLine", null);
         }
 
         var conflict = await SaveOrConflictAsync(cancellationToken);

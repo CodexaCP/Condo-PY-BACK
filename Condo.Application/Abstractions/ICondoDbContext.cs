@@ -57,6 +57,7 @@ public interface ICondoDbContext
     DbSet<BuildingBankAccount> BuildingBankAccounts { get; }
     DbSet<LedgerCategory> LedgerCategories { get; }
     DbSet<BudgetLine> BudgetLines { get; }
+    DbSet<FinanceAuditLog> FinanceAuditLogs { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }

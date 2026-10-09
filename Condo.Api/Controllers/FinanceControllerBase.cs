@@ -27,6 +27,11 @@ public abstract class FinanceControllerBase(
     protected ITenantContext Tenant => tenantContext;
     protected FinanceModuleGate Gate => gate;
 
+    // Historial de cambios del Centro de configuracion: solo agrega la fila al contexto; la guarda el SaveChanges del endpoint,
+    // en la misma transaccion que el cambio.
+    private ConfigAuditWriter? _audit;
+    protected ConfigAuditWriter Audit => _audit ??= new ConfigAuditWriter(dbContext, tenantContext);
+
     // Roles administrativos con acceso al modulo (el resto de los roles usa la app movil y no ve Finanzas).
     protected bool IsFinanceRole =>
         FinanceRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase);

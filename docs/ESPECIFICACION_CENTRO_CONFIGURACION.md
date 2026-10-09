@@ -394,3 +394,36 @@ Pendiente de Tony además: confirmar si el cierre de período puede ser **opcion
 | 8 Ocupación | Medio | Bajo | Bajo |
 
 Si hay que priorizar por dinero: **3 antes que 2**, porque corrige un defecto que hoy puede dejar de cobrar mora. La fase 1 va primero igual: crea la auditoría que las demás necesitan.
+
+---
+
+## 12. Estado de implementación
+
+Decisiones de Tony (2026-10-09) que rigen la ejecución: trabajo en la rama `feature/centro-configuracion`; **un commit por fase** al terminar compilando limpio y con las pruebas en verde, sin push salvo indicación; el cierre de período es **opcional por edificio y apagado por defecto**; mora, cierre y proveedores los editan **SuperAdmin y Administrador de empresa**; el frente web se hace **al final de todo**.
+
+### 12.1 Fase 1 — Centro de configuración y auditoría (backend, hecha 2026-10-09)
+
+**Datos:** tabla `FinanceAuditLogs` (entidad `FinanceAuditLog`; migración EF `20261009163132_ConfigCenterAuditLog` y su script `.sql` idempotente). Solo agrega una tabla y tres índices; no toca datos existentes. En vez de `BeforeJson`/`AfterJson` separados guarda `ChangesJson`, una lista de `{ field, label, before, after }` (más legible para el historial); `Summary` lleva la frase para mostrar.
+
+**Historial:** `ConfigAuditWriter` solo agrega la fila al contexto: queda en el mismo `SaveChanges` que el cambio (todo o nada). Se engancha en:
+- Ficha del edificio (`PUT /api/buildings/{id}`): una entrada por **sección** que cambió (identidad, cobro, mora, fondos), comparando una foto (`BuildingConfigSnapshot`) antes y después; si no cambió nada, no escribe. Incluye las cuentas bancarias del edificio. Las plantillas de documentos aún no se registran (llegan con la sección 12).
+- Finanzas: habilitar/apagar el módulo, fecha de arranque y mes del ejercicio, cuenta por defecto, completar la configuración inicial, cuentas financieras (alta, edición con cambios, baja), plan de cuentas (alta, edición con cambios, baja, activar/desactivar en bloque, copiar de otro edificio, plan genérico y Excel del cliente; el **reemplazo** del plan lleva su entrada dentro de la misma transacción) y presupuesto (guardar, copiar, completar con el promedio).
+- Timbrados (alta y desactivación), sección de identidad.
+
+**API** (`/api/building-config/{buildingId}`):
+- `GET overview`: secciones visibles para el rol, con estado, motivos, resumen, `required`, `canEdit`, y a dónde se edita (`linkKind` = `building` o `finance`, `linkTab`). Devuelve `requiredCount`, `readyCount`, `readyToOperate`, `financeAvailable`, `canViewAudit`. Roles: los cuatro administrativos; otro rol responde 403 `building_config_forbidden`; un edificio ajeno o inexistente, 404.
+- `GET audit`: historial paginado (más reciente primero), filtros `section`, `userId`, `from`, `to`; muestra el nombre de quien lo hizo. Solo **SuperAdmin y Administrador de empresa** (el historial contiene correos y nombres; la especificación original no lo restringía de forma explícita).
+
+**Secciones incluidas en la fase 1:** 1 Identidad y fiscal, 2 Cobro y vencimientos, 3 Política de mora (resumen; se edita en la ficha), 4 Regla de pago (informativa), 5 Fondos (resumen), 6 Plan de cuentas y cuentas financieras, 10 Presupuesto. Las demás se suman en su fase.
+
+**Reglas de estado tal como quedaron** (ajustes respecto de la sección 3.3):
+- Identidad: RUC, razón social, régimen de IVA y **al menos un timbrado vigente** (activo y dentro de su fecha de vigencia). Se exige siempre, no solo según el modo de facturación: hoy la emisión de facturas siempre necesita un timbrado vigente, sea cual sea el modo.
+- Cobro: día de vencimiento y (una cuenta bancaria activa o instrucciones de pago).
+- Mora y Fondos: **no son obligatorias en esta fase** (`required = false`): configuradas se ven completas, y sin configurar quedan «Opcional». Pasan a obligatorias en la fase 3, cuando exista la confirmación explícita de «sin mora» / «no aplica»; antes, un edificio sin mora no tiene forma de decirlo y quedaría incompleto para siempre.
+- Plan de cuentas: «No disponible» si el módulo Finanzas no está habilitado o el plan no lo incluye (no cuenta para el indicador); completo cuando se completó la configuración inicial.
+- Regla de pago: siempre completa; muestra la regla vigente (comprobante completo, del más antiguo al más nuevo, sin parciales ni saldo a favor).
+- Indicador: cuentan solo las secciones con `required = true` y disponibles.
+
+**Pruebas:** 26 pruebas nuevas (`ConfigCenterPhase1Tests`): estados y motivos, timbrado vencido o inactivo, roles y `canEdit`, 403 y 404, historial de cuentas, fecha de arranque, plan genérico, alta de cuenta del plan, paginación y filtros, nombre de usuario, aislamiento entre edificios, permisos del historial, y el guardado real de la ficha (una entrada por sección, sin entrada si no hay cambios). La prueba del guardado de la ficha detectó que una cuenta bancaria nueva se contaba dos veces en la foto «después» (EF la engancha a la colección del edificio al agregarla); quedó corregido. Suite completa: 827 pasan, 15 omitidas (las que exigen SQL Server).
+
+**Pendiente de esta fase para el final:** todo el frente web (secciones 6.1 a 6.5), incluido el `?tab=` de la ficha.

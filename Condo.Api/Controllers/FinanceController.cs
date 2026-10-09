@@ -113,6 +113,7 @@ public class FinanceController(
 
         settings.EnabledAtUtc = now;
         settings.EnabledByUserId = Tenant.UserId;
+        Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Chart, "Enabled", "Se habilitó el módulo Finanzas del edificio.", "Building", buildingId);
 
         // Plantilla estandar solo la primera vez: si el edificio ya tiene rubros (apagado y vuelto a encender) se respetan.
         var hasCategories = await Db.LedgerCategories.AnyAsync(x => !x.IsDeleted && x.BuildingId == buildingId, cancellationToken);
@@ -146,6 +147,12 @@ public class FinanceController(
 
         // Apagar conserva la configuracion y los datos: al volver a encenderlo sigue todo como estaba.
         building.FinanceModuleEnabled = false;
+        var disabledCompanyId = await ResolveCompanyIdAsync(buildingId, cancellationToken);
+        if (disabledCompanyId.HasValue)
+        {
+            Audit.Add(disabledCompanyId.Value, buildingId, ConfigSectionKeys.Chart, "Disabled", "Se apagó el módulo Finanzas del edificio.", "Building", buildingId);
+        }
+
         await Db.SaveChangesAsync(cancellationToken);
 
         return Ok((await BuildAdminRowsAsync(buildingId, cancellationToken)).Single());
@@ -200,8 +207,28 @@ public class FinanceController(
             return BadRequest(NoCompanyMessage);
         }
 
+        var previousStart = settings.FinanceStartDate;
+        var previousFiscalMonth = settings.FiscalYearStartMonth;
         settings.FinanceStartDate = startDate;
         settings.FiscalYearStartMonth = request.FiscalYearStartMonth;
+
+        var settingsChanges = new List<ConfigChange>();
+        if (previousStart != startDate)
+        {
+            settingsChanges.Add(new ConfigChange("financeStartDate", "Fecha de arranque", previousStart?.ToString("dd/MM/yyyy"), startDate.ToString("dd/MM/yyyy")));
+        }
+
+        if (previousFiscalMonth != request.FiscalYearStartMonth)
+        {
+            settingsChanges.Add(new ConfigChange("fiscalYearStartMonth", "Mes de inicio del ejercicio", previousFiscalMonth.ToString(), request.FiscalYearStartMonth.ToString()));
+        }
+
+        if (settingsChanges.Count > 0)
+        {
+            Audit.Add(settings.CompanyId, buildingId, ConfigSectionKeys.Chart, "Updated",
+                $"Configuración de Finanzas: cambió {string.Join(", ", settingsChanges.Select(x => x.Label))}.",
+                "FinanceSettings", settings.Id, settingsChanges);
+        }
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
         if (conflict is not null)
@@ -249,7 +276,19 @@ public class FinanceController(
             return BadRequest(NoCompanyMessage);
         }
 
+        var previousAccountId = settings.DefaultAccountId;
         settings.DefaultAccountId = request.AccountId;
+
+        if (previousAccountId != request.AccountId)
+        {
+            var accountNames = await Db.FinancialAccounts.AsNoTracking()
+                .Where(x => (previousAccountId != null && x.Id == previousAccountId) || (request.AccountId != null && x.Id == request.AccountId))
+                .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+            string? NameOf(Guid? id) => id.HasValue && accountNames.TryGetValue(id.Value, out var n) ? n : null;
+            Audit.Add(settings.CompanyId, buildingId, ConfigSectionKeys.Chart, "Updated", "Cambió la cuenta por defecto del libro.",
+                "FinanceSettings", settings.Id,
+                [new ConfigChange("defaultAccountId", "Cuenta por defecto", NameOf(previousAccountId), NameOf(request.AccountId))]);
+        }
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
         if (conflict is not null)
@@ -287,6 +326,8 @@ public class FinanceController(
             settings.SetupCompleted = true;
             settings.SetupCompletedAtUtc = DateTime.UtcNow;
             settings.SetupCompletedByUserId = Tenant.UserId;
+            Audit.Add(settings.CompanyId, buildingId, ConfigSectionKeys.Chart, "Completed",
+                "Se completó la configuración inicial de Finanzas.", "FinanceSettings", settings.Id);
         }
 
         var conflict = await SaveOrConflictAsync(cancellationToken);

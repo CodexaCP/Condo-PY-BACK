@@ -56,6 +56,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<BuildingBankAccount> BuildingBankAccounts => Set<BuildingBankAccount>();
     public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
     public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
+    public DbSet<FinanceAuditLog> FinanceAuditLogs => Set<FinanceAuditLog>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1087,6 +1088,22 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BudgetLine>()
             .HasOne(x => x.Category).WithMany()
             .HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Centro de configuracion del edificio: historial de cambios ─────────
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.Section).HasMaxLength(40);
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.Action).HasMaxLength(40);
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.Summary).HasMaxLength(500);
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.EntityType).HasMaxLength(60);
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.UserEmail).HasMaxLength(256);
+        modelBuilder.Entity<FinanceAuditLog>().Property(x => x.UserRole).HasMaxLength(40);
+        modelBuilder.Entity<FinanceAuditLog>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });
+        modelBuilder.Entity<FinanceAuditLog>().HasIndex(x => new { x.BuildingId, x.Section, x.CreatedAtUtc });
+        modelBuilder.Entity<FinanceAuditLog>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinanceAuditLog>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 
         MarketplaceModelConfiguration.Configure(modelBuilder, Database.IsSqlServer());
 

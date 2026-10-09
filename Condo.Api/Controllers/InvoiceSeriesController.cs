@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Condo.Api.Documents;
+using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -200,6 +201,9 @@ public class InvoiceSeriesController(
             }),
             Detalle = $"Timbrado {entity.NumeroTimbrado} creado para el edificio {building.Name}."
         });
+        new ConfigAuditWriter(dbContext, tenantContext).Add(
+            entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Identity, "Created",
+            $"Se creó el timbrado {entity.NumeroTimbrado} ({entity.Establecimiento}-{entity.PuntoExpedicion}).", "InvoiceSeries", entity.Id);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return CreatedAtAction(nameof(GetAll), null, ToDto(entity, building.Name, today: DateOnly.FromDateTime(DateTime.UtcNow)));
@@ -372,6 +376,10 @@ public class InvoiceSeriesController(
             DatosDespuesJson = JsonSerializer.Serialize(new { Activo = false }),
             Detalle = $"Timbrado {entity.NumeroTimbrado} desactivado manualmente."
         });
+        new ConfigAuditWriter(dbContext, tenantContext).Add(
+            entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Identity, "Deactivated",
+            $"Se desactivó el timbrado {entity.NumeroTimbrado}.", "InvoiceSeries", entity.Id,
+            [new ConfigChange("activo", "Activo", "Sí", "No")]);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();

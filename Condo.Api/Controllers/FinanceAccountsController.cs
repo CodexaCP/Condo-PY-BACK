@@ -68,9 +68,20 @@ public class FinanceAccountsController(
         };
 
         Db.FinancialAccounts.Add(entity);
+        Audit.Add(companyId.Value, entity.BuildingId, ConfigSectionKeys.Chart, "Created",
+            $"Se creó la cuenta «{entity.Name}» ({TypeLabel(entity.Type)}) con saldo inicial {entity.OpeningBalance:N0}.",
+            "FinancialAccount", entity.Id);
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(ToDto(entity));
     }
+
+    private static string TypeLabel(FinancialAccountType type) => type switch
+    {
+        FinancialAccountType.Cash => "caja",
+        FinancialAccountType.Bank => "banco",
+        FinancialAccountType.ReserveFund => "fondo de reserva",
+        _ => type.ToString()
+    };
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<FinancialAccountDto>> Update(Guid id, [FromBody] FinancialAccountUpsertRequest request, CancellationToken cancellationToken)
@@ -93,9 +104,23 @@ public class FinanceAccountsController(
             return error;
         }
 
-        entity.Name = request.Name.Trim();
+        var accountChanges = new List<ConfigChange>();
+        var newName = request.Name.Trim();
+        var newBalance = decimal.Round(request.OpeningBalance, 2);
+        if (entity.Name != newName) accountChanges.Add(new ConfigChange("name", "Nombre", entity.Name, newName));
+        if (entity.Type != request.Type) accountChanges.Add(new ConfigChange("type", "Tipo", TypeLabel(entity.Type), TypeLabel(request.Type)));
+        if (entity.OpeningBalance != newBalance) accountChanges.Add(new ConfigChange("openingBalance", "Saldo inicial", $"{entity.OpeningBalance:N0}", $"{newBalance:N0}"));
+        if (entity.IsActive != request.IsActive) accountChanges.Add(new ConfigChange("isActive", "Activa", entity.IsActive ? "Sí" : "No", request.IsActive ? "Sí" : "No"));
+        if (accountChanges.Count > 0)
+        {
+            Audit.Add(entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Chart, "Updated",
+                $"Cuenta «{entity.Name}»: cambió {string.Join(", ", accountChanges.Select(x => x.Label))}.",
+                "FinancialAccount", entity.Id, accountChanges);
+        }
+
+        entity.Name = newName;
         entity.Type = request.Type;
-        entity.OpeningBalance = decimal.Round(request.OpeningBalance, 2);
+        entity.OpeningBalance = newBalance;
         entity.IsActive = request.IsActive;
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
@@ -119,6 +144,8 @@ public class FinanceAccountsController(
 
         // Todavia no hay movimientos: la baja es libre. Desde la fase 2 una cuenta con movimientos solo se podra desactivar.
         entity.IsDeleted = true;
+        Audit.Add(entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Chart, "Deleted",
+            $"Se eliminó la cuenta «{entity.Name}» ({TypeLabel(entity.Type)}).", "FinancialAccount", entity.Id);
         await Db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }

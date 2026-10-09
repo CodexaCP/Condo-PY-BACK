@@ -102,6 +102,8 @@ public class FinanceCategoriesController(
         }
 
         Db.LedgerCategories.Add(entity);
+        Audit.Add(companyId.Value, entity.BuildingId, ConfigSectionKeys.Chart, "Created",
+            $"Se creó la cuenta {entity.Code} «{entity.Name}» del plan de cuentas.", "LedgerCategory", entity.Id);
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(ToDto(entity, false, false));
     }
@@ -129,6 +131,17 @@ public class FinanceCategoriesController(
         {
             return error;
         }
+
+        // Valores antes de aplicar los cambios, para el historial.
+        var beforeCode = entity.Code;
+        var beforeName = entity.Name;
+        var beforeExternal = entity.ExternalCode;
+        var beforeActive = entity.IsActive;
+        var beforeType = entity.Type;
+        var beforeParentId = entity.ParentId;
+        var beforeSystemKey = entity.SystemKey;
+        var beforeExpense = FinanceChartTemplate.ExpenseCategoryOf(entity);
+        var beforeIncome = FinanceChartTemplate.IncomeCategoryOf(entity);
 
         if (entity.SystemKey is not null)
         {
@@ -187,6 +200,40 @@ public class FinanceCategoriesController(
         entity.ExternalCode = NormalizeExternalCode(request.ExternalCode);
         entity.IsActive = request.IsActive;
 
+        var categoryChanges = new List<ConfigChange>();
+        void Track(string field, string label, string? before, string? after)
+        {
+            if (!string.Equals(before ?? string.Empty, after ?? string.Empty, StringComparison.Ordinal))
+            {
+                categoryChanges.Add(new ConfigChange(field, label, before, after));
+            }
+        }
+
+        Track("code", "Código", beforeCode, entity.Code);
+        Track("name", "Nombre", beforeName, entity.Name);
+        Track("externalCode", "Código del contador", beforeExternal, entity.ExternalCode);
+        Track("isActive", "Activa", beforeActive ? "Sí" : "No", entity.IsActive ? "Sí" : "No");
+        Track("type", "Tipo", beforeType.ToString(), entity.Type.ToString());
+        if (beforeParentId != entity.ParentId)
+        {
+            var parentIds = new[] { beforeParentId, entity.ParentId }.Where(x => x.HasValue).Select(x => x!.Value).ToList();
+            var parentLabels = await Db.LedgerCategories.AsNoTracking()
+                .Where(x => parentIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Code + " " + x.Name, cancellationToken);
+            string? ParentLabel(Guid? id) => id.HasValue && parentLabels.TryGetValue(id.Value, out var label) ? label : null;
+            Track("parentId", "Grupo", ParentLabel(beforeParentId), ParentLabel(entity.ParentId));
+        }
+
+        Track("systemKey", "Función especial", beforeSystemKey, entity.SystemKey);
+        Track("expenseCategory", "Categoría de gasto en la liquidación", beforeExpense?.ToString(), FinanceChartTemplate.ExpenseCategoryOf(entity)?.ToString());
+        Track("incomeCategory", "Categoría de ingreso en la liquidación", beforeIncome?.ToString(), FinanceChartTemplate.IncomeCategoryOf(entity)?.ToString());
+        if (categoryChanges.Count > 0)
+        {
+            Audit.Add(entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Chart, "Updated",
+                $"Cuenta {entity.Code} «{entity.Name}»: cambió {string.Join(", ", categoryChanges.Select(x => x.Label))}.",
+                "LedgerCategory", entity.Id, categoryChanges);
+        }
+
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(ToDto(entity, hasChildren, hasMovements));
     }
@@ -228,6 +275,8 @@ public class FinanceCategoriesController(
         }
 
         entity.IsDeleted = true;
+        Audit.Add(entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Chart, "Deleted",
+            $"Se eliminó la cuenta {entity.Code} «{entity.Name}» del plan de cuentas.", "LedgerCategory", entity.Id);
         await Db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -292,6 +341,13 @@ public class FinanceCategoriesController(
             }
         }
 
+        if (changed > 0)
+        {
+            var companyId = all[0].CompanyId;
+            Audit.Add(companyId, request.BuildingId, ConfigSectionKeys.Chart, "Updated",
+                $"{(request.IsActive ? "Se activaron" : "Se desactivaron")} {changed} cuentas del plan de cuentas.", "LedgerCategory", null);
+        }
+
         await Db.SaveChangesAsync(cancellationToken);
         return Ok(new { changed });
     }
@@ -327,6 +383,10 @@ public class FinanceCategoriesController(
         }
 
         var result = await copier.CopyAsync(request.SourceBuildingId, request.TargetBuildingId, companyId.Value, cancellationToken);
+        var sourceName = await Db.Buildings.AsNoTracking().Where(x => x.Id == request.SourceBuildingId).Select(x => x.Name).FirstOrDefaultAsync(cancellationToken);
+        Audit.Add(companyId.Value, request.TargetBuildingId, ConfigSectionKeys.Chart, "Copied",
+            $"Se copió el plan de cuentas del edificio «{sourceName}»: {result.Created} creadas, {result.Updated} actualizadas, {result.Skipped} sin cambios.",
+            "LedgerCategory", null);
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(result);
     }
@@ -357,7 +417,7 @@ public class FinanceCategoriesController(
             return BadRequest(NoCompanyMessage);
         }
 
-        return await ApplyAsync(request.BuildingId, companyId.Value, FinanceChartTemplate.Specs, request.Mode, request.ConfirmReplace, cancellationToken);
+        return await ApplyAsync(request.BuildingId, companyId.Value, FinanceChartTemplate.Specs, request.Mode, request.ConfirmReplace, "plan genérico de CondoPY", cancellationToken);
     }
 
     [HttpGet("import-template")]
@@ -456,11 +516,11 @@ public class FinanceCategoriesController(
             return BadRequest($"El plan tiene {resolution.ErrorCount} errores. {string.Join(" ", first)}");
         }
 
-        return await ApplyAsync(request.BuildingId, companyId.Value, resolution.Rows.Select(r => r.ToSpec()).ToList(), request.Mode, request.ConfirmReplace, cancellationToken);
+        return await ApplyAsync(request.BuildingId, companyId.Value, resolution.Rows.Select(r => r.ToSpec()).ToList(), request.Mode, request.ConfirmReplace, "Excel del cliente", cancellationToken);
     }
 
     private async Task<ActionResult<LedgerPlanApplyResultDto>> ApplyAsync(
-        Guid buildingId, Guid companyId, IReadOnlyList<PlanRowSpec> specs, LedgerPlanApplyMode mode, bool confirmReplace, CancellationToken cancellationToken)
+        Guid buildingId, Guid companyId, IReadOnlyList<PlanRowSpec> specs, LedgerPlanApplyMode mode, bool confirmReplace, string sourceLabel, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(mode))
         {
@@ -477,10 +537,17 @@ public class FinanceCategoriesController(
                     $"y borra {impact.BudgetLines} renglones de presupuesto. Confirmá para continuar.");
             }
 
+            // La fila del historial se agrega antes: el reemplazo guarda todo en una sola transaccion (todo o nada) y la lleva adentro.
+            Audit.Add(companyId, buildingId, ConfigSectionKeys.Chart, "Replaced",
+                $"Se reemplazó el plan de cuentas con el {sourceLabel} ({specs.Count} cuentas). Se desvincularon {impact.Expenses} gastos, {impact.Incomes} ingresos y {impact.RecurringExpenses} gastos recurrentes, y se borraron {impact.BudgetLines} renglones de presupuesto.",
+                "LedgerCategory", null);
             return Ok(await planService.ReplaceAsync(buildingId, companyId, specs, cancellationToken));
         }
 
         var result = await planService.MergeAsync(buildingId, companyId, specs, updateExisting: mode == LedgerPlanApplyMode.Update, cancellationToken);
+        Audit.Add(companyId, buildingId, ConfigSectionKeys.Chart, mode == LedgerPlanApplyMode.Update ? "Updated" : "Merged",
+            $"{(mode == LedgerPlanApplyMode.Update ? "Se actualizó" : "Se agregó lo que faltaba de")} el plan de cuentas con el {sourceLabel}: {result.Created} creadas, {result.Updated} actualizadas, {result.Skipped} sin cambios.",
+            "LedgerCategory", null);
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(result);
     }
