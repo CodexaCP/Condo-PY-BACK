@@ -113,6 +113,8 @@ public class LedgerCategoryDto
     public BuildingIncomeCategory? IncomeCategory { get; set; }
     // Ya tiene gastos o ingresos cargados: no se elimina ni se le cambia el tipo o la categoria; solo se desactiva.
     public bool HasMovements { get; set; }
+    // Tratamiento de IVA de la cuenta de egresos (se edita desde el Centro de configuracion, seccion Impuestos). Vacio = sin definir.
+    public VatTreatment? VatTreatment { get; set; }
 }
 
 public class LedgerCategoryUpsertRequest

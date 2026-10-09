@@ -59,6 +59,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<FinanceAuditLog> FinanceAuditLogs => Set<FinanceAuditLog>();
     public DbSet<FinancePeriodClosure> FinancePeriodClosures => Set<FinancePeriodClosure>();
     public DbSet<BuildingNoticeRule> BuildingNoticeRules => Set<BuildingNoticeRule>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1114,6 +1115,33 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<FinanceAuditLog>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Centro de configuracion: proveedores, cuentas por pagar e IVA ──────
+        modelBuilder.Entity<Supplier>().Property(x => x.Name).HasMaxLength(200);
+        modelBuilder.Entity<Supplier>().Property(x => x.Ruc).HasMaxLength(20);
+        modelBuilder.Entity<Supplier>().Property(x => x.Phone).HasMaxLength(40);
+        modelBuilder.Entity<Supplier>().Property(x => x.Email).HasMaxLength(160);
+        modelBuilder.Entity<Supplier>().Property(x => x.Address).HasMaxLength(300);
+        // El RUC es unico por empresa cuando se informa; el nombre se busca mucho.
+        modelBuilder.Entity<Supplier>().HasIndex(x => new { x.CompanyId, x.Ruc }).IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Ruc] IS NOT NULL");
+        modelBuilder.Entity<Supplier>().HasIndex(x => new { x.CompanyId, x.Name });
+        modelBuilder.Entity<Supplier>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.InvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.InvoiceTimbrado).HasMaxLength(20);
+        modelBuilder.Entity<BuildingExpense>().Property(x => x.VatRate).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<BuildingExpense>().HasIndex(x => new { x.BuildingId, x.DueDate });
+        modelBuilder.Entity<BuildingExpense>()
+            .HasOne(x => x.Supplier).WithMany()
+            .HasForeignKey(x => x.SupplierId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpense>()
+            .HasOne(x => x.PaidFromAccount).WithMany()
+            .HasForeignKey(x => x.PaidFromAccountId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<LedgerCategory>().Property(x => x.VatTreatment).HasConversion<string>().HasMaxLength(20);
 
         // ── Centro de configuracion: mora por unidad y reglas de avisos ────────
         modelBuilder.Entity<Unit>().Property(x => x.LateFeeExemptReason).HasMaxLength(300);

@@ -49,6 +49,8 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.PaymentRule => PaymentRule(),
                 ConfigSectionKeys.Funds => Funds(building),
                 ConfigSectionKeys.Chart => await ChartAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Taxes => await TaxesAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Suppliers => await SuppliersAsync(building, cancellationToken),
                 ConfigSectionKeys.Closing => await ClosingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
@@ -63,7 +65,10 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             section.Key = definition.Key;
             section.Order = definition.Order;
             section.Name = definition.Name;
-            section.Required = definition.Required;
+            // El IVA de las compras es obligatorio solo si el edificio discrimina IVA (regimen general).
+            section.Required = definition.Key == ConfigSectionKeys.Taxes
+                ? building.VatRegime == VatRegime.General && section.Status != ConfigSectionStatus.NotAvailable
+                : definition.Required;
             section.CanEdit = ConfigSections.CanEdit(definition, role);
             sections.Add(section);
         }
@@ -280,6 +285,85 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "finance",
             LinkTab = "settings"
+        };
+    }
+
+    // ── 7. Impuestos (IVA de las compras) ────────────────────────────────────
+    // Obligatoria solo con regimen general: entonces cada cuenta final de egresos activa tiene que tener su tratamiento de IVA.
+
+    private async Task<ConfigSectionDto> TaxesAsync(Building b, FinanceModuleState finance, CancellationToken cancellationToken)
+    {
+        var unavailable = FinanceUnavailable(finance);
+        if (unavailable is not null)
+        {
+            return unavailable;
+        }
+
+        var all = await dbContext.LedgerCategories.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => new { x.Id, x.ParentId, x.Type, x.IsActive, x.VatTreatment })
+            .ToListAsync(cancellationToken);
+        var parentIds = all.Where(x => x.ParentId.HasValue).Select(x => x.ParentId!.Value).ToHashSet();
+        var leaves = all.Where(x => x.Type == LedgerCategoryType.Expense && x.IsActive && !parentIds.Contains(x.Id)).ToList();
+        var defined = leaves.Count(x => x.VatTreatment.HasValue);
+        var missing = leaves.Count - defined;
+        var applies = b.VatRegime == VatRegime.General;
+
+        string? reason = null;
+        if (!applies)
+        {
+            reason = b.VatRegime is null
+                ? "Definí el régimen de IVA del edificio (Identidad y fiscal) para saber si discrimina IVA en sus compras."
+                : "El régimen de IVA del edificio no discrimina IVA en las compras: el tratamiento por cuenta es opcional.";
+        }
+        else if (missing > 0)
+        {
+            reason = $"Faltan {missing} cuentas de egresos sin tratamiento de IVA.";
+        }
+
+        return new ConfigSectionDto
+        {
+            Status = applies && missing == 0 && leaves.Count > 0 ? ConfigSectionStatus.Complete
+                : applies ? ConfigSectionStatus.Incomplete : ConfigSectionStatus.Optional,
+            Reasons = reason is null ? [] : [reason],
+            Summary =
+            [
+                Item("Régimen de IVA del edificio", VatRegimeLabel(b.VatRegime)),
+                Item("Cuentas de egresos con tratamiento", $"{defined.ToString(CultureInfo.InvariantCulture)} de {leaves.Count.ToString(CultureInfo.InvariantCulture)}")
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Taxes
+        };
+    }
+
+    // ── 8. Proveedores (de la empresa, compartidos entre sus edificios) ──────
+
+    private async Task<ConfigSectionDto> SuppliersAsync(Building b, CancellationToken cancellationToken)
+    {
+        var companyId = b.CompanyId ?? await dbContext.Condominiums.AsNoTracking()
+            .Where(x => x.Id == b.CondominiumId)
+            .Select(x => (Guid?)x.CompanyId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var suppliers = companyId.HasValue
+            ? await dbContext.Suppliers.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value)
+                .Select(x => x.IsActive)
+                .ToListAsync(cancellationToken)
+            : [];
+        var active = suppliers.Count(x => x);
+
+        return new ConfigSectionDto
+        {
+            Status = active > 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = active > 0 ? [] : ["Todavía no hay proveedores cargados: se pueden cargar al registrar el primer gasto."],
+            Summary =
+            [
+                Item("Proveedores activos", active.ToString(CultureInfo.InvariantCulture)),
+                Item("Proveedores desactivados", (suppliers.Count - active).ToString(CultureInfo.InvariantCulture))
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Suppliers
         };
     }
 

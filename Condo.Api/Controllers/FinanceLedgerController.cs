@@ -20,7 +20,8 @@ public class FinanceLedgerController(
     FinanceModuleGate gate,
     FinanceLedgerService ledgerService,
     FinanceBudgetService budgets,
-    FinanceReportService reports) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
+    FinanceReportService reports,
+    FinancePayablesService payables) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
     [HttpGet("balances")]
     public async Task<ActionResult<FinanceBalancesDto>> GetBalances(
@@ -117,7 +118,9 @@ public class FinanceLedgerController(
             FiscalYearToDate = FinanceReportBuilder.Flow(ytd),
             Series = FinanceReportBuilder.Series(ctx, buckets, monthStart.Year, monthStart.Month),
             Budget = FinanceBudgetCalculator.Summarize(vsActual, cells.Any(c => c.Amount != 0m)),
-            ReserveFund = FinanceReportBuilder.ReserveSummary(ctx, buckets, monthStart.Year, monthStart.Month)
+            ReserveFund = FinanceReportBuilder.ReserveSummary(ctx, buckets, monthStart.Year, monthStart.Month),
+            Payables = await payables.SummaryAsync(buildingId, today, cancellationToken),
+            Receivables = await payables.ReceivablesAsync(buildingId, today, cancellationToken)
         });
     }
 

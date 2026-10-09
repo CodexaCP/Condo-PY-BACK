@@ -49,6 +49,10 @@ public class ConfigCenterPhase1Tests : IDisposable
         _env.T.Db.SaveChanges();
         _env.Setup();
         _env.SeedTemplate();
+        // Regimen general: el IVA de las compras es obligatorio, asi que se clasifican todas las cuentas de egresos.
+        foreach (var category in _env.T.Db.LedgerCategories.Where(x => x.BuildingId == _env.Building.Id && x.Type == LedgerCategoryType.Expense))
+            category.VatTreatment = VatTreatment.Vat10;
+        _env.T.Db.SaveChanges();
     }
 
     // ── Resumen: estados ─────────────────────────────────────────────────────
@@ -89,8 +93,8 @@ public class ConfigCenterPhase1Tests : IDisposable
 
         var o = await Overview();
 
-        Assert.Equal(6, o.RequiredCount);
-        Assert.Equal(6, o.ReadyCount);
+        Assert.Equal(7, o.RequiredCount);
+        Assert.Equal(7, o.ReadyCount);
         Assert.True(o.ReadyToOperate);
         Assert.All(o.Sections.Where(s => s.Required), s => Assert.Equal(ConfigSectionStatus.Complete, s.Status));
     }
@@ -191,15 +195,15 @@ public class ConfigCenterPhase1Tests : IDisposable
         _env.Access.Buildings.Add(_env.Building.Id);
 
         _env.LoginAs("CompanyAdmin");
-        Assert.Equal(9, (await Overview()).Sections.Count);
+        Assert.Equal(11, (await Overview()).Sections.Count);
 
         _env.LoginAs("CompanyOperator");
-        Assert.Equal(9, (await Overview()).Sections.Count);
+        Assert.Equal(11, (await Overview()).Sections.Count);
 
         _env.LoginAs("BuildingManager");
         var manager = await Overview();
         Assert.Equal(
-            [ConfigSectionKeys.LateFee, ConfigSectionKeys.Chart, ConfigSectionKeys.Closing, ConfigSectionKeys.Budget],
+            [ConfigSectionKeys.LateFee, ConfigSectionKeys.Chart, ConfigSectionKeys.Taxes, ConfigSectionKeys.Suppliers, ConfigSectionKeys.Closing, ConfigSectionKeys.Budget],
             manager.Sections.Select(s => s.Key).ToArray());
     }
 
@@ -222,7 +226,9 @@ public class ConfigCenterPhase1Tests : IDisposable
 
         _env.LoginAs("CompanyOperator");
         var op = await Overview();
-        Assert.All(op.Sections, s => Assert.False(s.CanEdit));
+        // El operador solo edita proveedores (decision de Finanzas: quienes cargan gastos cargan proveedores).
+        Assert.All(op.Sections.Where(s => s.Key != ConfigSectionKeys.Suppliers), s => Assert.False(s.CanEdit));
+        Assert.True(Section(op, ConfigSectionKeys.Suppliers).CanEdit);
     }
 
     [Fact]

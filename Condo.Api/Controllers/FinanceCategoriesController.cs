@@ -893,7 +893,8 @@ public class FinanceCategoriesController(
             HasChildren = hasChildren,
             ExpenseCategory = isLeaf ? FinanceChartTemplate.ExpenseCategoryOf(x) : null,
             IncomeCategory = isLeaf ? FinanceChartTemplate.IncomeCategoryOf(x) : null,
-            HasMovements = hasMovements
+            HasMovements = hasMovements,
+            VatTreatment = x.VatTreatment
         };
     }
 }

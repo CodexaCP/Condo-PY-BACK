@@ -93,13 +93,25 @@ public class BuildingExpensesController(
                 ReceiptFileName = x.ReceiptFileName,
                 LedgerCategoryId = x.LedgerCategoryId,
                 LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
-                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null,
+                SupplierId = x.SupplierId,
+                InvoiceNumber = x.InvoiceNumber,
+                InvoiceTimbrado = x.InvoiceTimbrado,
+                DueDate = x.DueDate,
+                PaidAt = x.PaidAt,
+                PaidFromAccountId = x.PaidFromAccountId,
+                PaidFromAccountName = x.PaidFromAccount != null ? x.PaidFromAccount.Name : null,
+                VatRate = x.VatRate
             })
             .ToListAsync(cancellationToken);
 
         // Notas de credito del proveedor de periodos ya publicados: se suman aparte (pocas filas) para mostrarlas en la fila del gasto.
         var credited = await CreditedAfterPublishAsync(items.Select(x => x.Id).ToList(), cancellationToken);
-        foreach (var item in items) item.CreditedAfterPublishAmount = credited.GetValueOrDefault(item.Id);
+        foreach (var item in items)
+        {
+            item.CreditedAfterPublishAmount = credited.GetValueOrDefault(item.Id);
+            CompleteDto(item);
+        }
 
         return Ok(items);
     }
@@ -134,7 +146,15 @@ public class BuildingExpensesController(
                 ReceiptFileName = x.ReceiptFileName,
                 LedgerCategoryId = x.LedgerCategoryId,
                 LedgerCategoryCode = x.LedgerCategory != null ? x.LedgerCategory.Code : null,
-                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null
+                LedgerCategoryName = x.LedgerCategory != null ? x.LedgerCategory.Name : null,
+                SupplierId = x.SupplierId,
+                InvoiceNumber = x.InvoiceNumber,
+                InvoiceTimbrado = x.InvoiceTimbrado,
+                DueDate = x.DueDate,
+                PaidAt = x.PaidAt,
+                PaidFromAccountId = x.PaidFromAccountId,
+                PaidFromAccountName = x.PaidFromAccount != null ? x.PaidFromAccount.Name : null,
+                VatRate = x.VatRate
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -147,6 +167,7 @@ public class BuildingExpensesController(
 
         var credited = await CreditedAfterPublishAsync(new[] { item.Id }, cancellationToken);
         item.CreditedAfterPublishAmount = credited.GetValueOrDefault(item.Id);
+        CompleteDto(item);
         return Ok(item);
     }
 
@@ -189,7 +210,7 @@ public class BuildingExpensesController(
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
         }
 
-        var closedMonth = await periodGuard.FindClosedAsync(request.BuildingId, request.ExpenseDate, cancellationToken);
+        var closedMonth = await periodGuard.FindClosedAsync(request.BuildingId, ExpenseDates(request.ExpenseDate, request.PaidAt), cancellationToken);
         if (closedMonth is not null)
         {
             return FinancePeriodGuard.ClosedResponse(closedMonth);
@@ -202,6 +223,12 @@ public class BuildingExpensesController(
             return BadRequest(rubro.Error);
         }
 
+        var (extrasError, extras) = await ResolveExtrasAsync(request, effectiveCompanyId.Value, rubro.Rubro, null, cancellationToken);
+        if (extrasError is not null)
+        {
+            return BadRequest(extrasError);
+        }
+
         var entity = new BuildingExpense
         {
             CompanyId = effectiveCompanyId.Value,
@@ -209,7 +236,14 @@ public class BuildingExpensesController(
             ExpensePeriodId = request.ExpensePeriodId,
             Category = rubro.ExpenseCategory ?? request.Category,
             LedgerCategoryId = rubro.Rubro?.Id,
-            SupplierName = request.SupplierName.Trim(),
+            SupplierId = extras!.SupplierId,
+            SupplierName = extras.SupplierName,
+            InvoiceNumber = extras.InvoiceNumber,
+            InvoiceTimbrado = extras.InvoiceTimbrado,
+            DueDate = extras.DueDate,
+            PaidAt = extras.PaidAt,
+            PaidFromAccountId = extras.PaidFromAccountId,
+            VatRate = extras.VatRate,
             Description = request.Description.Trim(),
             ExpenseDate = request.ExpenseDate,
             Amount = request.Amount,
@@ -279,8 +313,8 @@ public class BuildingExpensesController(
         }
 
         // Cierre de periodo: ni el gasto como esta (su fecha actual) ni como quedaria (la fecha nueva) pueden estar en un mes cerrado.
-        var closedBefore = await periodGuard.FindClosedAsync(entity.BuildingId, entity.ExpenseDate, cancellationToken);
-        var closedAfter = await periodGuard.FindClosedAsync(request.BuildingId, request.ExpenseDate, cancellationToken);
+        var closedBefore = await periodGuard.FindClosedAsync(entity.BuildingId, ExpenseDates(entity.ExpenseDate, entity.PaidAt), cancellationToken);
+        var closedAfter = await periodGuard.FindClosedAsync(request.BuildingId, ExpenseDates(request.ExpenseDate, request.PaidAt), cancellationToken);
         if ((closedBefore ?? closedAfter) is { } closedUpdate)
         {
             return FinancePeriodGuard.ClosedResponse(closedUpdate);
@@ -302,12 +336,25 @@ public class BuildingExpensesController(
             return BadRequest("Este gasto tiene notas de crédito del proveedor aplicadas: no se puede cambiar su monto ni su período. Anulá primero las notas de crédito.");
         }
 
+        var (extrasError, extras) = await ResolveExtrasAsync(request, effectiveCompanyId.Value, rubro.Rubro, entity.SupplierId, cancellationToken);
+        if (extrasError is not null)
+        {
+            return BadRequest(extrasError);
+        }
+
         entity.CompanyId = effectiveCompanyId.Value;
         entity.BuildingId = request.BuildingId;
         entity.ExpensePeriodId = request.ExpensePeriodId;
         entity.Category = rubro.ExpenseCategory ?? request.Category;
         entity.LedgerCategoryId = rubro.Rubro?.Id;
-        entity.SupplierName = request.SupplierName.Trim();
+        entity.SupplierId = extras!.SupplierId;
+        entity.InvoiceNumber = extras.InvoiceNumber;
+        entity.InvoiceTimbrado = extras.InvoiceTimbrado;
+        entity.DueDate = extras.DueDate;
+        entity.PaidAt = extras.PaidAt;
+        entity.PaidFromAccountId = extras.PaidFromAccountId;
+        entity.VatRate = extras.VatRate;
+        entity.SupplierName = extras.SupplierName;
         entity.Description = request.Description.Trim();
         entity.ExpenseDate = request.ExpenseDate;
         entity.Amount = request.Amount;
@@ -318,6 +365,149 @@ public class BuildingExpensesController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(ToDto(entity, context.Building!, context.Period!, context.TargetUnit, rubro.Rubro));
+    }
+
+    // ─── Cuentas por pagar: registrar o deshacer el pago de una factura de proveedor ───────────────────────────────
+    // Un gasto con vencimiento queda "a pagar" y entra a la caja recien cuando se registra su pago (en esa fecha y desde la cuenta
+    // elegida). Se puede hacer aunque el periodo ya este publicado: el pago es un movimiento de caja, no cambia la liquidacion.
+
+    private static readonly string[] PayableRoles = ["SuperAdmin", "CompanyAdmin", "CompanyOperator", "BuildingManager"];
+
+    private ActionResult? RequirePayableRole() =>
+        PayableRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase)
+            ? null
+            : StatusCode(StatusCodes.Status403Forbidden, "Tu rol no puede registrar pagos de facturas de proveedores.");
+
+    [HttpPut("{id:guid}/payment")]
+    public async Task<ActionResult<BuildingExpenseDto>> RegisterPayment(
+        Guid id, [FromBody] RegisterExpensePaymentRequest request, CancellationToken cancellationToken)
+    {
+        var denied = RequirePayableRole();
+        if (denied is not null) return denied;
+
+        var entity = await dbContext.BuildingExpenses.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken)) return Forbid();
+
+        if (!entity.DueDate.HasValue)
+        {
+            return BadRequest("Este gasto no es una factura a pagar (no tiene vencimiento): ya cuenta en la caja en su fecha.");
+        }
+
+        var today = FinancePeriods.Today();
+        if (request.PaidAt > today) return BadRequest("La fecha de pago no puede ser futura.");
+        if (request.PaidAt < entity.ExpenseDate) return BadRequest("La fecha de pago no puede ser anterior a la fecha del gasto.");
+
+        if (request.AccountId.HasValue)
+        {
+            var account = await dbContext.FinancialAccounts.AsNoTracking().FirstOrDefaultAsync(
+                x => !x.IsDeleted && x.Id == request.AccountId.Value && x.BuildingId == entity.BuildingId, cancellationToken);
+            if (account is null) return BadRequest("La cuenta de pago no existe en este edificio.");
+            if (!account.IsActive) return BadRequest("La cuenta de pago está desactivada.");
+        }
+
+        // Cierre de periodo: la plata se mueve en la fecha del pago (y, si ya estaba pagado, deja de moverse en la anterior).
+        var closed = await periodGuard.FindClosedAsync(entity.BuildingId, ExpenseDates(request.PaidAt, entity.PaidAt), cancellationToken);
+        if (closed is not null) return FinancePeriodGuard.ClosedResponse(closed);
+
+        entity.PaidAt = request.PaidAt;
+        entity.PaidFromAccountId = request.AccountId;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetById(id, cancellationToken);
+    }
+
+    [HttpDelete("{id:guid}/payment")]
+    public async Task<ActionResult<BuildingExpenseDto>> UndoPayment(Guid id, CancellationToken cancellationToken)
+    {
+        var denied = RequirePayableRole();
+        if (denied is not null) return denied;
+
+        var entity = await dbContext.BuildingExpenses.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (entity is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(entity.BuildingId, cancellationToken)) return Forbid();
+
+        if (!entity.PaidAt.HasValue) return BadRequest("Este gasto no tiene un pago registrado.");
+        if (!entity.DueDate.HasValue)
+        {
+            return BadRequest("Este gasto no es una factura a pagar: su pago no se puede deshacer.");
+        }
+
+        var closed = await periodGuard.FindClosedAsync(entity.BuildingId, entity.PaidAt.Value, cancellationToken);
+        if (closed is not null) return FinancePeriodGuard.ClosedResponse(closed);
+
+        entity.PaidAt = null;
+        entity.PaidFromAccountId = null;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetById(id, cancellationToken);
+    }
+
+    // Fechas en las que un gasto mueve plata para el cierre de periodo: la del gasto y, si ya esta pagado, la del pago.
+    private static IEnumerable<DateOnly> ExpenseDates(DateOnly expenseDate, DateOnly? paidAt) =>
+        paidAt.HasValue ? [expenseDate, paidAt.Value] : [expenseDate];
+
+    private sealed record ExpenseExtras(
+        Guid? SupplierId, string SupplierName, string? InvoiceNumber, string? InvoiceTimbrado,
+        DateOnly? DueDate, DateOnly? PaidAt, Guid? PaidFromAccountId, decimal? VatRate);
+
+    private const int InvoiceNumberMaxLength = 50;
+    private const int InvoiceTimbradoMaxLength = 20;
+    private const int SupplierNameMaxLength = 160;
+
+    // Proveedor, factura del proveedor, cuentas por pagar e IVA de un gasto: valida y resuelve. Devuelve el mensaje de error o los valores a guardar.
+    private async Task<(string? Error, ExpenseExtras? Extras)> ResolveExtrasAsync(
+        BuildingExpenseUpsertRequest request, Guid companyId, LedgerCategory? rubro, Guid? currentSupplierId, CancellationToken cancellationToken)
+    {
+        var invoiceNumber = string.IsNullOrWhiteSpace(request.InvoiceNumber) ? null : request.InvoiceNumber.Trim();
+        var invoiceTimbrado = string.IsNullOrWhiteSpace(request.InvoiceTimbrado) ? null : request.InvoiceTimbrado.Trim();
+        if (invoiceNumber is { Length: > InvoiceNumberMaxLength }) return ($"El número de factura no puede superar los {InvoiceNumberMaxLength} caracteres.", null);
+        if (invoiceTimbrado is { Length: > InvoiceTimbradoMaxLength }) return ($"El timbrado no puede superar los {InvoiceTimbradoMaxLength} caracteres.", null);
+
+        // Proveedor de la lista: el nombre del gasto sale de el. Uno desactivado solo se acepta si el gasto ya lo tenia.
+        var supplierName = request.SupplierName.Trim();
+        if (request.SupplierId.HasValue)
+        {
+            var supplier = await dbContext.Suppliers.AsNoTracking()
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.SupplierId.Value && x.CompanyId == companyId, cancellationToken);
+            if (supplier is null) return ("El proveedor no existe en esta empresa.", null);
+            if (!supplier.IsActive && supplier.Id != currentSupplierId) return ("El proveedor está desactivado.", null);
+            supplierName = supplier.Name.Length > SupplierNameMaxLength ? supplier.Name[..SupplierNameMaxLength] : supplier.Name;
+        }
+
+        // Cuentas por pagar.
+        var today = FinancePeriods.Today();
+        if (request.DueDate.HasValue)
+        {
+            if (request.DueDate.Value < request.ExpenseDate) return ("El vencimiento no puede ser anterior a la fecha del gasto.", null);
+            if (request.DueDate.Value > request.ExpenseDate.AddYears(5)) return ("El vencimiento no es válido.", null);
+        }
+
+        if (request.PaidAt.HasValue)
+        {
+            if (request.PaidAt.Value > today) return ("La fecha de pago no puede ser futura.", null);
+            if (request.PaidAt.Value < request.ExpenseDate) return ("La fecha de pago no puede ser anterior a la fecha del gasto.", null);
+        }
+
+        if (request.PaidFromAccountId.HasValue)
+        {
+            if (!request.PaidAt.HasValue) return ("Indicá la fecha de pago para elegir la cuenta desde la que se pagó.", null);
+            var account = await dbContext.FinancialAccounts.AsNoTracking().FirstOrDefaultAsync(
+                x => !x.IsDeleted && x.Id == request.PaidFromAccountId.Value && x.BuildingId == request.BuildingId, cancellationToken);
+            if (account is null) return ("La cuenta de pago no existe en este edificio.", null);
+            if (!account.IsActive) return ("La cuenta de pago está desactivada.", null);
+        }
+
+        // IVA: la tasa pedida; sin tasa, la del rubro elegido (si tiene tratamiento definido).
+        decimal? vatRate = request.VatRate;
+        if (vatRate.HasValue && !VatMath.IsValidRate(vatRate.Value)) return ("La tasa de IVA debe ser 10, 5 o 0 (exento).", null);
+        vatRate ??= VatMath.RateOf(rubro?.VatTreatment);
+
+        return (null, new ExpenseExtras(
+            request.SupplierId, supplierName, invoiceNumber, invoiceTimbrado,
+            request.DueDate, request.PaidAt, request.PaidFromAccountId, vatRate));
     }
 
     private const long MaxImportSizeBytes = 2 * 1024 * 1024; // 2 MB
@@ -458,6 +648,14 @@ public class BuildingExpensesController(
         // Rubros de gastos del edificio (nulo si no tiene Finanzas del edificio disponible).
         var assignable = await rubros.AssignableAsync(buildingId, LedgerCategoryType.Expense, cancellationToken);
 
+        // Proveedores activos de la empresa por nombre: una fila cuyo proveedor coincide exactamente (sin importar mayusculas) queda vinculada a el.
+        var supplierByName = (await dbContext.Suppliers.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive && x.CompanyId == effectiveCompanyId.Value)
+                .Select(x => new { x.Id, x.Name })
+                .ToListAsync(cancellationToken))
+            .GroupBy(x => x.Name.Trim().ToUpperInvariant())
+            .ToDictionary(g => g.Key, g => g.First().Id);
+
         foreach (var row in parsed)
         {
             var dto = new BuildingExpenseImportRowDto
@@ -559,7 +757,9 @@ public class BuildingExpensesController(
                     ExpensePeriodId = expensePeriodId,
                     Category = category,
                     LedgerCategoryId = rubro?.Id,
+                    SupplierId = supplierByName.TryGetValue(row.Supplier.Trim().ToUpperInvariant(), out var linkedSupplier) ? linkedSupplier : null,
                     SupplierName = row.Supplier,
+                    VatRate = VatMath.RateOf(rubro?.VatTreatment),
                     Description = row.Description,
                     ExpenseDate = period.StartDate,
                     Amount = row.Amount!.Value,
@@ -936,7 +1136,7 @@ public class BuildingExpensesController(
     }
 
     internal static BuildingExpenseDto ToDto(BuildingExpense entity, Building building, ExpensePeriod period, Unit? targetUnit, LedgerCategory? rubro = null) =>
-        new()
+        new BuildingExpenseDto
         {
             Id = entity.Id,
             CompanyId = entity.CompanyId,
@@ -960,6 +1160,31 @@ public class BuildingExpensesController(
             ReceiptFileName = entity.ReceiptFileName,
             LedgerCategoryId = entity.LedgerCategoryId,
             LedgerCategoryCode = rubro?.Code,
-            LedgerCategoryName = rubro?.Name
-        };
+            LedgerCategoryName = rubro?.Name,
+            SupplierId = entity.SupplierId,
+            InvoiceNumber = entity.InvoiceNumber,
+            InvoiceTimbrado = entity.InvoiceTimbrado,
+            DueDate = entity.DueDate,
+            PaidAt = entity.PaidAt,
+            PaidFromAccountId = entity.PaidFromAccountId,
+            PaidFromAccountName = entity.PaidFromAccount?.Name,
+            VatRate = entity.VatRate
+        }.Completed();
+
+    // Lo que se calcula del estado del gasto: si es una cuenta por pagar y el IVA incluido en el monto vigente.
+    private static void CompleteDto(BuildingExpenseDto dto)
+    {
+        dto.PayableStatus = ExpensePayables.StatusOf(dto.DueDate, dto.PaidAt, FinancePeriods.Today());
+        dto.VatAmount = VatMath.VatOf(dto.Amount, dto.VatRate);
+    }
+}
+
+internal static class BuildingExpenseDtoExtensions
+{
+    public static BuildingExpenseDto Completed(this BuildingExpenseDto dto)
+    {
+        dto.PayableStatus = ExpensePayables.StatusOf(dto.DueDate, dto.PaidAt, FinancePeriods.Today());
+        dto.VatAmount = VatMath.VatOf(dto.Amount, dto.VatRate);
+        return dto;
+    }
 }

@@ -120,15 +120,23 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
                 FinanceLedgerRules.ForIncome(it.Category, ctx.IncomeTreatment, ctx.Resolved, ctx.IncomeKey(it.LedgerCategoryId, it.Category)), it.Amount);
         }
 
+        // Criterio percibido: un gasto sin vencimiento cuenta en su fecha (como siempre); uno con vencimiento solo cuando se paga, en la fecha
+        // del pago y desde la cuenta elegida (sin cuenta, la que le toca por defecto). Los pendientes de pago todavia no mueven la caja.
         var expenseTotals = await dbContext.BuildingExpenses.AsNoTracking()
-            .Where(e => !e.IsDeleted && e.BuildingId == buildingId && e.ExpenseDate >= from && e.ExpenseDate <= to)
-            .GroupBy(e => new { e.ExpenseDate.Year, e.ExpenseDate.Month, e.Category, e.PaidByReserveFund, e.LedgerCategoryId })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, g.Key.LedgerCategoryId, Amount = g.Sum(x => x.Amount) })
+            .Where(e => !e.IsDeleted && e.BuildingId == buildingId && (e.PaidAt != null || e.DueDate == null)
+                        && (e.PaidAt ?? e.ExpenseDate) >= from && (e.PaidAt ?? e.ExpenseDate) <= to)
+            .GroupBy(e => new
+            {
+                Year = (e.PaidAt ?? e.ExpenseDate).Year,
+                Month = (e.PaidAt ?? e.ExpenseDate).Month,
+                e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.PaidFromAccountId
+            })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, g.Key.LedgerCategoryId, g.Key.PaidFromAccountId, Amount = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
         foreach (var et in expenseTotals)
         {
-            AddBucket(raw, et.Year, et.Month,
-                FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(et.LedgerCategoryId, et.Category)), et.Amount);
+            var rule = FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(et.LedgerCategoryId, et.Category));
+            AddBucket(raw, et.Year, et.Month, WithPaidAccount(rule, et.PaidFromAccountId), et.Amount);
         }
 
         // Nota de credito del proveedor que quedo en el edificio (ver SupplierCreditNoteLedger): gasto negativo con la regla del gasto
@@ -210,21 +218,30 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
                 string.IsNullOrWhiteSpace(i.Description) ? "Ingreso del edificio" : i.Description, string.Empty, string.Empty));
         }
 
+        // Mismo criterio que los agregados por mes: sin vencimiento, en su fecha; con vencimiento, solo pagado y en la fecha del pago.
         var expenses = await dbContext.BuildingExpenses.AsNoTracking()
-            .Where(e => !e.IsDeleted && e.BuildingId == buildingId && e.ExpenseDate >= from && e.ExpenseDate <= to)
-            .Select(e => new { e.Id, e.ExpenseDate, e.Amount, e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.Description, e.SupplierName })
+            .Where(e => !e.IsDeleted && e.BuildingId == buildingId && (e.PaidAt != null || e.DueDate == null)
+                        && (e.PaidAt ?? e.ExpenseDate) >= from && (e.PaidAt ?? e.ExpenseDate) <= to)
+            .Select(e => new { e.Id, e.ExpenseDate, e.PaidAt, e.PaidFromAccountId, e.Amount, e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.Description, e.SupplierName, e.InvoiceNumber })
             .ToListAsync(cancellationToken);
         foreach (var e in expenses)
         {
-            var rule = FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(e.LedgerCategoryId, e.Category));
+            var rule = WithPaidAccount(
+                FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(e.LedgerCategoryId, e.Category)), e.PaidFromAccountId);
             if (rule is null)
             {
                 continue;
             }
 
             var description = string.IsNullOrWhiteSpace(e.Description) ? "Gasto del edificio" : e.Description;
-            rows.Add(new LedgerRow(e.ExpenseDate, rule.AccountId, rule.RubroKey, rule.Direction, e.Amount, LedgerSourceType.BuildingExpense, e.Id,
-                e.PaidByReserveFund ? description + " (pagado por el fondo de reserva)" : description, e.SupplierName, string.Empty));
+            // Una factura pagada despues de su fecha se aclara: el movimiento lleva la fecha del pago.
+            if (e.PaidAt.HasValue && e.PaidAt.Value != e.ExpenseDate)
+            {
+                description += $" (factura del {e.ExpenseDate:dd/MM/yyyy})";
+            }
+
+            rows.Add(new LedgerRow(e.PaidAt ?? e.ExpenseDate, rule.AccountId, rule.RubroKey, rule.Direction, e.Amount, LedgerSourceType.BuildingExpense, e.Id,
+                e.PaidByReserveFund ? description + " (pagado por el fondo de reserva)" : description, e.SupplierName, e.InvoiceNumber ?? string.Empty));
         }
 
         var supplierCredits = await SupplierCreditNoteLedger.LoadAsync(dbContext, new[] { buildingId }, from, to, cancellationToken);
@@ -248,6 +265,10 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ThenBy(r => r.Signed)
             .ToList();
     }
+
+    // Un gasto pagado desde una cuenta elegida mueve esa cuenta; sin cuenta elegida rige la que le toca por defecto.
+    private static LedgerClassification? WithPaidAccount(LedgerClassification? rule, Guid? paidFromAccountId) =>
+        rule is not null && paidFromAccountId.HasValue ? rule with { AccountId = paidFromAccountId.Value } : rule;
 
     private static void AddBucket(List<LedgerBucket> target, int year, int month, LedgerClassification? rule, decimal amount)
     {

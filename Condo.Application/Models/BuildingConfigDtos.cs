@@ -294,3 +294,41 @@ public class UpdateNoticeRulesRequest
 {
     public List<UpdateNoticeRuleItem> Rules { get; set; } = [];
 }
+
+// ── Impuestos: IVA de las compras por cuenta de egresos ───────────────────────
+
+public class VatTreatmentItemDto
+{
+    public Guid CategoryId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    // Grupo al que pertenece la cuenta ("codigo nombre"), para ordenar y mostrar.
+    public string GroupName { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public VatTreatment? Treatment { get; set; }
+}
+
+public class VatTreatmentsDto
+{
+    public Guid BuildingId { get; set; }
+    public bool FinanceAvailable { get; set; }
+    public VatRegime? BuildingVatRegime { get; set; }
+    // El edificio discrimina IVA en sus compras (regimen general): solo entonces el tratamiento de cada cuenta es obligatorio.
+    public bool Applies { get; set; }
+    public int DefinedCount { get; set; }
+    public int TotalCount { get; set; }
+    public bool CanEdit { get; set; }
+    public IReadOnlyList<VatTreatmentItemDto> Items { get; set; } = [];
+}
+
+public class VatTreatmentUpdateItem
+{
+    public Guid CategoryId { get; set; }
+    // Vacio = sin definir.
+    public VatTreatment? Treatment { get; set; }
+}
+
+public class UpdateVatTreatmentsRequest
+{
+    public List<VatTreatmentUpdateItem> Items { get; set; } = [];
+}

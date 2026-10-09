@@ -60,6 +60,7 @@ public interface ICondoDbContext
     DbSet<FinanceAuditLog> FinanceAuditLogs { get; }
     DbSet<FinancePeriodClosure> FinancePeriodClosures { get; }
     DbSet<BuildingNoticeRule> BuildingNoticeRules { get; }
+    DbSet<Supplier> Suppliers { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }

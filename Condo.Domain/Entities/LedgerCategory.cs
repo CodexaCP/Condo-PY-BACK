@@ -27,6 +27,9 @@ public class LedgerCategory : CompanyScopedEntity
 
     public bool IsActive { get; set; } = true;
 
+    // Tratamiento de IVA de una cuenta de egresos (Centro de configuracion, seccion Impuestos). Vacio = sin definir: el gasto no se clasifica solo.
+    public VatTreatment? VatTreatment { get; set; }
+
     // Clave con la que el libro identifica al rubro: la de la plantilla o, en los rubros propios, una derivada de su id.
     public string RubroKey => SystemKey ?? $"Rubro.{Id:N}";
 

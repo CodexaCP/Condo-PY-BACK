@@ -262,6 +262,135 @@ public class BuildingConfigPoliciesController(
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // Impuestos: tratamiento de IVA de cada cuenta de egresos
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [HttpGet("vat-treatments")]
+    public async Task<ActionResult<VatTreatmentsDto>> GetVatTreatments(Guid buildingId, CancellationToken cancellationToken)
+    {
+        var denied = await RequireAccessAsync(buildingId, Section(ConfigSectionKeys.Taxes).ViewRoles, cancellationToken);
+        if (denied is not null) return denied;
+
+        var building = await LoadBuildingAsync(buildingId, tracking: false, cancellationToken);
+        if (building is null) return NotFound();
+
+        var state = await new FinanceModuleGate(dbContext).GetStateAsync(buildingId, cancellationToken);
+        if (!state.IsAvailable)
+        {
+            return Ok(new VatTreatmentsDto
+            {
+                BuildingId = buildingId, FinanceAvailable = false, BuildingVatRegime = building.VatRegime, CanEdit = CanEdit(ConfigSectionKeys.Taxes)
+            });
+        }
+
+        return Ok(await BuildVatTreatmentsAsync(building, cancellationToken));
+    }
+
+    [HttpPut("vat-treatments")]
+    public async Task<ActionResult<VatTreatmentsDto>> UpdateVatTreatments(
+        Guid buildingId, [FromBody] UpdateVatTreatmentsRequest request, CancellationToken cancellationToken)
+    {
+        var denied = await RequireAccessAsync(buildingId, Section(ConfigSectionKeys.Taxes).EditRoles, cancellationToken);
+        if (denied is not null) return denied;
+
+        var building = await LoadBuildingAsync(buildingId, tracking: false, cancellationToken);
+        if (building is null) return NotFound();
+        var companyId = building.CompanyId ?? building.Condominium?.CompanyId;
+        if (!companyId.HasValue) return BadRequest("El edificio no tiene empresa asignada.");
+
+        var state = await new FinanceModuleGate(dbContext).GetStateAsync(buildingId, cancellationToken);
+        if (!state.Enabled)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = FinanceModuleGate.DisabledCode, message = FinanceModuleGate.DisabledMessage });
+        }
+
+        if (!state.PlanIncludesModule)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = FinanceModuleGate.PlanNotIncludedCode, message = FinanceModuleGate.PlanNotIncludedMessage });
+        }
+
+        var items = request.Items ?? [];
+        if (items.Any(x => x.Treatment.HasValue && !Enum.IsDefined(x.Treatment.Value))) return BadRequest("Hay un tratamiento de IVA que no es válido.");
+        if (items.GroupBy(x => x.CategoryId).Any(g => g.Count() > 1)) return BadRequest("Hay una cuenta repetida.");
+
+        var all = await dbContext.LedgerCategories
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId)
+            .ToListAsync(cancellationToken);
+        var parentIds = all.Where(x => x.ParentId.HasValue).Select(x => x.ParentId!.Value).ToHashSet();
+        var leaves = all.Where(x => x.Type == LedgerCategoryType.Expense && !parentIds.Contains(x.Id)).ToDictionary(x => x.Id);
+
+        if (items.Any(x => !leaves.ContainsKey(x.CategoryId)))
+        {
+            return BadRequest("Alguna cuenta no existe en este edificio o no es una cuenta final de egresos.");
+        }
+
+        var changes = new List<ConfigChange>();
+        foreach (var item in items)
+        {
+            var category = leaves[item.CategoryId];
+            if (category.VatTreatment == item.Treatment) continue;
+
+            changes.Add(new ConfigChange($"vat.{category.Code}", $"{category.Code} {category.Name}", VatLabel(category.VatTreatment), VatLabel(item.Treatment)));
+            category.VatTreatment = item.Treatment;
+            category.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        if (changes.Count > 0)
+        {
+            Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Taxes, "Updated",
+                $"IVA de las compras: cambió el tratamiento de {changes.Count} cuentas de egresos.", "LedgerCategory", null, changes);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return Ok(await BuildVatTreatmentsAsync(building, cancellationToken));
+    }
+
+    private async Task<VatTreatmentsDto> BuildVatTreatmentsAsync(Building building, CancellationToken cancellationToken)
+    {
+        var all = await dbContext.LedgerCategories.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == building.Id)
+            .ToListAsync(cancellationToken);
+        var byId = all.ToDictionary(x => x.Id);
+        var parentIds = all.Where(x => x.ParentId.HasValue).Select(x => x.ParentId!.Value).ToHashSet();
+
+        var items = all
+            .Where(x => x.Type == LedgerCategoryType.Expense && !parentIds.Contains(x.Id))
+            .OrderBy(x => x.Code, StringComparer.Ordinal)
+            .Select(x => new VatTreatmentItemDto
+            {
+                CategoryId = x.Id,
+                Code = x.Code,
+                Name = x.Name,
+                GroupName = x.ParentId is { } pid && byId.TryGetValue(pid, out var parent) ? $"{parent.Code} {parent.Name}" : string.Empty,
+                IsActive = x.IsActive,
+                Treatment = x.VatTreatment
+            })
+            .ToList();
+
+        var active = items.Where(x => x.IsActive).ToList();
+        return new VatTreatmentsDto
+        {
+            BuildingId = building.Id,
+            FinanceAvailable = true,
+            BuildingVatRegime = building.VatRegime,
+            Applies = building.VatRegime == VatRegime.General,
+            DefinedCount = active.Count(x => x.Treatment.HasValue),
+            TotalCount = active.Count,
+            CanEdit = CanEdit(ConfigSectionKeys.Taxes),
+            Items = items
+        };
+    }
+
+    private static string? VatLabel(VatTreatment? treatment) => treatment switch
+    {
+        VatTreatment.Vat10 => "IVA 10 %",
+        VatTreatment.Vat5 => "IVA 5 %",
+        VatTreatment.Exempt => "Exento",
+        VatTreatment.NotApplicable => "No corresponde",
+        _ => null
+    };
+
+    // ═════════════════════════════════════════════════════════════════════════
     // Avisos automaticos
     // ═════════════════════════════════════════════════════════════════════════
 

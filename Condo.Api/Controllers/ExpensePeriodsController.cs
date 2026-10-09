@@ -2174,7 +2174,9 @@ public class ExpensePeriodsController(
             TargetUnitId = e.TargetUnitId,
             Notes = e.Notes,
             PaidByReserveFund = e.PaidByReserveFund,
-            LedgerCategoryId = e.LedgerCategoryId
+            LedgerCategoryId = e.LedgerCategoryId,
+            SupplierId = e.SupplierId,
+            VatRate = e.VatRate
         }).ToList();
 
         if (copiedExpenses.Count > 0)

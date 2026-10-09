@@ -82,7 +82,7 @@ public static class FinanceExcelExporter
     public static void AddChart(XLWorkbook wb, LedgerContext ctx)
     {
         var ws = Sheet(wb, "Plan de cuentas", $"Plan de cuentas — {ctx.BuildingName}", "Cuentas del edificio con su código y el código del contador (columna E). El grupo muestra la ruta completa.");
-        Header(ws, 4, "Código", "Nombre", "Clase", "Grupo", "Código del contador", "Función", "Estado", "En la liquidación cuenta como", "Nivel");
+        Header(ws, 4, "Código", "Nombre", "Clase", "Grupo", "Código del contador", "Función", "Estado", "En la liquidación cuenta como", "Nivel", "Tratamiento de IVA");
 
         var parents = ctx.Categories.Where(c => c.ParentId.HasValue).Select(c => c.ParentId!.Value).ToHashSet();
         var row = 5;
@@ -109,11 +109,12 @@ public static class FinanceExcelExporter
             ws.Cell(row, 7).Value = c.IsActive ? "Activo" : "Inactivo";
             ws.Cell(row, 8).Value = isGroup ? string.Empty : SettlementCategoryText(c);
             ws.Cell(row, 9).Value = level;
-            if (isGroup) ws.Range(row, 1, row, 9).Style.Font.SetBold();
+            ws.Cell(row, 10).Value = VatTreatmentLabel(c.VatTreatment);
+            if (isGroup) ws.Range(row, 1, row, 10).Style.Font.SetBold();
             row++;
         }
 
-        Finish(ws, 4, row - 1, 9, [12, 42, 18, 46, 20, 38, 10, 30, 8]);
+        Finish(ws, 4, row - 1, 10, [12, 42, 18, 46, 20, 38, 10, 30, 8, 20]);
     }
 
     /// <summary>Saldo de cada cuenta a una fecha.</summary>
@@ -208,6 +209,66 @@ public static class FinanceExcelExporter
             ? [12, 22, 12, 32, 30, 18, 15, 15, 16, 48, 22, 22, 22]
             : [12, 22, 12, 32, 30, 18, 15, 15, 48, 22, 22, 22];
         Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, widths);
+    }
+
+    /// <summary>Libro de compras: un renglon por factura de proveedor (y por nota de credito, en negativo) con el IVA incluido, y el resumen por tasa.</summary>
+    public static void AddVatPurchases(XLWorkbook wb, VatPurchasesBookDto book)
+    {
+        var ws = Sheet(wb, "Libro de compras", $"Libro de compras — {book.BuildingName}",
+            $"Del {book.From:dd/MM/yyyy} al {book.To:dd/MM/yyyy}. Por fecha de la factura del proveedor. El IVA está incluido en el total de cada comprobante; las notas de crédito van en negativo.");
+        string[] headers = ["Fecha", "Proveedor", "RUC", "Timbrado", "N° de comprobante", "Tipo", "Descripción", "Código de cuenta", "Cuenta", "Total", "Tasa", "Base gravada / exento", "IVA"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var r in book.Rows)
+        {
+            ws.Cell(row, 1).Value = r.Date.ToDateTime(TimeOnly.MinValue);
+            ws.Cell(row, 1).Style.DateFormat.Format = DateFormat;
+            ws.Cell(row, 2).Value = r.SupplierName;
+            ws.Cell(row, 3).Value = r.SupplierRuc ?? string.Empty;
+            ws.Cell(row, 4).Value = r.Timbrado ?? string.Empty;
+            ws.Cell(row, 5).Value = r.DocumentNumber ?? string.Empty;
+            ws.Cell(row, 6).Value = r.IsCreditNote ? "Nota de crédito" : "Factura";
+            ws.Cell(row, 7).Value = r.Description;
+            ws.Cell(row, 8).Value = r.LedgerCategoryCode ?? string.Empty;
+            ws.Cell(row, 9).Value = r.LedgerCategoryName ?? string.Empty;
+            Amount(ws, row, 10, r.Total);
+            ws.Cell(row, 11).Value = r.VatRate == 0m ? "Exento" : $"{r.VatRate:0}%";
+            Amount(ws, row, 12, r.Base);
+            Amount(ws, row, 13, r.Vat);
+            row++;
+        }
+
+        ws.Cell(row, 1).Value = "Total";
+        Amount(ws, row, 10, book.GrandTotal);
+        Amount(ws, row, 12, book.GrandBase);
+        Amount(ws, row, 13, book.GrandVat);
+        ws.Range(row, 1, row, headers.Length).Style.Font.SetBold();
+        ws.Range(row, 1, row, headers.Length).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [12, 28, 14, 12, 20, 15, 40, 14, 32, 16, 9, 18, 14]);
+
+        // Resumen por tasa, debajo del libro.
+        var summaryRow = row + 3;
+        ws.Cell(summaryRow - 1, 1).Value = "Resumen por tasa";
+        ws.Cell(summaryRow - 1, 1).Style.Font.SetBold();
+        Header(ws, summaryRow, "Tasa", "Comprobantes", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, "Total", string.Empty, "Base gravada / exento", "IVA");
+        var line = summaryRow + 1;
+        foreach (var t in book.TotalsByRate)
+        {
+            ws.Cell(line, 1).Value = t.Rate == 0m ? "Exento" : $"{t.Rate:0}%";
+            ws.Cell(line, 2).Value = t.Count;
+            Amount(ws, line, 10, t.Total);
+            Amount(ws, line, 12, t.Base);
+            Amount(ws, line, 13, t.Vat);
+            line++;
+        }
+
+        if (book.UnclassifiedCount > 0)
+        {
+            ws.Cell(line + 1, 1).Value =
+                $"Atención: {book.UnclassifiedCount} gastos por {book.UnclassifiedTotal:N0} no tienen tasa de IVA y no figuran en este libro. Clasificalos desde el gasto o el tratamiento de IVA de su cuenta.";
+            ws.Cell(line + 1, 1).Style.Font.SetFontColor(XLColor.Red);
+        }
     }
 
     /// <summary>Flujo de caja del ejercicio: un renglon por rubro con un importe por mes.</summary>
@@ -499,6 +560,15 @@ public static class FinanceExcelExporter
         cell.Value = value.Value;
         cell.Style.NumberFormat.Format = PercentFormat;
     }
+
+    private static string VatTreatmentLabel(VatTreatment? treatment) => treatment switch
+    {
+        VatTreatment.Vat10 => "IVA 10 %",
+        VatTreatment.Vat5 => "IVA 5 %",
+        VatTreatment.Exempt => "Exento",
+        VatTreatment.NotApplicable => "No corresponde",
+        _ => string.Empty
+    };
 
     private static string TypeLabel(LedgerCategoryType type) => type switch
     {

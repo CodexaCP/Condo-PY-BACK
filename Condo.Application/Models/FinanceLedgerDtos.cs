@@ -122,6 +122,9 @@ public class FinanceDashboardDto
     // Fase 3: presupuesto del mes contra lo real y fondo de reserva.
     public FinanceBudgetSummaryDto Budget { get; set; } = new();
     public FinanceReserveSummaryDto ReserveFund { get; set; } = new();
+    // Fase 4: facturas de proveedores a pagar y deuda de los propietarios (por lo devengado).
+    public PayablesSummaryDto Payables { get; set; } = new();
+    public ReceivablesSummaryDto Receivables { get; set; } = new();
 }
 
 public class FinanceCashFlowLineDto
