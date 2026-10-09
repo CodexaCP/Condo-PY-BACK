@@ -19,6 +19,10 @@ public class FinanceSettings : CompanyScopedEntity
     // del edificio. Nula = el libro usa el unico banco activo, si hay uno solo.
     public Guid? DefaultAccountId { get; set; }
 
+    // Cierre de periodo (Centro de configuracion): opcional por edificio y apagado por defecto. Con el interruptor apagado los meses
+    // cerrados no bloquean nada; no se puede apagar mientras haya meses cerrados (primero se reabren, con motivo).
+    public bool PeriodClosingEnabled { get; set; }
+
     public bool SetupCompleted { get; set; }
     public DateTime? SetupCompletedAtUtc { get; set; }
     public Guid? SetupCompletedByUserId { get; set; }

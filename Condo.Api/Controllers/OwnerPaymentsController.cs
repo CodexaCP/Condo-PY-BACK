@@ -622,6 +622,10 @@ public class OwnerPaymentsController(
         {
             await SettlePaymentAsync(payment, companyId.Value, scope, ct);
         }
+        catch (PeriodClosedException exception)
+        {
+            return FinancePeriodGuard.ClosedResponse(exception.Month);
+        }
         catch (OutOfScopeException exception)
         {
             return StatusCode(StatusCodes.Status403Forbidden, exception.Message);
@@ -829,6 +833,11 @@ public class OwnerPaymentsController(
         if (!CoverageInScope(coverage, scope))
             return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
 
+        // Cierre contable de un mes: se rechaza antes de crear el pago, para no dejar un registro rechazado.
+        var closedRegister = await FindClosedForCoverageAsync(coverage, request.PaymentDate, ct);
+        if (closedRegister is not null)
+            return FinancePeriodGuard.ClosedResponse(closedRegister);
+
         var now = DateTime.UtcNow;
         var year = now.Year;
         var ownerPayment = new OwnerPayment
@@ -875,6 +884,8 @@ public class OwnerPaymentsController(
             ownerPayment.RejectionReason = "No se pudo registrar: " + exception.Message;
             ownerPayment.IsDeleted = true;
             await dbContext.SaveChangesAsync(ct);
+            if (exception is PeriodClosedException closedException)
+                return FinancePeriodGuard.ClosedResponse(closedException.Month);
             return exception is OutOfScopeException
                 ? StatusCode(StatusCodes.Status403Forbidden, exception.Message)
                 : BadRequest(exception.Message);
@@ -946,6 +957,11 @@ public class OwnerPaymentsController(
             .Where(x => !x.IsDeleted && !x.IsReversed && x.CompanyId == companyId.Value && x.Reference == payment.Reference)
             .ToListAsync(ct);
         var paymentIds = settlements.Select(x => x.Id).ToList();
+
+        // Cierre contable de un mes: revertir cambia la caja del mes en que se hizo cada pago.
+        var closedReverse = await FindClosedForPaymentsAsync(settlements, ct);
+        if (closedReverse is not null)
+            return FinancePeriodGuard.ClosedResponse(closedReverse);
 
         // Si el pago uso saldo a favor, devolverlo exige reconstruir los lotes: se hace con un ajuste manual.
         var usedCredit = await dbContext.OwnerCreditMovements
@@ -1168,6 +1184,11 @@ public class OwnerPaymentsController(
         if (!CoverageInScope(coverage, scope))
             throw new OutOfScopeException(OutOfScopeMessage);
 
+        // Cierre contable de un mes: los pagos nuevos llevan la fecha del pago.
+        var closedMonth = await FindClosedForCoverageAsync(coverage, ownerPayment.PaymentDate, ct);
+        if (closedMonth is not null)
+            throw new PeriodClosedException(closedMonth);
+
         var allocatedPerUnit = ownerPayment.Units
             .Where(u => !u.IsDeleted)
             .ToDictionary(u => u.UnitId, u => 0m);
@@ -1307,6 +1328,29 @@ public class OwnerPaymentsController(
         "Debe procesarlo un Administrador de empresa o un encargado con acceso a todos esos edificios.";
 
     private sealed class OutOfScopeException(string message) : InvalidOperationException(message);
+
+    // El pago caeria en un mes contable cerrado (Centro de configuracion): se responde 409 con el codigo de cierre.
+    private sealed class PeriodClosedException(ClosedMonth month) : InvalidOperationException(FinancePeriodGuard.MessageFor(month))
+    {
+        public ClosedMonth Month { get; } = month;
+    }
+
+    // Cierre contable de un mes: el primer mes cerrado entre los pagos indicados (cada uno en el edificio de su periodo, con su fecha).
+    private async Task<ClosedMonth?> FindClosedForPaymentsAsync(IReadOnlyCollection<Payment> payments, CancellationToken ct) =>
+        await new FinancePeriodGuard(dbContext).FindClosedForPaymentsAsync(payments, ct);
+
+    // Cierre contable de un mes: el primer mes cerrado entre los edificios que cubre el pago, segun la fecha del pago.
+    private async Task<ClosedMonth?> FindClosedForCoverageAsync(ComprobanteCoverage coverage, DateOnly paymentDate, CancellationToken ct)
+    {
+        var guard = new FinancePeriodGuard(dbContext);
+        foreach (var buildingId in coverage.Covered.Select(c => c.BuildingId).Distinct())
+        {
+            var closed = await guard.FindClosedAsync(buildingId, paymentDate, ct);
+            if (closed is not null) return closed;
+        }
+
+        return null;
+    }
 
     private static bool TouchesScope(OwnerPayment payment, HashSet<Guid> scope) =>
         payment.Units.Any(u => !u.IsDeleted && u.Unit is not null && scope.Contains(u.Unit.BuildingId));

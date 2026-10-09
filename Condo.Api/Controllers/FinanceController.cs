@@ -209,6 +209,14 @@ public class FinanceController(
 
         var previousStart = settings.FinanceStartDate;
         var previousFiscalMonth = settings.FiscalYearStartMonth;
+
+        // Con meses cerrados la fecha de arranque y el ejercicio no se tocan: moverian los saldos y el ejercicio de esos meses.
+        if ((previousStart != startDate || previousFiscalMonth != request.FiscalYearStartMonth)
+            && await new FinancePeriodGuard(Db).AnyClosedAsync(buildingId, cancellationToken))
+        {
+            return FinancePeriodGuard.ClosedMonthsExistResponse("cambiar la fecha de arranque o el mes de inicio del ejercicio");
+        }
+
         settings.FinanceStartDate = startDate;
         settings.FiscalYearStartMonth = request.FiscalYearStartMonth;
 

@@ -50,10 +50,12 @@ public class ConfigSectionDto
     // El usuario puede editar esta seccion.
     public bool CanEdit { get; set; }
 
-    // Donde se edita: "building" (pestana de la ficha del edificio), "finance" (pantallas de Finanzas) o vacio si no se edita.
+    // Donde se edita: "building" (pestana de la ficha del edificio), "finance" (pantallas de Finanzas), "self" (en el propio Centro) o
+    // vacio si no se edita.
     public string? LinkKind { get; set; }
 
-    // Para "building": general, legal, billing, accounting o config. Para "finance": settings o budget.
+    // Para "building": general, legal, billing, accounting o config. Para "finance": settings o budget. Para "self" (una seccion del
+    // propio Centro): la clave de la seccion.
     public string? LinkTab { get; set; }
 }
 
@@ -94,4 +96,77 @@ public class ConfigAuditPageDto
     public int Page { get; set; }
     public int PageSize { get; set; }
     public IReadOnlyList<ConfigAuditEntryDto> Items { get; set; } = [];
+}
+
+// ── Periodo y cierre ──────────────────────────────────────────────────────────
+
+/// <summary>Estados de un mes en la pantalla del cierre (se envian como texto).</summary>
+public static class ClosingMonthStatus
+{
+    public const string Open = "Open";
+    public const string Closed = "Closed";
+    // El mes en curso: todavia no terminó, no se puede cerrar.
+    public const string Current = "Current";
+}
+
+public class PeriodClosingDto
+{
+    public Guid BuildingId { get; set; }
+
+    // Finanzas esta disponible en el edificio (el cierre depende del modulo).
+    public bool FinanceAvailable { get; set; }
+
+    // El interruptor del cierre del edificio.
+    public bool Enabled { get; set; }
+
+    // El usuario puede encender/apagar, cerrar y reabrir.
+    public bool CanEdit { get; set; }
+
+    public DateOnly? FinanceStartDate { get; set; }
+    public int FiscalYearStartMonth { get; set; }
+
+    // Del mes de arranque al mes en curso, en orden cronologico.
+    public IReadOnlyList<ClosingMonthDto> Months { get; set; } = [];
+
+    // Los ultimos cierres (vigentes y reabiertos), el mas reciente primero.
+    public IReadOnlyList<ClosureHistoryDto> History { get; set; } = [];
+}
+
+public class ClosingMonthDto
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public string Status { get; set; } = ClosingMonthStatus.Open;
+    public DateTime? ClosedAtUtc { get; set; }
+    public string? ClosedByName { get; set; }
+
+    // Se puede cerrar ahora: cierre encendido, mes terminado y sin meses anteriores abiertos.
+    public bool CanClose { get; set; }
+    // Si no se puede cerrar, por que.
+    public string? CannotCloseReason { get; set; }
+    public bool CanReopen { get; set; }
+}
+
+public class ClosureHistoryDto
+{
+    public Guid Id { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public DateTime ClosedAtUtc { get; set; }
+    public string ClosedByName { get; set; } = string.Empty;
+    public DateTime? ReopenedAtUtc { get; set; }
+    public string? ReopenedByName { get; set; }
+    public string? ReopenReason { get; set; }
+}
+
+public class SetPeriodClosingRequest
+{
+    public bool Enabled { get; set; }
+}
+
+public class ReopenPeriodRequest
+{
+    public string Reason { get; set; } = string.Empty;
 }

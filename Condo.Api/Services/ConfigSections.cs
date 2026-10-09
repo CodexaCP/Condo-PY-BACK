@@ -13,6 +13,7 @@ public static class ConfigSectionKeys
     public const string Funds = "funds";
     public const string Chart = "chart";
     public const string Budget = "budget";
+    public const string Closing = "closing";
 }
 
 public sealed record ConfigSectionDefinition(
@@ -45,6 +46,7 @@ public static class ConfigSections
         new(ConfigSectionKeys.PaymentRule, 4, "Regla de pago", true, NoManager, Nobody),
         new(ConfigSectionKeys.Funds, 5, "Fondos", false, NoManager, SuperAndAdmin),
         new(ConfigSectionKeys.Chart, 6, "Plan de cuentas y cuentas financieras", true, AllStaff, SuperOnly),
+        new(ConfigSectionKeys.Closing, 9, "Período y cierre", false, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.Budget, 10, "Presupuesto y alertas", false, AllStaff, SuperAndAdmin)
     ];
 

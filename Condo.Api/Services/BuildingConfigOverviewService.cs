@@ -47,6 +47,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.PaymentRule => PaymentRule(),
                 ConfigSectionKeys.Funds => Funds(building),
                 ConfigSectionKeys.Chart => await ChartAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Closing => await ClosingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
                 _ => null
             };
@@ -233,6 +234,42 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "finance",
             LinkTab = "settings"
+        };
+    }
+
+    // ── 9. Período y cierre ──────────────────────────────────────────────────
+
+    private async Task<ConfigSectionDto> ClosingAsync(Building b, FinanceModuleState finance, CancellationToken cancellationToken)
+    {
+        var unavailable = FinanceUnavailable(finance);
+        if (unavailable is not null)
+        {
+            return unavailable;
+        }
+
+        var enabled = await dbContext.FinanceSettings.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
+            .Select(x => x.PeriodClosingEnabled)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var closed = await dbContext.FinancePeriodClosures.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == b.Id && x.ReopenedAtUtc == null)
+            .Select(x => new { x.Year, x.Month })
+            .ToListAsync(cancellationToken);
+        var last = closed.OrderByDescending(x => x.Year).ThenByDescending(x => x.Month).FirstOrDefault();
+
+        return new ConfigSectionDto
+        {
+            Status = enabled ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = enabled ? [] : ["El cierre de período está apagado: los meses no se bloquean."],
+            Summary =
+            [
+                Item("Cierre de período", enabled ? "Encendido" : "Apagado"),
+                Item("Meses cerrados", closed.Count.ToString(CultureInfo.InvariantCulture)),
+                Item("Último mes cerrado", last is null ? null : $"{last.Month:00}/{last.Year}")
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Closing
         };
     }
 

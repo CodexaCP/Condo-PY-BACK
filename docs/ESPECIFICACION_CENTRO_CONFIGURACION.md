@@ -427,3 +427,29 @@ Decisiones de Tony (2026-10-09) que rigen la ejecución: trabajo en la rama `fea
 **Pruebas:** 26 pruebas nuevas (`ConfigCenterPhase1Tests`): estados y motivos, timbrado vencido o inactivo, roles y `canEdit`, 403 y 404, historial de cuentas, fecha de arranque, plan genérico, alta de cuenta del plan, paginación y filtros, nombre de usuario, aislamiento entre edificios, permisos del historial, y el guardado real de la ficha (una entrada por sección, sin entrada si no hay cambios). La prueba del guardado de la ficha detectó que una cuenta bancaria nueva se contaba dos veces en la foto «después» (EF la engancha a la colección del edificio al agregarla); quedó corregido. Suite completa: 827 pasan, 15 omitidas (las que exigen SQL Server).
 
 **Pendiente de esta fase para el final:** todo el frente web (secciones 6.1 a 6.5), incluido el `?tab=` de la ficha.
+
+### 12.2 Fase 2 — Cierre de período (backend, hecha 2026-10-09)
+
+Decisiones de Tony para esta fase: el cierre **depende del módulo Finanzas** (sin Finanzas disponible la sección figura «No disponible»); **solo se cierran meses ya terminados y en orden** (desde la fecha de arranque; reabrir puede hacerse con cualquier mes, con motivo); un mes cerrado bloquea **gastos e ingresos, pagos de propietarios, notas de crédito de proveedor y presupuesto**, evaluado por la fecha de cada movimiento.
+
+**Datos:** `FinanceSettings.PeriodClosingEnabled` (interruptor por edificio, **apagado por defecto**: los edificios existentes no cambian) y tabla `FinancePeriodClosures` (migración `20261009164951_PeriodClosing` y su `.sql` idempotente). Reabrir no borra: la fila queda con quien reabrió, cuándo y por qué, y volver a cerrar crea otra fila. Un índice único filtrado garantiza un solo cierre vigente por edificio y mes.
+
+**Guarda única:** `FinancePeriodGuard` es el único lugar donde se decide si un mes está cerrado. Rige solo si el interruptor del edificio está encendido, el módulo Finanzas está disponible y el mes tiene un cierre vigente; sin interruptor, el costo es una consulta. Respuesta uniforme `409 { error: "finance_period_closed", message }`; el mensaje nombra el mes y dice dónde reabrirlo.
+
+**Dónde se aplica** (con prueba en cada punto):
+- Gastos del edificio: alta, edición (se miran la fecha actual **y** la nueva), baja e importación de Excel (la fecha de los gastos nuevos y, con «reemplazar», la de los que se eliminan).
+- Ingresos: alta, edición y baja. **No se bloquean** el arrastre de saldo (`AccumulatedBalance`) ni el fondo operativo (`OperationalFund`): el libro los excluye, no son plata.
+- Gastos recurrentes al aplicarlos a un período, y clonado de período (los gastos e ingresos copiados llevan la fecha de inicio del período nuevo).
+- Notas de crédito de proveedor: alta y anulación, según la fecha del gasto.
+- Pagos: registrar (se rechaza **antes** de crear el pago, sin dejar un registro rechazado), aprobar un pago de la app (queda «En revisión»), revertir un pago registrado por el sistema y el camino antiguo de reversa. Cada pago cuenta en el edificio de su período y en el mes de su **fecha de pago**. Un pago que el propietario envía desde la app no se bloquea al enviarlo (todavía no toca el libro); sí al aprobarlo.
+- Presupuesto: guardar celdas (se rechaza si cambia el importe de un mes cerrado; una celda sin cambio de importe se acepta) y, en «copiar del ejercicio anterior» y «completar con el promedio», los meses cerrados **se omiten**.
+- Lo que cambiaría los números de los meses cerrados sin ser un movimiento con fecha: con meses cerrados **no se cambia** la fecha de arranque ni el mes de inicio del ejercicio, el saldo inicial o el tipo de una cuenta financiera, no se elimina una cuenta y no se **reemplaza** el plan de cuentas (agregar lo que falta sí se puede).
+- No se bloquean (no alimentan el libro): cargos de la liquidación, mora automática, facturas, comprobantes adjuntos de un gasto, ni el saldo a favor (desactivado) — este último crea pagos con la fecha de hoy, que nunca cae en un mes cerrado.
+
+**API** (`/api/building-config/{buildingId}/closing`): `GET` (interruptor, meses desde el arranque hasta el mes en curso con su estado, quién cerró y cuándo, si se puede cerrar o reabrir y por qué no, y el historial de cierres), `PUT` (encender o apagar), `POST {año}/{mes}/close` y `POST {año}/{mes}/reopen` (motivo obligatorio, máximo 500 caracteres). Ver: los cuatro roles administrativos; encender, apagar, cerrar y reabrir: **SuperAdmin y Administrador de empresa**. Requiere Finanzas disponible (403 con el código del módulo) y fecha de arranque (409 `finance_setup_incomplete`). Errores propios: `closing_disabled`, `previous_month_open`, `month_already_closed` y `closing_has_closed_months` (no se apaga el cierre mientras haya meses cerrados: se reabren primero). Todo queda en el historial del Centro (sección `closing`).
+
+**Resumen del Centro:** nueva sección 9 «Período y cierre» (opcional; completa cuando el cierre está encendido; «No disponible» sin Finanzas).
+
+**Pruebas:** 46 pruebas nuevas (`ConfigCenterPhase2Tests`): pantalla del cierre (estados, orden, mes en curso, mes anterior al arranque, doble cierre, apagar y reabrir, motivo, rehacer un cierre, reabrir un mes intermedio, permisos y dependencia de Finanzas), la guarda (cierre apagado, módulo apagado, mes reabierto, aislamiento entre edificios) y cada punto protegido con su caso negativo y su caso permitido. Suite completa: 873 pasan, 15 omitidas.
+
+**No cubierto por pruebas automáticas:** la importación de gastos por Excel (la guarda está, pero no se armó un archivo de plantilla firmado) y el camino feliz del clonado de período (la base de pruebas SQLite no soporta la suma de decimales que usa el cálculo del saldo de arrastre).

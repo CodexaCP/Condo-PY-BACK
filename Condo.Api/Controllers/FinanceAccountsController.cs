@@ -107,6 +107,14 @@ public class FinanceAccountsController(
         var accountChanges = new List<ConfigChange>();
         var newName = request.Name.Trim();
         var newBalance = decimal.Round(request.OpeningBalance, 2);
+
+        // Con meses cerrados el saldo inicial y el tipo de la cuenta no se tocan: moverian los saldos de esos meses.
+        if ((entity.OpeningBalance != newBalance || entity.Type != request.Type)
+            && await new FinancePeriodGuard(Db).AnyClosedAsync(entity.BuildingId, cancellationToken))
+        {
+            return FinancePeriodGuard.ClosedMonthsExistResponse("cambiar el saldo inicial o el tipo de una cuenta");
+        }
+
         if (entity.Name != newName) accountChanges.Add(new ConfigChange("name", "Nombre", entity.Name, newName));
         if (entity.Type != request.Type) accountChanges.Add(new ConfigChange("type", "Tipo", TypeLabel(entity.Type), TypeLabel(request.Type)));
         if (entity.OpeningBalance != newBalance) accountChanges.Add(new ConfigChange("openingBalance", "Saldo inicial", $"{entity.OpeningBalance:N0}", $"{newBalance:N0}"));
@@ -140,6 +148,12 @@ public class FinanceAccountsController(
         if (denied is not null)
         {
             return denied;
+        }
+
+        // Con meses cerrados no se elimina una cuenta: sus saldos y movimientos ya estan cerrados.
+        if (await new FinancePeriodGuard(Db).AnyClosedAsync(entity.BuildingId, cancellationToken))
+        {
+            return FinancePeriodGuard.ClosedMonthsExistResponse("eliminar una cuenta");
         }
 
         // Todavia no hay movimientos: la baja es libre. Desde la fase 2 una cuenta con movimientos solo se podra desactivar.

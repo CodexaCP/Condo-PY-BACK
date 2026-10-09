@@ -349,6 +349,13 @@ public class RecurringBuildingExpensesController(
             return BadRequest("Los gastos recurrentes solo se pueden aplicar mientras el periodo este en borrador.");
         }
 
+        // Cierre de periodo: los gastos que genera la plantilla llevan la fecha de inicio del periodo.
+        var closedMonth = await new FinancePeriodGuard(dbContext).FindClosedAsync(period.BuildingId, period.StartDate, cancellationToken);
+        if (closedMonth is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedMonth);
+        }
+
         // Se aplican las plantillas de ese edificio puntual y tambien las generales (sin edificio) de la empresa.
         var templates = await dbContext.RecurringBuildingExpenses
             .AsNoTracking()

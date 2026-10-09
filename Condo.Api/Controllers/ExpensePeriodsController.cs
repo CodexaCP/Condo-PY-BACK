@@ -2114,6 +2114,14 @@ public class ExpensePeriodsController(
         var monthDiff = source.Month == 12 ? 12 : 0;
         var yearDiff = source.Month == 12 ? 1 : 0;
         var startDate = source.StartDate.AddMonths(1);
+
+        // Cierre de periodo: el clon copia gastos e ingresos con la fecha de inicio del periodo nuevo.
+        var closedMonth = await new FinancePeriodGuard(dbContext).FindClosedAsync(source.BuildingId, startDate, cancellationToken);
+        if (closedMonth is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedMonth);
+        }
+
         var endDate = source.EndDate.AddMonths(1);
         var dueDate = source.DueDate.AddMonths(1);
         var lateFeeDate = source.LateFeeDate?.AddMonths(1);

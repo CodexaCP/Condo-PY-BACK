@@ -22,6 +22,10 @@ public class BuildingExpensesController(
     IConfiguration configuration,
     MovementRubroResolver rubros) : ControllerBase
 {
+    // Cierre de periodo: un gasto fechado en un mes cerrado no se agrega, modifica ni elimina.
+    private FinancePeriodGuard? _periodGuard;
+    private FinancePeriodGuard periodGuard => _periodGuard ??= new FinancePeriodGuard(dbContext);
+
     private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
     private const long MaxReceiptSizeBytes = 10 * 1024 * 1024; // 10 MB
 
@@ -185,6 +189,12 @@ public class BuildingExpensesController(
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
         }
 
+        var closedMonth = await periodGuard.FindClosedAsync(request.BuildingId, request.ExpenseDate, cancellationToken);
+        if (closedMonth is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedMonth);
+        }
+
         // Con rubro elegido, la categoria de la liquidacion sale del rubro.
         var rubro = await rubros.ResolveAsync(request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Expense, null, cancellationToken);
         if (rubro.Error is not null)
@@ -266,6 +276,14 @@ public class BuildingExpensesController(
         if (!effectiveCompanyId.HasValue)
         {
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar gastos.");
+        }
+
+        // Cierre de periodo: ni el gasto como esta (su fecha actual) ni como quedaria (la fecha nueva) pueden estar en un mes cerrado.
+        var closedBefore = await periodGuard.FindClosedAsync(entity.BuildingId, entity.ExpenseDate, cancellationToken);
+        var closedAfter = await periodGuard.FindClosedAsync(request.BuildingId, request.ExpenseDate, cancellationToken);
+        if ((closedBefore ?? closedAfter) is { } closedUpdate)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedUpdate);
         }
 
         // Conservar el rubro que ya tenia no exige que siga activo; cambiarlo a otro si.
@@ -416,6 +434,15 @@ public class BuildingExpensesController(
         var existing = await dbContext.BuildingExpenses
             .Where(x => !x.IsDeleted && x.ExpensePeriodId == expensePeriodId)
             .ToListAsync(cancellationToken);
+
+        // Cierre de periodo: los gastos nuevos llevan la fecha de inicio del periodo y, con "reemplazar", se eliminan los que ya estaban.
+        var importDates = new List<DateOnly> { period.StartDate };
+        if (replaceExisting) importDates.AddRange(existing.Select(x => x.ExpenseDate));
+        var closedImport = await periodGuard.FindClosedAsync(buildingId, importDates, cancellationToken);
+        if (closedImport is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedImport);
+        }
 
         // Con "reemplazar" los existentes se eliminan, asi que no cuentan como duplicados.
         static string Key(string supplier, string description, decimal amount, bool paidByReserveFund) =>
@@ -601,6 +628,12 @@ public class BuildingExpensesController(
         if (entity.OriginalAmount.HasValue)
         {
             return BadRequest("Este gasto tiene notas de crédito del proveedor aplicadas: anulalas antes de eliminarlo.");
+        }
+
+        var closedDelete = await periodGuard.FindClosedAsync(entity.BuildingId, entity.ExpenseDate, cancellationToken);
+        if (closedDelete is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedDelete);
         }
 
         entity.IsDeleted = true;

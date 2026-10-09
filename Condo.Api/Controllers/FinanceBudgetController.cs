@@ -112,6 +112,18 @@ public class FinanceBudgetController(
         }
 
         var existing = await LoadLinesAsync(buildingId, fiscalYear, startMonth, cancellationToken);
+
+        // Cierre de periodo: un mes cerrado no admite cambios de presupuesto (una celda sin cambio de importe si se acepta).
+        var closedMonths = await ActiveClosedMonthsAsync(buildingId, cancellationToken);
+        foreach (var cell in request.Cells.Where(c => closedMonths.Contains((c.Year, c.Month))))
+        {
+            var current = existing.FirstOrDefault(l => l.CategoryId == cell.CategoryId && l.Year == cell.Year && l.Month == cell.Month)?.Amount ?? 0m;
+            if (current != decimal.Round(cell.Amount, 2))
+            {
+                return FinancePeriodGuard.ClosedResponse(new ClosedMonth(cell.Year, cell.Month));
+            }
+        }
+
         var affected = 0;
         foreach (var cell in request.Cells)
         {
@@ -167,6 +179,10 @@ public class FinanceBudgetController(
         var source = await LoadLinesAsync(buildingId, fiscalYear - 1, startMonth, cancellationToken);
         var existing = await LoadLinesAsync(buildingId, fiscalYear, startMonth, cancellationToken);
 
+        // Cierre de periodo: el atajo no toca los meses cerrados (se omiten sin avisar de error).
+        var closedMonths = await ActiveClosedMonthsAsync(buildingId, cancellationToken);
+        var skippedClosed = 0;
+
         var affected = 0;
         foreach (var line in source.Where(l => l.Amount != 0m && budgetable.Contains(l.CategoryId)).ToList())
         {
@@ -177,6 +193,12 @@ public class FinanceBudgetController(
             }
 
             var target = targetMonths[index];
+            if (closedMonths.Contains((target.Year, target.Month)))
+            {
+                skippedClosed++;
+                continue;
+            }
+
             var current = existing.FirstOrDefault(l => l.CategoryId == line.CategoryId && l.Year == target.Year && l.Month == target.Month);
             if (current is not null && current.Amount != 0m && !overwrite)
             {
@@ -192,7 +214,7 @@ public class FinanceBudgetController(
         if (affected > 0)
         {
             Audit.Add(companyId.Value, buildingId, ConfigSectionKeys.Budget, "Copied",
-                $"Presupuesto del ejercicio {fiscalYear}: se copió del ejercicio anterior ({affected} celdas{(overwrite ? ", reemplazando las cargadas" : string.Empty)}).",
+                $"Presupuesto del ejercicio {fiscalYear}: se copió del ejercicio anterior ({affected} celdas{(overwrite ? ", reemplazando las cargadas" : string.Empty)}{(skippedClosed > 0 ? $"; se omitieron {skippedClosed} de meses cerrados" : string.Empty)}).",
                 "BudgetLine", null);
         }
 
@@ -250,6 +272,9 @@ public class FinanceBudgetController(
         var targetMonths = FinancePeriods.FiscalMonths(fiscalYear, ctx.FiscalYearStartMonth);
         var existing = await LoadLinesAsync(buildingId, fiscalYear, ctx.FiscalYearStartMonth, cancellationToken);
 
+        // Cierre de periodo: el atajo no toca los meses cerrados.
+        var closedMonths = await ActiveClosedMonthsAsync(buildingId, cancellationToken);
+
         var affected = 0;
         foreach (var category in FinanceBudgetCalculator.BudgetableCategories(ctx.Categories.ToList()).Where(c => c.IsActive))
         {
@@ -262,6 +287,11 @@ public class FinanceBudgetController(
 
             foreach (var m in targetMonths)
             {
+                if (closedMonths.Contains((m.Year, m.Month)))
+                {
+                    continue;
+                }
+
                 var line = existing.FirstOrDefault(l => l.CategoryId == category.Id && l.Year == m.Year && l.Month == m.Month);
                 if (line is not null && line.Amount != 0m && !overwrite)
                 {
@@ -317,6 +347,13 @@ public class FinanceBudgetController(
         await Db.LedgerCategories.AsNoTracking().Where(x => !x.IsDeleted && x.BuildingId == buildingId).ToListAsync(cancellationToken);
 
     // Lineas (rastreadas) del ejercicio.
+    // Meses cerrados vigentes del edificio, o vacio si el cierre no esta encendido (el modulo ya se valido al entrar al endpoint).
+    private async Task<HashSet<(int Year, int Month)>> ActiveClosedMonthsAsync(Guid buildingId, CancellationToken cancellationToken)
+    {
+        var guard = new FinancePeriodGuard(Db);
+        return await guard.IsEnabledAsync(buildingId, cancellationToken) ? await guard.ClosedSetAsync(buildingId, cancellationToken) : [];
+    }
+
     private async Task<List<BudgetLine>> LoadLinesAsync(Guid buildingId, int fiscalYear, int startMonth, CancellationToken cancellationToken)
     {
         var months = FinancePeriods.FiscalMonths(fiscalYear, startMonth);

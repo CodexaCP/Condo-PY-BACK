@@ -529,6 +529,12 @@ public class FinanceCategoriesController(
 
         if (mode == LedgerPlanApplyMode.Replace)
         {
+            // Con meses cerrados no se reemplaza el plan: desvincula el rubro de los movimientos y borra el presupuesto.
+            if (await new FinancePeriodGuard(Db).AnyClosedAsync(buildingId, cancellationToken))
+            {
+                return FinancePeriodGuard.ClosedMonthsExistResponse("reemplazar el plan de cuentas");
+            }
+
             var impact = await planService.GetImpactAsync(buildingId, cancellationToken);
             if (impact.HasImpact && !confirmReplace)
             {

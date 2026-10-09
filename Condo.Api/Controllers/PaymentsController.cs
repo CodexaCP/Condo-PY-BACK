@@ -236,6 +236,11 @@ public class PaymentsController(ICondoDbContext dbContext, IAccessScopeService a
 
         if (unit is null) return BadRequest("La unidad no existe.");
 
+        // Cierre contable de un mes (Centro de configuracion): revertir cambia la caja del mes en que se hizo el pago.
+        var closedMonth = await new Condo.Api.Services.FinancePeriodGuard(dbContext).FindClosedForPaymentsAsync([entity], cancellationToken);
+        if (closedMonth is not null)
+            return Condo.Api.Services.FinancePeriodGuard.ClosedResponse(closedMonth);
+
         // Soft-delete allocations to free up the charges
         var allocations = await dbContext.PaymentAllocations
             .Where(a => !a.IsDeleted && a.PaymentId == id)

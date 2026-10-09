@@ -14,6 +14,17 @@ namespace Condo.Api.Controllers;
 [Route("api/building-incomes")]
 public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeService accessScope, MovementRubroResolver rubros) : ControllerBase
 {
+    // Cierre de periodo: un ingreso fechado en un mes cerrado no se agrega, modifica ni elimina. El arrastre de saldo y el fondo
+    // operativo no son plata del libro (el libro los excluye), asi que no se bloquean.
+    private FinancePeriodGuard? _periodGuard;
+    private FinancePeriodGuard periodGuard => _periodGuard ??= new FinancePeriodGuard(dbContext);
+
+    private static bool CountsInLedger(BuildingIncomeCategory category) =>
+        category is not (BuildingIncomeCategory.AccumulatedBalance or BuildingIncomeCategory.OperationalFund);
+
+    private async Task<ClosedMonth?> ClosedMonthAsync(Guid buildingId, BuildingIncomeCategory category, DateOnly date, CancellationToken cancellationToken) =>
+        CountsInLedger(category) ? await periodGuard.FindClosedAsync(buildingId, date, cancellationToken) : null;
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingIncomeDto>>> GetAll(
         [FromQuery] Guid? buildingId,
@@ -134,6 +145,13 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar ingresos.");
         }
 
+        // El rubro puede cambiar la categoria final; se mira la que quedaria.
+        var closedMonth = await ClosedMonthAsync(request.BuildingId, request.Category, request.IncomeDate, cancellationToken);
+        if (closedMonth is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedMonth);
+        }
+
         // Con rubro elegido, la categoria de la liquidacion sale del rubro.
         var rubro = await rubros.ResolveAsync(request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Income, null, cancellationToken);
         if (rubro.Error is not null)
@@ -213,6 +231,14 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
             return BadRequest("El edificio no tiene empresa asignada. Asigne una empresa o condominio antes de gestionar ingresos.");
         }
 
+        // Cierre de periodo: ni el ingreso como esta ni como quedaria pueden estar en un mes cerrado.
+        var closedBefore = await ClosedMonthAsync(entity.BuildingId, entity.Category, entity.IncomeDate, cancellationToken);
+        var closedAfter = await ClosedMonthAsync(request.BuildingId, request.Category, request.IncomeDate, cancellationToken);
+        if ((closedBefore ?? closedAfter) is { } closedUpdate)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedUpdate);
+        }
+
         // Conservar el rubro que ya tenia no exige que siga activo; cambiarlo a otro si.
         var rubro = await rubros.ResolveAsync(
             request.LedgerCategoryId, request.BuildingId, LedgerCategoryType.Income,
@@ -264,6 +290,12 @@ public class BuildingIncomesController(ICondoDbContext dbContext, IAccessScopeSe
         if (period.Status != ExpensePeriodStatus.Draft)
         {
             return BadRequest("Building incomes can only be deleted while the expense period is in draft status.");
+        }
+
+        var closedDelete = await ClosedMonthAsync(entity.BuildingId, entity.Category, entity.IncomeDate, cancellationToken);
+        if (closedDelete is not null)
+        {
+            return FinancePeriodGuard.ClosedResponse(closedDelete);
         }
 
         entity.IsDeleted = true;

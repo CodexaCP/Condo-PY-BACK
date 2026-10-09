@@ -151,6 +151,10 @@ public class BuildingExpenseCreditNotesController(
 
         if (period.Status == ExpensePeriodStatus.Closed) return BadRequest(ClosedMessage);
 
+        // Cierre contable de un mes (Centro de configuracion): la nota cambia el gasto de ese mes.
+        var closedMonth = await new FinancePeriodGuard(dbContext).FindClosedAsync(expense.BuildingId, expense.ExpenseDate, cancellationToken);
+        if (closedMonth is not null) return FinancePeriodGuard.ClosedResponse(closedMonth);
+
         // Una misma nota (proveedor + numero, y timbrado si se carga) no se registra dos veces: el control mira toda la empresa (la
         // nota puede haberse cargado en otro gasto u otro edificio) y reconoce el numero aunque se escriba distinto.
         var supplierKey = BuildingExpenseCreditNoteKeys.Normalize(expense.SupplierName);
@@ -258,6 +262,10 @@ public class BuildingExpenseCreditNotesController(
         var period = await dbContext.ExpensePeriods.AsNoTracking()
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == note.ExpensePeriodId, cancellationToken);
         if (period is null) return BadRequest("El periodo de expensas asociado no existe.");
+
+        // Cierre contable de un mes (Centro de configuracion): anular la nota vuelve a cambiar el gasto de ese mes.
+        var closedMonth = await new FinancePeriodGuard(dbContext).FindClosedAsync(expense.BuildingId, expense.ExpenseDate, cancellationToken);
+        if (closedMonth is not null) return FinancePeriodGuard.ClosedResponse(closedMonth);
 
         var pushes = new List<PendingPush>();
 

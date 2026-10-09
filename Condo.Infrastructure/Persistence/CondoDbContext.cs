@@ -57,6 +57,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<LedgerCategory> LedgerCategories => Set<LedgerCategory>();
     public DbSet<BudgetLine> BudgetLines => Set<BudgetLine>();
     public DbSet<FinanceAuditLog> FinanceAuditLogs => Set<FinanceAuditLog>();
+    public DbSet<FinancePeriodClosure> FinancePeriodClosures => Set<FinancePeriodClosure>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1102,6 +1103,20 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<FinanceAuditLog>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Centro de configuracion: cierre de periodo ─────────────────────────
+        modelBuilder.Entity<FinancePeriodClosure>().Ignore(x => x.IsActive);
+        modelBuilder.Entity<FinancePeriodClosure>().Property(x => x.ReopenReason).HasMaxLength(500);
+        // Un solo cierre vigente (sin reabrir) por edificio y mes; los reabiertos quedan como historial.
+        modelBuilder.Entity<FinancePeriodClosure>().HasIndex(x => new { x.BuildingId, x.Year, x.Month }).IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [ReopenedAtUtc] IS NULL");
+        modelBuilder.Entity<FinancePeriodClosure>().HasIndex(x => new { x.BuildingId, x.Year, x.Month, x.ReopenedAtUtc });
+        modelBuilder.Entity<FinancePeriodClosure>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinancePeriodClosure>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 
