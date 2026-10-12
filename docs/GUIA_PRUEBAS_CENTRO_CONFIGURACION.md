@@ -57,7 +57,7 @@ Pantallas nuevas del web (rama `feature/centro-configuracion` en BACK y WEB). Ca
 
 ## 6. Proveedores (sección «Proveedores»)
 
-1. Nuevo proveedor: nombre y RUC `80012345-6` → aparece en la lista. RUC inválido o repetido → mensaje del servidor. Nombre repetido → conflicto.
+1. Nuevo proveedor: nombre y RUC `80012345-0` → aparece en la lista. RUC inválido o repetido → mensaje del servidor. Nombre repetido → conflicto.
 2. Plazo de pago 30 días, correo inválido → error.
 3. Editar y desactivar: queda «Desactivado» y atenuado. Un proveedor con gastos no se elimina (no hay botón de borrar).
 4. Búsqueda por nombre o RUC (espera medio segundo) y filtro de estado.
