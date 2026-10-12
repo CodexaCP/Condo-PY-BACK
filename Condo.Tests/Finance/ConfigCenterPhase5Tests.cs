@@ -60,6 +60,17 @@ public class ConfigCenterPhase5Tests
     }
 
     [Fact]
+    public void UnaFraccionDeGuaraniEnElLibroNoImpideQueLaDiferenciaSeaCero()
+    {
+        var id = Guid.NewGuid();
+        var movements = BankReconciliationCalculator.GroupRows([Row(D1, 10_546_116.37m, LedgerSourceType.BuildingIncome, id)], D3);
+        var marks = new[] { Mark(LedgerSourceType.BuildingIncome, id, D1, 10_546_116.37m) };
+
+        Assert.Equal(0m, BankReconciliationCalculator.Calculate(0m, 10_546_116m, movements, marks, null, NoNames).Difference);
+        Assert.Equal(1m, BankReconciliationCalculator.Calculate(0m, 10_546_117m, movements, marks, null, NoNames).Difference);
+    }
+
+    [Fact]
     public void LaDiferenciaTieneSignoYMuestraLoQueElBancoTieneDeMasODeMenos()
     {
         var id = Guid.NewGuid();

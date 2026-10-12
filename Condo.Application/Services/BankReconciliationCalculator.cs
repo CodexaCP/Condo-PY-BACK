@@ -124,7 +124,9 @@ public static class BankReconciliationCalculator
         return new ReconciliationCalculation
         {
             ReconciledBalance = reconciled,
-            Difference = statementBalance - reconciled,
+            // El guarani no tiene centimos: el libro puede arrastrar fracciones (cobros prorrateados, saldo a favor) que la pantalla
+            // muestra como "Gs. 0" pero impedirian cerrar. La diferencia se mide en guaranies enteros.
+            Difference = decimal.Round(statementBalance - reconciled, 0, MidpointRounding.AwayFromZero),
             PendingIn = pending.Where(p => p.Amount > 0m).Sum(p => p.Amount),
             PendingOut = -pending.Where(p => p.Amount < 0m).Sum(p => p.Amount),
             ChangedCount = changed,
