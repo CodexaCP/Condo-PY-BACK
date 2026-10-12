@@ -2,6 +2,8 @@
 
 Fecha del análisis: 2026-10-05. Documento de análisis y diseño. **No hay código ni migraciones asociadas.**
 
+> **Actualización 2026-10-12:** se implementó la **configuración** de la conexión con Bancard (entidades `PaymentConnection`, `BuildingPaymentConfig` y su historial, cifrado de secretos con clave maestra fuera de la base, catálogo en código de Bancard Tpago y vPOS, y la sección *Pagos online* del Centro de configuración). El cobro sigue sin existir: ver `GUIA_PRUEBAS_PAGOS_BANCARD_CONFIG.md`. El resto de la sección 5.2 (extraer la liquidación, intentos de cobro, callback y proveedor falso) queda pendiente.
+
 Convención de etiquetas en todo el documento:
 
 - **[Confirmado]** lo publica el proveedor en una fuente oficial (se cita el enlace).

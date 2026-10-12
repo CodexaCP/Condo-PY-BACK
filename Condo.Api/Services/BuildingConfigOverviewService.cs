@@ -56,6 +56,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.Reconciliation => await ReconciliationAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Accounting => await AccountingAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
+                ConfigSectionKeys.Payments => await PaymentsAsync(building, cancellationToken),
                 _ => null
             };
 
@@ -366,6 +367,48 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "self",
             LinkTab = ConfigSectionKeys.Suppliers
+        };
+    }
+
+    // ── 14. Pagos online ─────────────────────────────────────────────────────
+    // Conexiones de pago de la empresa y cuales sirven a este edificio. Es opcional: sin conexion el edificio sigue cobrando como hoy.
+    private async Task<ConfigSectionDto> PaymentsAsync(Building b, CancellationToken cancellationToken)
+    {
+        var companyId = b.CompanyId ?? await dbContext.Condominiums.AsNoTracking()
+            .Where(x => x.Id == b.CondominiumId)
+            .Select(x => (Guid?)x.CompanyId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var connections = companyId.HasValue
+            ? await dbContext.PaymentConnections.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.CompanyId == companyId.Value)
+                .Select(x => new
+                {
+                    x.Status,
+                    ForThisBuilding = x.BuildingConfigs.Any(c => !c.IsDeleted && c.IsEnabled && c.BuildingId == b.Id)
+                })
+                .ToListAsync(cancellationToken)
+            : [];
+
+        var active = connections.Count(x => x.ForThisBuilding && x.Status == PaymentConnectionStatus.Active);
+        var assigned = connections.Count(x => x.ForThisBuilding);
+
+        return new ConfigSectionDto
+        {
+            Status = active > 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = active > 0
+                ? []
+                : [connections.Count == 0
+                    ? "La empresa todavía no tiene una conexión de pago online: los pagos se siguen registrando como hasta ahora."
+                    : "Ninguna conexión activa sirve a este edificio todavía."],
+            Summary =
+            [
+                Item("Conexiones de la empresa", connections.Count.ToString(CultureInfo.InvariantCulture)),
+                Item("Asignadas a este edificio", assigned.ToString(CultureInfo.InvariantCulture)),
+                Item("Activas en este edificio", active.ToString(CultureInfo.InvariantCulture))
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Payments
         };
     }
 

@@ -1444,6 +1444,49 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.ToTable("BuildingNoticeRules");
                 });
 
+            modelBuilder.Entity("Condo.Domain.Entities.BuildingPaymentConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BuildingId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ConnectionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ConnectionId");
+
+                    b.HasIndex("BuildingId", "ConnectionId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("BuildingPaymentConfigs");
+                });
+
             modelBuilder.Entity("Condo.Domain.Entities.BuildingPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4222,6 +4265,151 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.ToTable("PaymentAllocations");
                 });
 
+            modelBuilder.Entity("Condo.Domain.Entities.PaymentConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("KeyId")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("ProductCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("ProviderCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("SecretsCipher")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("SecretsFingerprint")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("SecretsUpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SettingsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime?>("StatusChangedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("StatusChangedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("PaymentConnections");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.PaymentConnectionAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ChangesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ConnectionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Ip")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UserEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("UserRole")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ConnectionId", "CreatedAtUtc");
+
+                    b.ToTable("PaymentConnectionAudits");
+                });
+
             modelBuilder.Entity("Condo.Domain.Entities.Plan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5280,6 +5468,33 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Building");
 
                     b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.BuildingPaymentConfig", b =>
+                {
+                    b.HasOne("Condo.Domain.Entities.Building", "Building")
+                        .WithMany()
+                        .HasForeignKey("BuildingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Condo.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Condo.Domain.Entities.PaymentConnection", "Connection")
+                        .WithMany("BuildingConfigs")
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Building");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Connection");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.BuildingPlan", b =>
@@ -6468,6 +6683,36 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Payment");
                 });
 
+            modelBuilder.Entity("Condo.Domain.Entities.PaymentConnection", b =>
+                {
+                    b.HasOne("Condo.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.PaymentConnectionAudit", b =>
+                {
+                    b.HasOne("Condo.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Condo.Domain.Entities.PaymentConnection", "Connection")
+                        .WithMany()
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Connection");
+                });
+
             modelBuilder.Entity("Condo.Domain.Entities.RecurringBuildingExpense", b =>
                 {
                     b.HasOne("Condo.Domain.Entities.Building", "Building")
@@ -6828,6 +7073,11 @@ namespace Condo.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Condo.Domain.Entities.Payment", b =>
                 {
                     b.Navigation("Allocations");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.PaymentConnection", b =>
+                {
+                    b.Navigation("BuildingConfigs");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.Plan", b =>

@@ -19,6 +19,7 @@ public static class ConfigSectionKeys
     public const string Suppliers = "suppliers";
     public const string Closing = "closing";
     public const string Documents = "documents";
+    public const string Payments = "payments";
 }
 
 public sealed record ConfigSectionDefinition(
@@ -57,7 +58,8 @@ public static class ConfigSections
         new(ConfigSectionKeys.Budget, 10, "Presupuesto y alertas", false, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.Reconciliation, 11, "Conciliación bancaria", false, AllStaff, SuperAndAdmin),
         new(ConfigSectionKeys.Accounting, 12, "Asientos contables", false, AllStaff, SuperAndAdmin),
-        new(ConfigSectionKeys.Documents, 13, "Documentos y comunicación", false, NoManager, SuperAndAdmin)
+        new(ConfigSectionKeys.Documents, 13, "Documentos y comunicación", false, NoManager, SuperAndAdmin),
+        new(ConfigSectionKeys.Payments, 14, "Pagos online", false, AllStaff, SuperAndAdmin)
     ];
 
     public static ConfigSectionDefinition? Find(string key) =>

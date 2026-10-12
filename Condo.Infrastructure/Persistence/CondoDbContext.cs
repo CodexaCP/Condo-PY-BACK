@@ -60,6 +60,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<FinancePeriodClosure> FinancePeriodClosures => Set<FinancePeriodClosure>();
     public DbSet<BuildingNoticeRule> BuildingNoticeRules => Set<BuildingNoticeRule>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<PaymentConnection> PaymentConnections => Set<PaymentConnection>();
+    public DbSet<BuildingPaymentConfig> BuildingPaymentConfigs => Set<BuildingPaymentConfig>();
+    public DbSet<PaymentConnectionAudit> PaymentConnectionAudits => Set<PaymentConnectionAudit>();
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
@@ -1176,6 +1179,51 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<LedgerAccountRole>()
             .HasOne(x => x.LedgerCategory).WithMany()
             .HasForeignKey(x => x.LedgerCategoryId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Pagos online: conexiones con el proveedor, asignacion a edificios e historial ──
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.ProviderCode).HasMaxLength(30);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.ProductCode).HasMaxLength(30);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.Environment).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.PublicId).HasMaxLength(32);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.SettingsJson).HasMaxLength(2000);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.SecretsCipher).HasMaxLength(4000);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.KeyId).HasMaxLength(30);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.SecretsFingerprint).HasMaxLength(500);
+        // El identificador del callback es unico en toda la plataforma (se usa para encontrar la conexion sin saber la empresa).
+        modelBuilder.Entity<PaymentConnection>().HasIndex(x => x.PublicId).IsUnique();
+        modelBuilder.Entity<PaymentConnection>().HasIndex(x => new { x.CompanyId, x.Name })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<PaymentConnection>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BuildingPaymentConfig>().HasIndex(x => new { x.BuildingId, x.ConnectionId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<BuildingPaymentConfig>().HasIndex(x => x.ConnectionId);
+        modelBuilder.Entity<BuildingPaymentConfig>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPaymentConfig>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingPaymentConfig>()
+            .HasOne(x => x.Connection).WithMany(x => x.BuildingConfigs)
+            .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PaymentConnectionAudit>().Property(x => x.Action).HasMaxLength(40);
+        modelBuilder.Entity<PaymentConnectionAudit>().Property(x => x.Summary).HasMaxLength(500);
+        modelBuilder.Entity<PaymentConnectionAudit>().Property(x => x.UserEmail).HasMaxLength(256);
+        modelBuilder.Entity<PaymentConnectionAudit>().Property(x => x.UserRole).HasMaxLength(40);
+        modelBuilder.Entity<PaymentConnectionAudit>().Property(x => x.Ip).HasMaxLength(64);
+        modelBuilder.Entity<PaymentConnectionAudit>().HasIndex(x => new { x.ConnectionId, x.CreatedAtUtc });
+        modelBuilder.Entity<PaymentConnectionAudit>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentConnectionAudit>()
+            .HasOne(x => x.Connection).WithMany()
+            .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Centro de configuracion: proveedores, cuentas por pagar e IVA ──────
         modelBuilder.Entity<Supplier>().Property(x => x.Name).HasMaxLength(200);
