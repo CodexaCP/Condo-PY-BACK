@@ -55,6 +55,134 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
         return Ok(units);
     }
 
+    /// <summary>
+    /// Listado paginado en el servidor para la pantalla de Unidades: con 300 unidades por edificio no se puede traer todo.
+    /// status: all | active | inactive | lateFeeExempt. Los contadores y los pisos se calculan sobre el alcance (edificio elegido o todos),
+    /// sin contar la busqueda ni el piso ni el estado, para que los filtros muestren cuanto hay en cada opcion.
+    /// </summary>
+    [HttpGet("paged")]
+    public async Task<ActionResult<UnitPageDto>> GetPaged(
+        [FromQuery] string? search,
+        [FromQuery] Guid? buildingId,
+        [FromQuery] string? floor,
+        [FromQuery] string? status,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = PagedQuery.DefaultPageSize,
+        CancellationToken cancellationToken = default)
+    {
+        page = PagedQuery.NormalizePage(page);
+        pageSize = PagedQuery.NormalizePageSize(pageSize);
+        var text = PagedQuery.NormalizeSearch(search);
+
+        var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
+
+        var scoped = dbContext.Units
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Building != null && !x.Building.IsDeleted);
+
+        if (!accessScope.IsSuperAdmin)
+        {
+            if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
+            {
+                scoped = scoped.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+            }
+            else
+            {
+                scoped = scoped.Where(x => accessibleBuildingIds.Contains(x.BuildingId));
+            }
+        }
+
+        if (buildingId.HasValue)
+        {
+            scoped = scoped.Where(x => x.BuildingId == buildingId.Value);
+        }
+
+        var counts = new UnitPageCountsDto
+        {
+            Total = await scoped.CountAsync(cancellationToken),
+            Active = await scoped.CountAsync(x => x.IsActive, cancellationToken),
+            Inactive = await scoped.CountAsync(x => !x.IsActive, cancellationToken),
+            LateFeeExempt = await scoped.CountAsync(x => x.LateFeeExempt, cancellationToken)
+        };
+
+        var floors = new List<string>();
+        if (buildingId.HasValue)
+        {
+            floors = (await scoped.Select(x => x.Floor).Distinct().ToListAsync(cancellationToken))
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .OrderBy(f => f, FloorComparer.Instance)
+                .ToList();
+        }
+
+        var query = scoped;
+
+        if (!string.IsNullOrWhiteSpace(floor))
+        {
+            var floorText = floor.Trim();
+            query = query.Where(x => x.Floor == floorText);
+        }
+
+        query = (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" => query.Where(x => x.IsActive),
+            "inactive" => query.Where(x => !x.IsActive),
+            "latefeeexempt" => query.Where(x => x.LateFeeExempt),
+            _ => query
+        };
+
+        if (text.Length > 0)
+        {
+            query = query.Where(x => x.Code.Contains(text) || x.Floor.Contains(text) || x.Building!.Name.Contains(text));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderBy(x => x.Building!.Name)
+            .ThenBy(x => x.Code)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new UnitDto
+            {
+                Id = x.Id,
+                BuildingId = x.BuildingId,
+                BuildingName = x.Building != null ? x.Building.Name : string.Empty,
+                Code = x.Code,
+                Floor = x.Floor,
+                Coefficient = x.Coefficient,
+                IsActive = x.IsActive,
+                LateFeeExempt = x.LateFeeExempt,
+                LateFeeExemptReason = x.LateFeeExemptReason
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new UnitPageDto
+        {
+            Items = items,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
+            Floors = floors,
+            Counts = counts
+        });
+    }
+
+    /// <summary>Pisos en orden natural: los numericos por valor (2 antes de 10), despues los de texto (PB, Terraza).</summary>
+    private sealed class FloorComparer : IComparer<string>
+    {
+        public static readonly FloorComparer Instance = new();
+
+        public int Compare(string? a, string? b)
+        {
+            var aIsNumber = int.TryParse(a, out var x);
+            var bIsNumber = int.TryParse(b, out var y);
+            if (aIsNumber && bIsNumber) return x.CompareTo(y);
+            if (aIsNumber) return -1;
+            if (bIsNumber) return 1;
+            return string.Compare(a, b, StringComparison.CurrentCultureIgnoreCase);
+        }
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<UnitDto>> GetById(Guid id, CancellationToken cancellationToken)
     {

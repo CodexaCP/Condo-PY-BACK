@@ -83,6 +83,92 @@ public class UsersController(ICondoDbContext dbContext, IAccessScopeService acce
         return Ok(users.Select(ToDto).ToList());
     }
 
+    // ─── GET PAGED ──────────────────────────────────────────────────────────
+    // Listado paginado en el servidor para la pantalla de Usuarios. role: vacio = todos, "staff" = personal (todo menos
+    // propietarios y residentes, que tienen su propia pantalla), o el nombre exacto de un rol. status: active | inactive.
+    // Los contadores por grupo no cuentan la busqueda ni el estado ni el rol: alimentan las pestañas.
+    [HttpGet("paged")]
+    public async Task<ActionResult<UserPageDto>> GetPaged(
+        [FromQuery] string? search,
+        [FromQuery] string? role,
+        [FromQuery] string? status,
+        [FromQuery] Guid? companyId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = PagedQuery.DefaultPageSize,
+        CancellationToken cancellationToken = default)
+    {
+        page = PagedQuery.NormalizePage(page);
+        pageSize = PagedQuery.NormalizePageSize(pageSize);
+        var text = PagedQuery.NormalizeSearch(search);
+
+        IQueryable<ApplicationUser> scoped = dbContext.ApplicationUsers
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted);
+
+        if (!accessScope.IsSuperAdmin)
+        {
+            if (!accessScope.CompanyId.HasValue) return Forbid();
+            scoped = scoped.Where(x => x.CompanyId == accessScope.CompanyId.Value);
+        }
+        else if (companyId.HasValue)
+        {
+            scoped = scoped.Where(x => x.CompanyId == companyId.Value);
+        }
+
+        var counts = new UserPageCountsDto
+        {
+            All = await scoped.CountAsync(cancellationToken),
+            Owners = await scoped.CountAsync(x => x.Role == UserRole.Owner, cancellationToken),
+            Residents = await scoped.CountAsync(x => x.Role == UserRole.Resident, cancellationToken)
+        };
+        counts.Staff = counts.All - counts.Owners - counts.Residents;
+
+        var query = scoped;
+
+        var roleText = (role ?? string.Empty).Trim();
+        if (roleText.Equals("staff", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x => x.Role != UserRole.Owner && x.Role != UserRole.Resident);
+        }
+        else if (roleText.Length > 0 && Enum.TryParse<UserRole>(roleText, ignoreCase: true, out var parsedRole))
+        {
+            query = query.Where(x => x.Role == parsedRole);
+        }
+
+        query = (status ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "active" => query.Where(x => x.IsActive),
+            "inactive" => query.Where(x => !x.IsActive),
+            _ => query
+        };
+
+        if (text.Length > 0)
+        {
+            query = query.Where(x =>
+                x.FullName.Contains(text) || x.FirstName.Contains(text) || x.LastName.Contains(text) ||
+                x.Username.Contains(text) || x.Email.Contains(text) || (x.Phone != null && x.Phone.Contains(text)));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var users = await query
+            .Include(x => x.BuildingAccesses.Where(a => !a.IsDeleted && a.IsActive))
+            .OrderBy(x => x.FullName)
+            .ThenBy(x => x.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new UserPageDto
+        {
+            Items = users.Select(ToDto).ToList(),
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
+            Counts = counts
+        });
+    }
+
     // ─── GET BY ID ──────────────────────────────────────────────────────────
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<UserDto>> GetById(Guid id, CancellationToken cancellationToken)

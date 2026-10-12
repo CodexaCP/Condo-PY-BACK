@@ -49,3 +49,17 @@ public class UserDto
     public IReadOnlyList<Guid> BuildingIds { get; set; } = Array.Empty<Guid>();
     public string? SignatureUrl { get; set; }
 }
+
+/// <summary>Cuantos usuarios hay por grupo en el alcance (empresa elegida), sin contar busqueda ni estado: alimenta las pestañas del listado.</summary>
+public class UserPageCountsDto
+{
+    public int All { get; set; }
+    public int Staff { get; set; }
+    public int Owners { get; set; }
+    public int Residents { get; set; }
+}
+
+public class UserPageDto : PagedResultDto<UserDto>
+{
+    public UserPageCountsDto Counts { get; set; } = new();
+}
