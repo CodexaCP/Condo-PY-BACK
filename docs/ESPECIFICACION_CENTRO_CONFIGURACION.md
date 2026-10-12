@@ -564,3 +564,21 @@ Decisiones de Tony para esta fase: la morosidad va **solo agregada por antigüed
 **Alcance que quedó afuera (a propósito):** detalle de morosidad por unidad (Tony eligió que no); notas guardadas como borrador; firma del administrador; gráficos; comparación con el período anterior; el estado de resultados por criterio devengado.
 
 **Pruebas:** 17 pruebas nuevas (`ConfigCenterPhase7Tests`): el PDF se genera con todas las secciones, sin presupuesto, sin fondo, sin notas, vacío y con muchas filas y notas largas; validación del rango y las notas; el controlador (400, edificio ajeno, sin configuración inicial, los cuatro roles); y, con SQL Server real, que saldos, movimientos, presupuesto, fondo, morosidad y cuentas por pagar coinciden con las pantallas de origen. Se revisó el PDF generado página por página. Suite completa con SQL Server: 1096 pasan, 0 omitidas. No hay migración en esta fase.
+
+## 13. Frente web (hecho 2026-10-12, rama `feature/centro-configuracion` en `Condo-PY-WEB`, sin push)
+
+Seis pantallas y piezas nuevas, un commit por bloque, compiladas sin errores (`ng build` de desarrollo y de producción); la prueba visual la hace Tony con `docs/GUIA_PRUEBAS_CENTRO_CONFIGURACION.md`.
+
+| Bloque | Qué incluye | Commit (WEB) |
+|---|---|---|
+| Base | `/building-config`: selector de edificio, indicador «listo para operar», tarjetas por sección con enlace a la ficha (`?tab=`), a Finanzas o al editor dentro del Centro (`?section=`), historial de cambios, entrada de menú | `d8af304` |
+| Configuración | Secciones dentro del Centro: período y cierre, mora, fondos, avisos automáticos e IVA de las compras; umbral del semáforo en Presupuesto y Presupuesto vs. real; exoneración de mora en la unidad (y etiqueta «Sin mora» en el listado) | `86117d6` |
+| Compras | Proveedores de la empresa, `/finance/payables` (registrar y deshacer pagos), `/finance/vat-purchases` (libro con su Excel) y el formulario de gastos con proveedor de la lista, factura, vencimiento, IVA y estado de pago | `3525f6a` |
+| Conciliación | `/finance/reconciliation` (resumen, alta e historial) y `/finance/reconciliation/:id` (marcar, desmarcar en tandas de 500, cerrar, reabrir, descartar) | `e41c745` |
+| Asientos | `/finance/accounting`: pestañas de asientos sugeridos (con sumas y Excel) y de cuentas del plan (con sugerencias) | `a04fadc` |
+| Informe | `/finance/assembly-report`: vista previa, notas del administrador y PDF | `e9ce599` |
+| Notificaciones | Íconos y colores de los tres avisos automáticos nuevos | `38225c5` |
+
+**Decisiones de diseño del frente:** el Centro envuelve la ficha y las pantallas de Finanzas (no las reemplaza); las secciones «self» se abren dentro del Centro con `?section=` y al volver se recarga el resumen; los enlaces a Finanzas solo se muestran para pantallas que existen; los errores del backend (incluido el `409 finance_period_closed`) se muestran con el mensaje que manda el servidor, sin pantallas especiales; el formulario de gastos conserva el pago, el vencimiento y la tasa al editar aunque el edificio ya no tenga Finanzas.
+
+**Falta (a pedido de Tony, después):** la aplicación móvil (`CondoPY-APP`): sus ajustes del Centro y de los nuevos avisos; la fase 8 (ocupación y alquileres) con su backend y su frente; «copiar la configuración de otro edificio»; el historial de cambios de proveedores.
