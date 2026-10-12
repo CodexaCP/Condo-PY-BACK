@@ -115,6 +115,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("frontend");
+// Despues de CORS (para conservar sus cabeceras) y antes de todo lo demas: cualquier error no controlado sale como JSON con un
+// codigo de referencia en vez de cortar la conexion.
+app.UseMiddleware<GlobalExceptionMiddleware>();
 // app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAuthentication();

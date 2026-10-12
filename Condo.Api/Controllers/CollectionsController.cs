@@ -124,6 +124,13 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             })
             .ToListAsync(cancellationToken);
 
+        // Los cargos y pagos se traen de todos los periodos, pero el reporte solo cuenta los de la lista de arriba (el año, los meses y
+        // el edificio filtran los periodos, no los cargos; y un periodo borrado puede seguir teniendo cargos). Sin este filtro, buscar
+        // el periodo de un cargo que no esta en la lista lanzaba una excepcion y la pantalla mostraba "Failed to fetch".
+        var periodIds = periods.Select(x => x.Id).ToHashSet();
+        chargesQuery = chargesQuery.Where(x => periodIds.Contains(x.ExpensePeriodId));
+        paymentsQuery = paymentsQuery.Where(x => periodIds.Contains(x.ExpensePeriodId));
+
         var chargeSnapshots = await chargesQuery
             .Select(x => new
             {
@@ -271,7 +278,8 @@ public class CollectionsController(ICondoDbContext dbContext, IAccessScopeServic
             .ThenBy(x => x.BuildingName)
             .ToList();
 
-        var rateIndex = items.ToDictionary(x => (x.BuildingId, x.Year, x.Month), x => x.CollectionRatePercentage);
+        var rateIndex = new Dictionary<(Guid, int, int), decimal>();
+        foreach (var item in items) rateIndex.TryAdd((item.BuildingId, item.Year, item.Month), item.CollectionRatePercentage);
         foreach (var item in items)
         {
             var prevYear = item.Month == 1 ? item.Year - 1 : item.Year;
