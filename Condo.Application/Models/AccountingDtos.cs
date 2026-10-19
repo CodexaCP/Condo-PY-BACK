@@ -202,6 +202,9 @@ public class JournalEntryDto
     public LedgerSourceType? SourceType { get; set; }
     public Guid? SourceId { get; set; }
     public Guid? ReversesEntryId { get; set; }
+    // Numero del asiento que este contraasiento invierte, y del contraasiento que anulo a este asiento (si lo hay).
+    public string? ReversesLabel { get; set; }
+    public string? ReversedByLabel { get; set; }
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
     public DateTime PostedAtUtc { get; set; }
@@ -241,6 +244,9 @@ public class JournalPreviewDto
     public string? LastLabel { get; set; }
     public decimal TotalDebit { get; set; }
     public decimal TotalCredit { get; set; }
+    // Asientos ya asentados que cambiaron y se corrigen al asentar (contraasiento + asiento nuevo), y cuantos asientos nuevos eso crea.
+    public IReadOnlyList<JournalDifferenceDto> Differences { get; set; } = [];
+    public int CorrectionEntryCount { get; set; }
     // Hay algo para asentar y todos los asientos estan completos.
     public bool CanPost { get; set; }
 }
@@ -254,7 +260,49 @@ public class PostJournalRequest
 public class PostJournalResultDto
 {
     public int PostedCount { get; set; }
+    // Cuantos de los asientos creados son correcciones (contraasientos y asientos de reemplazo).
+    public int CorrectionEntryCount { get; set; }
     public string? FirstLabel { get; set; }
     public string? LastLabel { get; set; }
     public DateOnly PostedThrough { get; set; }
+}
+
+// ── Libro Diario: diferencias contra lo asentado y contraasientos ─────────────
+
+public enum JournalDifferenceKind
+{
+    // El movimiento cambio (importe, IVA, cuenta o rubro) despues de asentarlo: contraasiento del asiento y asiento nuevo.
+    Changed = 1,
+    // Un movimiento de un dia ya asentado que no tiene asiento (se cargo o se corrigio despues): asiento nuevo.
+    Missing = 2,
+    // El movimiento ya no existe (se revirtio o se borro): contraasiento del asiento.
+    Removed = 3
+}
+
+public class JournalDifferenceDto
+{
+    public JournalDifferenceKind Kind { get; set; }
+    // Asiento asentado que se corrige (nulo si el movimiento nunca se asento).
+    public Guid? EntryId { get; set; }
+    public string? EntryLabel { get; set; }
+    public DateOnly OperationDate { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string ThirdParty { get; set; } = string.Empty;
+    // Importe del asiento asentado y del que saldria hoy (nulo cuando no existe de ese lado).
+    public decimal? AmountBefore { get; set; }
+    public decimal? AmountAfter { get; set; }
+    // El asiento nuevo estaria incompleto (falta una cuenta del plan): no se puede corregir hasta asignarla.
+    public bool Incomplete { get; set; }
+}
+
+public class JournalDifferencesDto
+{
+    public Guid BuildingId { get; set; }
+    public DateOnly? PostedThrough { get; set; }
+    public IReadOnlyList<JournalDifferenceDto> Items { get; set; } = [];
+    public int ChangedCount { get; set; }
+    public int MissingCount { get; set; }
+    public int RemovedCount { get; set; }
+    public int IncompleteCount { get; set; }
+    public IReadOnlyList<string> Pending { get; set; } = [];
 }

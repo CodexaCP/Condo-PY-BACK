@@ -136,6 +136,24 @@ Cada paso es independiente, compila y se prueba solo. Las fases 1 a 3 cubren H1,
 - **1.6 No asentar incompletos.** Si hay asientos con cuenta del plan faltante, `post` falla con el listado (reusa `Pending`). Nunca se asienta un asiento incompleto.
 - **Aceptación:** se asienta dos veces el mismo rango y no se duplica nada; los números son 1..N sin huecos aunque falle una transacción a mitad de camino; con dos usuarios asentando a la vez no se repiten números. Pruebas con SQL Server real (`CONDO_TEST_SQLSERVER`).
 
+### Fase 2 — HECHA 2026-10-19 (sin commit ni deploy)
+
+**Qué quedó (difiere en detalles del diseño de abajo):**
+- **Detección de diferencias** (`JournalPostingService.Compare`/`DetectAsync`, `GET api/finance/journal/differences`): se compara lo que hoy arma el libro (del arranque a «asentado hasta») con lo asentado, por movimiento de origen (tipo, id, fecha de operación y cuenta financiera). Tres tipos: **Cambió** (contraasiento + asiento nuevo), **Sin asentar** (movimiento de un día ya asentado que no tiene asiento: asiento nuevo) y **Ya no existe** (contraasiento). Se mira siempre la versión vigente (la de mayor versión que ningún contraasiento anuló), así se pueden encadenar varias correcciones.
+- **Qué cuenta como cambio:** importes, IVA, fecha, cuenta financiera de origen y **rubro**. **No** cuenta renombrar o recodificar cuentas del plan ni reasignar la cuenta del plan de un banco o del IVA (eso afecta solo a lo futuro). Las huellas de la fase 1 se siguen reconociendo.
+- **Contraasiento** (`Kind=Reversal`, `ReversesEntryId`): mismos renglones con debe y haber invertidos, sin origen propio. **Asiento nuevo** (`Revision` + 1): el movimiento como está hoy. Los originales no se tocan.
+- **Fecha de las correcciones (ajuste a D3):** la fecha contable es **el día hasta el que se asienta** (puede ser el mismo «asentado hasta» para asentar solo correcciones, pero nunca anterior) y la fecha real queda en `OperationDate` y en la glosa. Así, con «hasta hoy» queda con fecha de hoy como pedía D3, y el número sigue siempre el orden cronológico (art. 80), porque las correcciones van al final del lote.
+- **Todo o nada y sin duplicar:** un asiento se anula una sola vez (índice único sobre `ReversesEntryId`) y el movimiento de origen se identifica por fecha de operación (índice único); si dos personas corrigen a la vez, una gana y la otra recibe un 409 sin que se guarde nada. Un asiento nuevo incompleto frena todo el asentado.
+- **Cierre de mes (2.3):** con el Libro Diario en uso no se cierra un mes mientras haya diferencias (409 `journal_differences`).
+- **Bloqueo en la base (2.4):** triggers `TR_JournalEntries_Immutable` y `TR_JournalEntryLines_Immutable` (INSTEAD OF UPDATE, DELETE) impiden modificar o borrar lo asentado; insertar sigue andando. Para una corrección excepcional hay que desactivarlos de forma deliberada.
+- **Migración** `20261019125025_JournalReversals` + `.sql` idempotente (cambia un índice, agrega otro y crea los triggers; no toca datos). Va después de `JournalEntries`.
+- **Web:** aviso y tabla de «asientos que cambiaron desde que se asentaron» (qué pasó, fecha de operación, asiento, importe antes y ahora); la vista previa suma las correcciones; las tarjetas muestran «Anulado por el N° …», «Contraasiento del N° …» y la fecha de operación cuando difiere.
+- **Pruebas:** 23 nuevas (`JournalCorrectionsTests`, con 3 de punta a punta en SQL Server: corrección con el libro real, cierre de mes bloqueado y triggers). Suite completa con SQL Server: 1224 pasan, 0 omitidas.
+
+**Límites que quedan:** no hay Libro Diario imprimible con folios ni Excel de lo asentado (Fase 3); no hay asiento de apertura, de transferencias ni de cierre (Fase 4); no se exige que el mes esté asentado para cerrarlo.
+
+**Diseño original (referencia):**
+
 ### Fase 2 — Inmutabilidad y contraasiento (backend)
 - **2.1 Detección de diferencias.** Al consultar, comparar `ContentHash` de lo asentado contra lo que hoy produce el libro para ese origen. Salida: lista «Pendientes de reasentar» (cambió, se anuló o apareció con fecha vieja).
 - **2.2 Reasentar.** Para cada diferencia: contraasiento (`Kind=Reversal`, líneas invertidas, `ReversesEntryId`) más asiento nuevo, ambos con la fecha de hoy y `OperationDate` = fecha real (D3). Nunca se toca el original.

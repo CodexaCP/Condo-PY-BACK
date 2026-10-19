@@ -3099,14 +3099,16 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.HasIndex("ReversesEntryId");
+                    b.HasIndex("ReversesEntryId")
+                        .IsUnique()
+                        .HasFilter("[ReversesEntryId] IS NOT NULL");
 
                     b.HasIndex("BuildingId", "Date");
 
                     b.HasIndex("BuildingId", "FiscalYear", "Number")
                         .IsUnique();
 
-                    b.HasIndex("BuildingId", "SourceType", "SourceId", "Date", "SourceAccountId", "Revision")
+                    b.HasIndex("BuildingId", "SourceType", "SourceId", "OperationDate", "SourceAccountId", "Revision")
                         .IsUnique()
                         .HasFilter("[SourceType] IS NOT NULL");
 

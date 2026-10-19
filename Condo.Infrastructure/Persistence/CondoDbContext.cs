@@ -1210,9 +1210,11 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<JournalEntry>().Property(x => x.TotalCredit).HasColumnType("decimal(18,2)");
         // El numero no se repite dentro de un edificio y ejercicio: es lo que frena a dos personas que asientan a la vez.
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.FiscalYear, x.Number }).IsUnique();
-        // Un movimiento de origen se asienta una sola vez por version.
-        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.SourceType, x.SourceId, x.Date, x.SourceAccountId, x.Revision })
+        // Un movimiento de origen (identificado por su fecha de operacion, no por la fecha contable) se asienta una sola vez por version.
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.SourceType, x.SourceId, x.OperationDate, x.SourceAccountId, x.Revision })
             .IsUnique().HasFilter("[SourceType] IS NOT NULL");
+        // Un asiento se anula con un solo contraasiento.
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => x.ReversesEntryId).IsUnique().HasFilter("[ReversesEntryId] IS NOT NULL");
         modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.Date });
         modelBuilder.Entity<JournalEntry>()
             .HasOne(x => x.Company).WithMany()

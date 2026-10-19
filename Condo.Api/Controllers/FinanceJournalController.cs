@@ -32,6 +32,16 @@ public class FinanceJournalController(
         return Ok(await journal.GetAsync(ctx!, fiscalYear, from, to, number, page, pageSize, CanPost, cancellationToken));
     }
 
+    // Asientos ya asentados que cambiaron desde entonces (se corrigen con contraasiento al asentar).
+    [HttpGet("differences")]
+    public async Task<ActionResult<JournalDifferencesDto>> Differences([FromQuery] Guid buildingId, CancellationToken cancellationToken)
+    {
+        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
+        if (denied is not null) return denied;
+
+        return Ok(await journal.DifferencesAsync(ctx!, cancellationToken));
+    }
+
     [HttpGet("preview")]
     public async Task<ActionResult<JournalPreviewDto>> Preview(
         [FromQuery] Guid buildingId, [FromQuery] DateOnly through, CancellationToken cancellationToken)

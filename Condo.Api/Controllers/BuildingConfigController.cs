@@ -349,6 +349,26 @@ public class BuildingConfigController(
             }
         }
 
+        // Con el Libro Diario en uso no se cierra un mes mientras haya asientos asentados que cambiaron: primero se corrigen (contraasiento).
+        if (settings.JournalPostedThrough.HasValue)
+        {
+            var ledger = new FinanceLedgerService(dbContext);
+            var ledgerContext = await ledger.LoadContextAsync(buildingId, cancellationToken);
+            if (ledgerContext is not null)
+            {
+                var journal = new JournalPostingService(dbContext, new AccountingEntriesService(dbContext, ledger, tenantContext), tenantContext);
+                var differences = await journal.DetectAsync(ledgerContext, settings.JournalPostedThrough, cancellationToken);
+                if (differences.Count > 0)
+                {
+                    return Conflict(new
+                    {
+                        error = "journal_differences",
+                        message = $"Hay {differences.Count} asientos del Libro Diario que cambiaron desde que se asentaron. Corregilos (Asientos contables → Libro diario → Asentar) antes de cerrar el mes."
+                    });
+                }
+            }
+        }
+
         var closure = new FinancePeriodClosure
         {
             CompanyId = settings.CompanyId,

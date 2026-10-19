@@ -19,6 +19,7 @@ namespace Condo.Tests.Finance;
 public class JournalPostingTests
 {
     private static readonly Guid BankAccountId = Guid.NewGuid();
+    private static readonly Guid RubroCat = Guid.NewGuid();
     private static readonly DateOnly D1 = new(2026, 3, 5);
     private static readonly DateOnly D2 = new(2026, 3, 10);
     private static readonly DateOnly D3 = new(2026, 3, 20);
@@ -30,7 +31,7 @@ public class JournalPostingTests
         var lines = new[]
         {
             new AccountingLineDto { CategoryId = Guid.NewGuid(), Code = complete ? "1.1.03" : "", Name = "Banco", Debit = amount, Kind = "Financial", Missing = !complete },
-            new AccountingLineDto { CategoryId = Guid.NewGuid(), Code = "4.1.01", ExternalCode = "401", Name = "Expensas ordinarias", Credit = amount, Kind = "Rubro" }
+            new AccountingLineDto { CategoryId = RubroCat, Code = "4.1.01", ExternalCode = "401", Name = "Expensas ordinarias", Credit = amount, Kind = "Rubro" }
         };
         return new AccountingEntryDto
         {
@@ -125,7 +126,7 @@ public class JournalPostingTests
         Assert.Null(JournalPostingService.ValidateThrough(new DateOnly(2026, 3, 31), new DateOnly(2026, 4, 30), start, today));
         Assert.Contains("futura", JournalPostingService.ValidateThrough(null, today.AddDays(1), start, today));
         Assert.Contains("arranque", JournalPostingService.ValidateThrough(null, new DateOnly(2025, 12, 31), start, today));
-        Assert.Contains("Ya está asentado", JournalPostingService.ValidateThrough(new DateOnly(2026, 3, 31), new DateOnly(2026, 3, 31), start, today));
+        Assert.Null(JournalPostingService.ValidateThrough(new DateOnly(2026, 3, 31), new DateOnly(2026, 3, 31), start, today));   // el mismo dia sirve para asentar solo las correcciones
         Assert.Contains("Ya está asentado", JournalPostingService.ValidateThrough(new DateOnly(2026, 3, 31), new DateOnly(2026, 3, 1), start, today));
     }
 

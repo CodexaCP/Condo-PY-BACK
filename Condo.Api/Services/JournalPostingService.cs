@@ -11,15 +11,33 @@ using Microsoft.EntityFrameworkCore;
 namespace Condo.Api.Services;
 
 /// <summary>
+/// Una diferencia entre lo asentado en el Libro Diario y lo que hoy dice el libro de Finanzas. <c>Original</c> es el asiento asentado que se
+/// corrige (nulo si el movimiento nunca se asento) y <c>Current</c> el asiento que saldria hoy (nulo si el movimiento ya no existe).
+/// <c>NextRevision</c> es la version que llevaria el asiento nuevo.
+/// </summary>
+public sealed record JournalDifference(JournalDifferenceKind Kind, JournalEntry? Original, AccountingEntryDto? Current, int NextRevision)
+{
+    // Contraasiento + asiento nuevo (Changed), solo asiento nuevo (Missing) o solo contraasiento (Removed).
+    public int EntryCount => Kind == JournalDifferenceKind.Changed ? 2 : 1;
+}
+
+/// <summary>
 /// Libro Diario: asienta los asientos sugeridos en un numero correlativo por edificio y ejercicio, sin huecos, y los deja guardados sin
 /// posibilidad de editarlos (Ley 1034/83, arts. 79 y 80). Se asienta por periodo: todo lo posterior a «asentado hasta» y hasta el dia elegido,
 /// en orden cronologico. Nunca se asienta un asiento incompleto. El numero se toma y se guarda en la misma transaccion que los asientos, y los
-/// indices unicos (numero y origen del movimiento) frenan a dos personas que asientan a la vez: una sola gana y la otra recibe un conflicto.
+/// indices unicos (numero, movimiento de origen y contraasiento) frenan a dos personas que asientan a la vez: una sola gana y la otra recibe
+/// un conflicto.
+///
+/// Lo asentado no se corrige nunca: si el movimiento de origen cambia (se edita, se revierte o aparece uno con fecha ya asentada), al asentar
+/// se genera un contraasiento que invierte el asiento viejo y, si el movimiento sigue existiendo, un asiento nuevo. La fecha contable de esas
+/// correcciones es el dia hasta el que se asienta (nunca antes de lo ya asentado, asi el numero sigue el orden cronologico) y la fecha real
+/// de la operacion queda en OperationDate.
 /// </summary>
 public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesService accounting, ITenantContext tenantContext)
 {
     public const int DefaultPageSize = 100;
     public const int MaxPageSize = 500;
+    private const int MaxDescriptionLength = 500;
 
     private ConfigAuditWriter Audit => new(dbContext, tenantContext);
 
@@ -29,13 +47,16 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
 
     // ─── Validacion del dia hasta el que se asienta ───────────────────────────
 
+    /// <summary>
+    /// El dia puede ser el ya asentado (sirve para asentar solo las correcciones) o uno posterior; nunca uno anterior ni futuro.
+    /// </summary>
     public static string? ValidateThrough(DateOnly? postedThrough, DateOnly through, DateOnly startDate, DateOnly today)
     {
         if (through > today) return "No se puede asentar hasta una fecha futura.";
         if (through < startDate) return "La fecha es anterior al arranque de las finanzas del edificio.";
-        if (postedThrough.HasValue && through <= postedThrough.Value)
+        if (postedThrough.HasValue && through < postedThrough.Value)
         {
-            return $"Ya está asentado hasta el {postedThrough.Value:dd/MM/yyyy}: elegí una fecha posterior.";
+            return $"Ya está asentado hasta el {postedThrough.Value:dd/MM/yyyy}: elegí esa fecha o una posterior.";
         }
 
         return null;
@@ -43,6 +64,104 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
 
     private static DateOnly StartOf(DateOnly? postedThrough, DateOnly startDate) =>
         postedThrough.HasValue ? postedThrough.Value.AddDays(1) : startDate;
+
+    private static string NothingToPost(DateOnly postedThrough) =>
+        $"No hay nada para asentar: ya está asentado hasta el {postedThrough:dd/MM/yyyy} y no hay diferencias con el libro. Elegí una fecha posterior.";
+
+    // ─── Diferencias contra lo asentado ───────────────────────────────────────
+
+    /// <summary>
+    /// Compara lo que hoy arma el libro (asientos del dia de arranque a «asentado hasta») con lo asentado. Por cada movimiento se mira su
+    /// asiento vigente: el de mayor version que ningun contraasiento anulo. Pura: no toca la base.
+    /// </summary>
+    public static List<JournalDifference> Compare(
+        IReadOnlyList<AccountingEntryDto> current, IReadOnlyList<JournalEntry> posted, IReadOnlySet<Guid> reversedIds)
+    {
+        var groups = posted
+            .Where(e => e.Kind == JournalEntryKind.Auto && e.SourceType.HasValue && e.SourceId.HasValue)
+            .GroupBy(e => (e.SourceType!.Value, e.SourceId!.Value, e.OperationDate, e.SourceAccountId))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.Revision).ToList());
+        var currentByKey = current.ToDictionary(e => ((int)e.SourceType, e.SourceId, e.Date, e.SourceAccountId));
+
+        var result = new List<JournalDifference>();
+        foreach (var (key, versions) in groups)
+        {
+            var active = versions.FirstOrDefault(e => !reversedIds.Contains(e.Id));
+            var next = versions[0].Revision + 1;
+            if (currentByKey.TryGetValue(key, out var now))
+            {
+                if (active is null) result.Add(new JournalDifference(JournalDifferenceKind.Missing, null, now, next));
+                else if (!HashMatches(active.ContentHash, now)) result.Add(new JournalDifference(JournalDifferenceKind.Changed, active, now, next));
+            }
+            else if (active is not null)
+            {
+                result.Add(new JournalDifference(JournalDifferenceKind.Removed, active, null, next));
+            }
+        }
+
+        foreach (var (key, now) in currentByKey)
+        {
+            if (!groups.ContainsKey(key)) result.Add(new JournalDifference(JournalDifferenceKind.Missing, null, now, 0));
+        }
+
+        return result
+            .OrderBy(d => d.Original?.OperationDate ?? d.Current!.Date)
+            .ThenBy(d => d.Original?.Number ?? int.MaxValue)
+            .ThenBy(d => d.Current?.Description, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Diferencias de un edificio: nada si todavia no se asento ningun dia.</summary>
+    public async Task<List<JournalDifference>> DetectAsync(LedgerContext ctx, DateOnly? postedThrough, CancellationToken ct)
+    {
+        if (!postedThrough.HasValue || postedThrough.Value < ctx.StartDate) return [];
+
+        var built = await accounting.BuildAsync(ctx, ctx.StartDate, postedThrough.Value, ct);
+        var posted = await dbContext.JournalEntries.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId && x.Kind == JournalEntryKind.Auto && x.SourceType != null)
+            .ToListAsync(ct);
+        var reversed = (await dbContext.JournalEntries.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId && x.ReversesEntryId != null)
+                .Select(x => x.ReversesEntryId!.Value)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        return Compare(built.Entries, posted, reversed);
+    }
+
+    public async Task<JournalDifferencesDto> DifferencesAsync(LedgerContext ctx, CancellationToken ct)
+    {
+        var postedThrough = await PostedThroughAsync(ctx.BuildingId, ct);
+        var items = await DetectAsync(ctx, postedThrough, ct);
+        return new JournalDifferencesDto
+        {
+            BuildingId = ctx.BuildingId,
+            PostedThrough = postedThrough,
+            Items = items.Select(ToDto).ToList(),
+            ChangedCount = items.Count(d => d.Kind == JournalDifferenceKind.Changed),
+            MissingCount = items.Count(d => d.Kind == JournalDifferenceKind.Missing),
+            RemovedCount = items.Count(d => d.Kind == JournalDifferenceKind.Removed),
+            IncompleteCount = items.Count(d => d.Current is { IsComplete: false }),
+            Pending = PendingNames(items.Where(d => d.Current is not null).Select(d => d.Current!))
+        };
+    }
+
+    private static JournalDifferenceDto ToDto(JournalDifference d) => new()
+    {
+        Kind = d.Kind,
+        EntryId = d.Original?.Id,
+        EntryLabel = d.Original is null ? null : LabelOf(d.Original.FiscalYear, d.Original.Number),
+        OperationDate = d.Original?.OperationDate ?? d.Current!.Date,
+        Description = d.Original?.Description ?? d.Current!.Description,
+        ThirdParty = d.Original?.ThirdParty ?? d.Current!.ThirdParty,
+        AmountBefore = d.Original?.TotalDebit,
+        AmountAfter = d.Current?.Debit,
+        Incomplete = d.Current is { IsComplete: false }
+    };
+
+    private static List<string> PendingNames(IEnumerable<AccountingEntryDto> entries) =>
+        entries.SelectMany(e => e.Lines).Where(l => l.Missing).Select(l => l.Name).Distinct()
+            .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
 
     // ─── Vista previa ─────────────────────────────────────────────────────────
 
@@ -52,11 +171,21 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         var error = ValidateThrough(postedThrough, through, ctx.StartDate, FinancePeriods.Today());
         if (error is not null) return (null, error);
 
+        var differences = await DetectAsync(ctx, postedThrough, ct);
         var start = StartOf(postedThrough, ctx.StartDate);
-        var built = await accounting.BuildAsync(ctx, start, through, ct);
+        IReadOnlyList<AccountingEntryDto> entries = !postedThrough.HasValue || through > postedThrough.Value
+            ? (await accounting.BuildAsync(ctx, start, through, ct)).Entries
+            : [];
+        if (postedThrough.HasValue && through == postedThrough.Value && differences.Count == 0)
+        {
+            return (null, NothingToPost(postedThrough.Value));
+        }
+
         var lastNumbers = await LastNumbersAsync(ctx.BuildingId, ct);
-        var plan = Allocate(built.Entries, ctx.FiscalYearStartMonth, lastNumbers);
-        var incomplete = built.Entries.Count(e => !e.IsComplete);
+        var dates = entries.OrderBy(e => e.Date).Select(e => e.Date)
+            .Concat(differences.SelectMany(d => Enumerable.Repeat(through, d.EntryCount))).ToList();
+        var numbers = AllocateDates(dates, ctx.FiscalYearStartMonth, lastNumbers);
+        var incomplete = entries.Count(e => !e.IsComplete) + differences.Count(d => d.Current is { IsComplete: false });
 
         return (new JournalPreviewDto
         {
@@ -64,102 +193,113 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             PostedThrough = postedThrough,
             From = start,
             Through = through,
-            EntryCount = built.Entries.Count,
+            EntryCount = entries.Count,
             IncompleteCount = incomplete,
-            Pending = built.Pending,
-            FirstLabel = plan.Count > 0 ? LabelOf(plan[0].FiscalYear, plan[0].Number) : null,
-            LastLabel = plan.Count > 0 ? LabelOf(plan[^1].FiscalYear, plan[^1].Number) : null,
-            TotalDebit = built.Entries.Sum(e => e.Debit),
-            TotalCredit = built.Entries.Sum(e => e.Credit),
-            CanPost = built.Entries.Count > 0 && incomplete == 0
+            Pending = PendingNames(entries.Concat(differences.Where(d => d.Current is not null).Select(d => d.Current!))),
+            FirstLabel = numbers.Count > 0 ? LabelOf(numbers[0].FiscalYear, numbers[0].Number) : null,
+            LastLabel = numbers.Count > 0 ? LabelOf(numbers[^1].FiscalYear, numbers[^1].Number) : null,
+            TotalDebit = entries.Sum(e => e.Debit),
+            TotalCredit = entries.Sum(e => e.Credit),
+            Differences = differences.Select(ToDto).ToList(),
+            CorrectionEntryCount = differences.Sum(d => d.EntryCount),
+            CanPost = numbers.Count > 0 && incomplete == 0
         }, null);
     }
 
     // ─── Asentar ──────────────────────────────────────────────────────────────
 
-    /// <summary>Asienta todo lo posterior a lo ya asentado y hasta <paramref name="through"/>. El error es <c>Conflict</c> si hay que corregir algo y reintentar.</summary>
+    /// <summary>
+    /// Asienta todo lo posterior a lo ya asentado hasta <paramref name="through"/> y corrige lo asentado que cambio. El error es
+    /// <c>Conflict</c> si hay que arreglar algo y reintentar.
+    /// </summary>
     public async Task<(PostJournalResultDto? Result, string? Error, bool Conflict)> PostAsync(
         LedgerContext ctx, DateOnly through, Guid companyId, CancellationToken ct)
     {
         var settings = await dbContext.FinanceSettings.FirstOrDefaultAsync(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId, ct);
         if (settings is null) return (null, "Completá la configuración inicial de Finanzas del edificio.", true);
 
-        var error = ValidateThrough(settings.JournalPostedThrough, through, ctx.StartDate, FinancePeriods.Today());
+        var posted = settings.JournalPostedThrough;
+        var error = ValidateThrough(posted, through, ctx.StartDate, FinancePeriods.Today());
         if (error is not null) return (null, error, false);
 
-        var start = StartOf(settings.JournalPostedThrough, ctx.StartDate);
-        var built = await accounting.BuildAsync(ctx, start, through, ct);
-        return await PostBuiltAsync(ctx, settings, built.Entries, through, companyId, ct);
+        var differences = await DetectAsync(ctx, posted, ct);
+        IReadOnlyList<AccountingEntryDto> entries = !posted.HasValue || through > posted.Value
+            ? (await accounting.BuildAsync(ctx, StartOf(posted, ctx.StartDate), through, ct)).Entries
+            : [];
+        if (posted.HasValue && through == posted.Value && differences.Count == 0) return (null, NothingToPost(posted.Value), false);
+
+        return await PostBuiltAsync(ctx, settings, entries, through, companyId, ct, differences);
     }
 
-    /// <summary>Guarda en el Libro Diario los asientos ya armados (el armado y la guarda estan separados para poder probar cada uno).</summary>
+    /// <summary>
+    /// Guarda en el Libro Diario los asientos ya armados y las correcciones (el armado y la guarda estan separados para poder probar cada uno).
+    /// Orden: primero los asientos nuevos por fecha y despues las correcciones, todas con la fecha del dia hasta el que se asienta.
+    /// </summary>
     public async Task<(PostJournalResultDto? Result, string? Error, bool Conflict)> PostBuiltAsync(
-        LedgerContext ctx, FinanceSettings settings, IReadOnlyList<AccountingEntryDto> entries, DateOnly through, Guid companyId, CancellationToken ct)
+        LedgerContext ctx, FinanceSettings settings, IReadOnlyList<AccountingEntryDto> entries, DateOnly through, Guid companyId,
+        CancellationToken ct, IReadOnlyList<JournalDifference>? differences = null)
     {
-        var incomplete = entries.Where(e => !e.IsComplete).ToList();
+        differences ??= [];
+        var toCheck = entries.Concat(differences.Where(d => d.Current is not null).Select(d => d.Current!)).ToList();
+
+        var incomplete = toCheck.Where(e => !e.IsComplete).ToList();
         if (incomplete.Count > 0)
         {
-            var pending = string.Join(", ", entries.SelectMany(e => e.Lines).Where(l => l.Missing).Select(l => l.Name).Distinct());
-            return (null, $"Hay {incomplete.Count} asientos incompletos porque falta la cuenta del plan de: {pending}. Asignalas en «Cuentas del plan» y volvé a asentar.", true);
+            var pending = string.Join(", ", PendingNames(toCheck));
+            return (null, $"Hay {incomplete.Count} asientos incompletos porque falta la cuenta del plan de: {pending}. Asignalas y volvé a asentar.", true);
         }
 
-        var unbalanced = entries.FirstOrDefault(e => e.Debit != e.Credit);
+        var unbalanced = toCheck.FirstOrDefault(e => e.Debit != e.Credit);
         if (unbalanced is not null)
         {
             return (null, $"El asiento del {unbalanced.Date:dd/MM/yyyy} ({unbalanced.Description}) no cuadra: no se asentó nada.", true);
         }
 
+        // Los asientos a anular se leen con sus renglones para invertirlos.
+        var originalIds = differences.Where(d => d.Original is not null).Select(d => d.Original!.Id).ToList();
+        var originals = originalIds.Count == 0
+            ? new Dictionary<Guid, JournalEntry>()
+            : await dbContext.JournalEntries.AsNoTracking().Include(x => x.Lines)
+                .Where(x => originalIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+
+        var now = DateTime.UtcNow;
+        var rows = new List<JournalEntry>();
+        foreach (var entry in entries.OrderBy(e => e.Date))
+        {
+            rows.Add(NewRow(entry, entry.Date, 0, entry.Description, companyId, ctx.BuildingId, now));
+        }
+
+        var correctionCount = 0;
+        foreach (var d in differences)
+        {
+            if (d.Original is not null)
+            {
+                rows.Add(ReversalRow(originals[d.Original.Id], through, companyId, ctx.BuildingId, now));
+                correctionCount++;
+            }
+
+            if (d.Current is not null)
+            {
+                var note = d.Original is not null
+                    ? $"{d.Current.Description} (corrige el asiento {LabelOf(d.Original.FiscalYear, d.Original.Number)})"
+                    : $"{d.Current.Description} (movimiento del {d.Current.Date:dd/MM/yyyy}, asentado después)";
+                rows.Add(NewRow(d.Current, through, d.NextRevision, note, companyId, ctx.BuildingId, now));
+                correctionCount++;
+            }
+        }
+
         var sequences = await dbContext.JournalSequences
             .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
             .ToListAsync(ct);
-        var plan = Allocate(entries, ctx.FiscalYearStartMonth, sequences.ToDictionary(x => x.FiscalYear, x => x.LastNumber));
-        var now = DateTime.UtcNow;
-
-        foreach (var item in plan)
+        var numbers = AllocateDates(rows.Select(r => r.Date).ToList(), ctx.FiscalYearStartMonth, sequences.ToDictionary(x => x.FiscalYear, x => x.LastNumber));
+        for (var i = 0; i < rows.Count; i++)
         {
-            var entry = item.Entry;
-            var row = new JournalEntry
-            {
-                CompanyId = companyId,
-                BuildingId = ctx.BuildingId,
-                FiscalYear = item.FiscalYear,
-                Number = item.Number,
-                Date = entry.Date,
-                OperationDate = entry.Date,
-                Description = entry.Description,
-                ThirdParty = entry.ThirdParty,
-                Reference = entry.Reference,
-                Kind = JournalEntryKind.Auto,
-                SourceType = (int)entry.SourceType,
-                SourceId = entry.SourceId,
-                SourceAccountId = entry.SourceAccountId,
-                Revision = 0,
-                TotalDebit = entry.Debit,
-                TotalCredit = entry.Credit,
-                ContentHash = HashOf(entry),
-                PostedAtUtc = now,
-                PostedByUserId = tenantContext.UserId
-            };
-            var lineNo = 0;
-            foreach (var line in entry.Lines)
-            {
-                row.Lines.Add(new JournalEntryLine
-                {
-                    LineNo = ++lineNo,
-                    LedgerCategoryId = line.CategoryId,
-                    Code = line.Code,
-                    ExternalCode = line.ExternalCode,
-                    Name = line.Name,
-                    Debit = line.Debit,
-                    Credit = line.Credit,
-                    Kind = line.Kind
-                });
-            }
-
-            dbContext.JournalEntries.Add(row);
+            rows[i].FiscalYear = numbers[i].FiscalYear;
+            rows[i].Number = numbers[i].Number;
+            dbContext.JournalEntries.Add(rows[i]);
         }
 
-        foreach (var group in plan.GroupBy(x => x.FiscalYear))
+        foreach (var group in numbers.GroupBy(x => x.FiscalYear))
         {
             var last = group.Max(x => x.Number);
             var sequence = sequences.FirstOrDefault(x => x.FiscalYear == group.Key);
@@ -181,11 +321,12 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         settings.JournalPostedThrough = through;
         settings.UpdatedAtUtc = now;
 
-        var firstLabel = plan.Count > 0 ? LabelOf(plan[0].FiscalYear, plan[0].Number) : null;
-        var lastLabel = plan.Count > 0 ? LabelOf(plan[^1].FiscalYear, plan[^1].Number) : null;
-        var summary = plan.Count == 0
+        var firstLabel = rows.Count > 0 ? LabelOf(rows[0].FiscalYear, rows[0].Number) : null;
+        var lastLabel = rows.Count > 0 ? LabelOf(rows[^1].FiscalYear, rows[^1].Number) : null;
+        var summary = rows.Count == 0
             ? $"Libro Diario: se asentó hasta el {through:dd/MM/yyyy} sin movimientos."
-            : $"Libro Diario: se asentaron {plan.Count} asientos ({firstLabel} a {lastLabel}) hasta el {through:dd/MM/yyyy}.";
+            : $"Libro Diario: se asentaron {rows.Count} asientos ({firstLabel} a {lastLabel}) hasta el {through:dd/MM/yyyy}"
+              + (correctionCount > 0 ? $", {correctionCount} de ellos correcciones de asientos que cambiaron (contraasiento y asiento nuevo)." : ".");
         Audit.Add(companyId, ctx.BuildingId, ConfigSectionKeys.Accounting, "Posted", summary, "JournalEntry", null,
             [new ConfigChange("journalPostedThrough", "Asentado hasta",
                 before?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture), through.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture))]);
@@ -196,12 +337,100 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         }
         catch (DbUpdateException)
         {
-            // Otra persona asento al mismo tiempo (choco el numero o el movimiento de origen): no se guardo nada de esta tanda.
+            // Otra persona asento al mismo tiempo (choco el numero, el movimiento de origen o el contraasiento): no se guardo nada de esta tanda.
             return (null, "Otra persona asentó al mismo tiempo. No se guardó nada de este asentado: actualizá la pantalla y reintentá.", true);
         }
 
-        return (new PostJournalResultDto { PostedCount = plan.Count, FirstLabel = firstLabel, LastLabel = lastLabel, PostedThrough = through }, null, false);
+        return (new PostJournalResultDto
+        {
+            PostedCount = rows.Count, CorrectionEntryCount = correctionCount, FirstLabel = firstLabel, LastLabel = lastLabel, PostedThrough = through
+        }, null, false);
     }
+
+    // Asiento que sale de un movimiento del libro. La fecha contable es la del movimiento salvo en las correcciones.
+    private JournalEntry NewRow(
+        AccountingEntryDto entry, DateOnly date, int revision, string description, Guid companyId, Guid buildingId, DateTime now)
+    {
+        var row = new JournalEntry
+        {
+            CompanyId = companyId,
+            BuildingId = buildingId,
+            Date = date,
+            OperationDate = entry.Date,
+            Description = Truncate(description),
+            ThirdParty = entry.ThirdParty,
+            Reference = entry.Reference,
+            Kind = JournalEntryKind.Auto,
+            SourceType = (int)entry.SourceType,
+            SourceId = entry.SourceId,
+            SourceAccountId = entry.SourceAccountId,
+            Revision = revision,
+            TotalDebit = entry.Debit,
+            TotalCredit = entry.Credit,
+            ContentHash = HashOf(entry),
+            PostedAtUtc = now,
+            PostedByUserId = tenantContext.UserId
+        };
+        var lineNo = 0;
+        foreach (var line in entry.Lines)
+        {
+            row.Lines.Add(new JournalEntryLine
+            {
+                LineNo = ++lineNo,
+                LedgerCategoryId = line.CategoryId,
+                Code = line.Code,
+                ExternalCode = line.ExternalCode,
+                Name = line.Name,
+                Debit = line.Debit,
+                Credit = line.Credit,
+                Kind = line.Kind
+            });
+        }
+
+        return row;
+    }
+
+    // Contraasiento: los mismos renglones con el debe y el haber invertidos. No tiene origen propio (lo identifica ReversesEntryId).
+    private JournalEntry ReversalRow(JournalEntry original, DateOnly date, Guid companyId, Guid buildingId, DateTime now)
+    {
+        var row = new JournalEntry
+        {
+            CompanyId = companyId,
+            BuildingId = buildingId,
+            Date = date,
+            OperationDate = original.OperationDate,
+            Description = Truncate($"Contraasiento del asiento {LabelOf(original.FiscalYear, original.Number)}: {original.Description}"),
+            ThirdParty = original.ThirdParty,
+            Reference = original.Reference,
+            Kind = JournalEntryKind.Reversal,
+            ReversesEntryId = original.Id,
+            TotalDebit = original.TotalCredit,
+            TotalCredit = original.TotalDebit,
+            ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"reversal|{original.Id}"))).ToLowerInvariant(),
+            PostedAtUtc = now,
+            PostedByUserId = tenantContext.UserId
+        };
+        var lineNo = 0;
+        foreach (var line in original.Lines.OrderBy(l => l.LineNo))
+        {
+            row.Lines.Add(new JournalEntryLine
+            {
+                LineNo = ++lineNo,
+                LedgerCategoryId = line.LedgerCategoryId,
+                Code = line.Code,
+                ExternalCode = line.ExternalCode,
+                Name = line.Name,
+                Debit = line.Credit,
+                Credit = line.Debit,
+                Kind = line.Kind
+            });
+        }
+
+        return row;
+    }
+
+    private static string Truncate(string text) =>
+        text.Length > MaxDescriptionLength ? text[..MaxDescriptionLength] : text;
 
     // ─── Lectura del Libro Diario ─────────────────────────────────────────────
 
@@ -228,6 +457,16 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync(ct);
 
+        // Numero del contraasiento de cada asiento anulado y del asiento que invierte cada contraasiento (pueden estar en otro ejercicio).
+        var ids = rows.Select(r => r.Id).ToList();
+        var reversedBy = await all.Where(x => x.ReversesEntryId != null && ids.Contains(x.ReversesEntryId.Value))
+            .Select(x => new { Original = x.ReversesEntryId!.Value, x.FiscalYear, x.Number })
+            .ToDictionaryAsync(x => x.Original, x => LabelOf(x.FiscalYear, x.Number), ct);
+        var reversedIds = rows.Where(r => r.ReversesEntryId.HasValue).Select(r => r.ReversesEntryId!.Value).ToList();
+        var reverses = await all.Where(x => reversedIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.FiscalYear, x.Number })
+            .ToDictionaryAsync(x => x.Id, x => LabelOf(x.FiscalYear, x.Number), ct);
+
         return new JournalDto
         {
             BuildingId = ctx.BuildingId,
@@ -235,7 +474,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             FiscalYear = year,
             FiscalYears = years,
             PostedThrough = await PostedThroughAsync(ctx.BuildingId, ct),
-            Entries = rows.Select(ToDto).ToList(),
+            Entries = rows.Select(r => ToDto(r, reversedBy, reverses)).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize,
@@ -245,7 +484,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         };
     }
 
-    private static JournalEntryDto ToDto(JournalEntry e) => new()
+    private static JournalEntryDto ToDto(JournalEntry e, IReadOnlyDictionary<Guid, string> reversedBy, IReadOnlyDictionary<Guid, string> reverses) => new()
     {
         Id = e.Id,
         FiscalYear = e.FiscalYear,
@@ -260,6 +499,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         SourceType = e.SourceType.HasValue ? (LedgerSourceType)e.SourceType.Value : null,
         SourceId = e.SourceId,
         ReversesEntryId = e.ReversesEntryId,
+        ReversesLabel = e.ReversesEntryId.HasValue && reverses.TryGetValue(e.ReversesEntryId.Value, out var original) ? original : null,
+        ReversedByLabel = reversedBy.TryGetValue(e.Id, out var reversal) ? reversal : null,
         Debit = e.TotalDebit,
         Credit = e.TotalCredit,
         PostedAtUtc = e.PostedAtUtc,
@@ -276,32 +517,67 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         }).ToList()
     };
 
-    // ─── Auxiliares ───────────────────────────────────────────────────────────
+    // ─── Numeracion y huellas ─────────────────────────────────────────────────
 
     public sealed record PlannedEntry(AccountingEntryDto Entry, int FiscalYear, int Number);
 
+    public sealed record AllocatedNumber(int FiscalYear, int Number);
+
     /// <summary>
-    /// Reparte los numeros: en el orden de los asientos (ya cronologico), el siguiente correlativo del ejercicio de cada fecha.
+    /// Reparte los numeros: en el orden de las fechas dadas (ya cronologico), el siguiente correlativo del ejercicio de cada una.
     /// <paramref name="lastNumbers"/> es el ultimo numero usado de cada ejercicio.
     /// </summary>
+    public static List<AllocatedNumber> AllocateDates(
+        IReadOnlyList<DateOnly> dates, int fiscalYearStartMonth, IReadOnlyDictionary<int, int> lastNumbers)
+    {
+        var next = lastNumbers.ToDictionary(x => x.Key, x => x.Value);
+        var result = new List<AllocatedNumber>(dates.Count);
+        foreach (var date in dates)
+        {
+            var year = FinancePeriods.FiscalYearOf(date, fiscalYearStartMonth);
+            var number = next.GetValueOrDefault(year) + 1;
+            next[year] = number;
+            result.Add(new AllocatedNumber(year, number));
+        }
+
+        return result;
+    }
+
+    /// <summary>Lo mismo para asientos armados: el numero de cada uno, en orden de fecha.</summary>
     public static List<PlannedEntry> Allocate(
         IReadOnlyList<AccountingEntryDto> entries, int fiscalYearStartMonth, IReadOnlyDictionary<int, int> lastNumbers)
     {
-        var next = lastNumbers.ToDictionary(x => x.Key, x => x.Value);
-        var plan = new List<PlannedEntry>(entries.Count);
-        foreach (var entry in entries.OrderBy(e => e.Date))
-        {
-            var year = FinancePeriods.FiscalYearOf(entry.Date, fiscalYearStartMonth);
-            var number = next.GetValueOrDefault(year) + 1;
-            next[year] = number;
-            plan.Add(new PlannedEntry(entry, year, number));
-        }
-
-        return plan;
+        var ordered = entries.OrderBy(e => e.Date).ToList();
+        var numbers = AllocateDates(ordered.Select(e => e.Date).ToList(), fiscalYearStartMonth, lastNumbers);
+        return ordered.Select((e, i) => new PlannedEntry(e, numbers[i].FiscalYear, numbers[i].Number)).ToList();
     }
 
-    /// <summary>Huella de un asiento: fecha, origen y renglones. Sirve para saber mas adelante si el movimiento de origen cambio.</summary>
+    /// <summary>
+    /// Huella de un asiento: fecha, origen y renglones (rubro, importes). Sirve para saber si el movimiento de origen cambio despues de asentarlo.
+    /// No incluye el codigo ni el nombre de las cuentas ni la cuenta del plan de los bancos y del IVA: renombrar o recodificar el plan, o
+    /// reasignar la cuenta de un banco, no es un cambio del movimiento y no debe generar correcciones. El rubro si cuenta (reclasificar un gasto).
+    /// </summary>
     public static string HashOf(AccountingEntryDto entry)
+    {
+        var text = new StringBuilder("v2|")
+            .Append(entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append('|')
+            .Append((int)entry.SourceType).Append('|').Append(entry.SourceId).Append('|').Append(entry.SourceAccountId);
+        var lines = entry.Lines
+            .Select(l => (l.Kind, Category: l.Kind == "Rubro" ? l.CategoryId?.ToString() ?? string.Empty : string.Empty, l.Debit, l.Credit))
+            .OrderBy(l => l.Kind, StringComparer.Ordinal).ThenBy(l => l.Category, StringComparer.Ordinal)
+            .ThenBy(l => l.Debit).ThenBy(l => l.Credit);
+        foreach (var line in lines)
+        {
+            text.Append('\n').Append(line.Kind).Append('|').Append(line.Category).Append('|')
+                .Append(line.Debit.ToString("0.00", CultureInfo.InvariantCulture)).Append('|')
+                .Append(line.Credit.ToString("0.00", CultureInfo.InvariantCulture));
+        }
+
+        return Sha(text.ToString());
+    }
+
+    // Huella de la fase 1 (con codigo y nombre de cuenta): los asientos asentados antes de la fase 2 se siguen reconociendo.
+    private static string LegacyHashOf(AccountingEntryDto entry)
     {
         var text = new StringBuilder()
             .Append(entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append('|')
@@ -313,8 +589,13 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
                 .Append(line.Credit.ToString("0.00", CultureInfo.InvariantCulture));
         }
 
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
+        return Sha(text.ToString());
     }
+
+    private static bool HashMatches(string stored, AccountingEntryDto entry) =>
+        string.Equals(stored, HashOf(entry), StringComparison.Ordinal) || string.Equals(stored, LegacyHashOf(entry), StringComparison.Ordinal);
+
+    private static string Sha(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     private async Task<DateOnly?> PostedThroughAsync(Guid buildingId, CancellationToken ct) =>
         await dbContext.FinanceSettings.AsNoTracking()
