@@ -66,6 +66,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
+    public DbSet<AccountingBookSettings> AccountingBookSettings => Set<AccountingBookSettings>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1179,6 +1180,22 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<LedgerAccountRole>()
             .HasOne(x => x.LedgerCategory).WithMany()
             .HasForeignKey(x => x.LedgerCategoryId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Libros contables del edificio: titular, contador y rubrica (una configuracion por edificio) ──
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.Holder).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.HolderLegalName).HasMaxLength(200);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.HolderRuc).HasMaxLength(20);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.HolderAddress).HasMaxLength(300);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.AccountantName).HasMaxLength(200);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.AccountantRegistration).HasMaxLength(30);
+        modelBuilder.Entity<AccountingBookSettings>().Property(x => x.BookNumber).HasMaxLength(30);
+        modelBuilder.Entity<AccountingBookSettings>().HasIndex(x => x.BuildingId).IsUnique().HasFilter("[IsDeleted] = 0");
+        modelBuilder.Entity<AccountingBookSettings>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<AccountingBookSettings>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Pagos online: conexiones con el proveedor, asignacion a edificios e historial ──
         modelBuilder.Entity<PaymentConnection>().Property(x => x.Name).HasMaxLength(120);

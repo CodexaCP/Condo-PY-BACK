@@ -55,6 +55,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 ConfigSectionKeys.Budget => await BudgetAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Reconciliation => await ReconciliationAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Accounting => await AccountingAsync(building, finance, cancellationToken),
+                ConfigSectionKeys.Books => await BooksAsync(building, finance, cancellationToken),
                 ConfigSectionKeys.Documents => await DocumentsAsync(building, cancellationToken),
                 ConfigSectionKeys.Payments => await PaymentsAsync(building, cancellationToken),
                 _ => null
@@ -487,6 +488,56 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             ],
             LinkKind = "finance",
             LinkTab = "accounting"
+        };
+    }
+
+    // ── 13. Libros contables ─────────────────────────────────────────────────
+    // Completa cuando el titular esta configurado y el encabezado del Libro Diario tiene razon social y RUC (cargados o por defecto).
+
+    private async Task<ConfigSectionDto> BooksAsync(Building b, FinanceModuleState finance, CancellationToken cancellationToken)
+    {
+        var unavailable = FinanceUnavailable(finance);
+        if (unavailable is not null)
+        {
+            return unavailable;
+        }
+
+        var settings = await dbContext.AccountingBookSettings.AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.BuildingId == b.Id, cancellationToken);
+        var companyId = b.CompanyId ?? await dbContext.Condominiums.AsNoTracking()
+            .Where(x => x.Id == b.CondominiumId)
+            .Select(x => (Guid?)x.CompanyId)
+            .FirstOrDefaultAsync(cancellationToken);
+        var companyName = companyId.HasValue
+            ? await dbContext.Companies.AsNoTracking().Where(x => x.Id == companyId.Value).Select(x => x.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var header = AccountingBooksService.Resolve(b, settings, companyName);
+
+        var reasons = new List<string>();
+        if (settings is null) reasons.Add("Todavía no se configuró el titular de los libros: rige el consorcio con los datos de la ficha del edificio.");
+        if (string.IsNullOrWhiteSpace(header.LegalName)) reasons.Add("Falta la razón social del titular.");
+        if (string.IsNullOrWhiteSpace(header.Ruc)) reasons.Add("Falta el RUC del titular.");
+
+        var folios = settings is { AuthorizedFolios: not null }
+            ? $"{(settings.UsedFolios ?? 0).ToString(CultureInfo.InvariantCulture)} de {settings.AuthorizedFolios.Value.ToString(CultureInfo.InvariantCulture)}"
+            : null;
+
+        return new ConfigSectionDto
+        {
+            Status = settings is not null && reasons.Count == 0 ? ConfigSectionStatus.Complete : ConfigSectionStatus.Optional,
+            Reasons = reasons,
+            Summary =
+            [
+                Item("Titular del libro", AccountingBooksService.HolderLabel(header.Holder)),
+                Item("Razón social", header.LegalName),
+                Item("RUC", header.Ruc),
+                Item("Contador", header.AccountantName),
+                Item("Libro N°", settings?.BookNumber),
+                Item("Rúbrica", settings?.RubricDate?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)),
+                Item("Folios usados", folios)
+            ],
+            LinkKind = "self",
+            LinkTab = ConfigSectionKeys.Books
         };
     }
 

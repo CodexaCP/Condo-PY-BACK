@@ -119,3 +119,52 @@ public class AccountingEntriesDto
     // Cuentas financieras y rubros sin cuenta del plan que hicieron incompletos a algunos asientos.
     public IReadOnlyList<string> Pending { get; set; } = [];
 }
+
+// ── Libros contables del edificio (titular, contador y rubrica) ───────────────
+
+/// <summary>Datos con que se completa el encabezado del Libro Diario cuando el titular no los pisa.</summary>
+public class AccountingBookDefaultsDto
+{
+    public string? LegalName { get; set; }
+    public string? Ruc { get; set; }
+    public string? Address { get; set; }
+}
+
+public class AccountingBooksDto
+{
+    public Guid BuildingId { get; set; }
+    public bool FinanceAvailable { get; set; } = true;
+    public bool CanEdit { get; set; }
+    // Ya se guardo la configuracion alguna vez (sin guardar rige el consorcio con los datos de la ficha).
+    public bool Configured { get; set; }
+    public AccountingBookHolder Holder { get; set; } = AccountingBookHolder.Consortium;
+    // Lo que cargo el usuario; vacio = se usa el dato por defecto del titular.
+    public string? HolderLegalName { get; set; }
+    public string? HolderRuc { get; set; }
+    public string? HolderAddress { get; set; }
+    public string? AccountantName { get; set; }
+    public string? AccountantRegistration { get; set; }
+    public string? BookNumber { get; set; }
+    public DateOnly? RubricDate { get; set; }
+    public int? AuthorizedFolios { get; set; }
+    public int? UsedFolios { get; set; }
+    // Por defecto de cada titular: ficha del edificio (consorcio) y empresa (administradora).
+    public AccountingBookDefaultsDto ConsortiumDefaults { get; set; } = new();
+    public AccountingBookDefaultsDto AdminCompanyDefaults { get; set; } = new();
+    // Lo que saldria hoy en el encabezado del Diario (dato cargado o, si falta, el por defecto del titular).
+    public AccountingBookDefaultsDto Effective { get; set; } = new();
+}
+
+public class UpdateAccountingBooksRequest
+{
+    public AccountingBookHolder Holder { get; set; } = AccountingBookHolder.Consortium;
+    public string? HolderLegalName { get; set; }
+    public string? HolderRuc { get; set; }
+    public string? HolderAddress { get; set; }
+    public string? AccountantName { get; set; }
+    public string? AccountantRegistration { get; set; }
+    public string? BookNumber { get; set; }
+    public DateOnly? RubricDate { get; set; }
+    public int? AuthorizedFolios { get; set; }
+    public int? UsedFolios { get; set; }
+}

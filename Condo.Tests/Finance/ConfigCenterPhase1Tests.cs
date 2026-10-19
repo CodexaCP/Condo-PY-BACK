@@ -195,10 +195,10 @@ public class ConfigCenterPhase1Tests : IDisposable
         _env.Access.Buildings.Add(_env.Building.Id);
 
         _env.LoginAs("CompanyAdmin");
-        Assert.Equal(14, (await Overview()).Sections.Count);
+        Assert.Equal(15, (await Overview()).Sections.Count);
 
         _env.LoginAs("CompanyOperator");
-        Assert.Equal(14, (await Overview()).Sections.Count);
+        Assert.Equal(15, (await Overview()).Sections.Count);
 
         _env.LoginAs("BuildingManager");
         var manager = await Overview();
