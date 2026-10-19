@@ -16,7 +16,9 @@ public enum LedgerSourceType
     // Nota de credito del proveedor sobre un gasto de un periodo ya publicado (movimiento negativo con la fecha de la nota).
     SupplierCreditNote = 4,
     // Asiento de apertura: los saldos iniciales de las cuentas financieras a la fecha de arranque (un asiento por edificio; su origen es el edificio).
-    OpeningBalance = 5
+    OpeningBalance = 5,
+    // Transferencia entre cuentas propias (operacion guiada): dos movimientos con el mismo origen, uno que sale y otro que entra. No es ingreso ni gasto.
+    Transfer = 6
 }
 
 public enum LedgerDirection
@@ -188,7 +190,11 @@ public static class FinancePeriods
 }
 
 /// <summary>Suma de movimientos de un mes, en una cuenta (nula = sin cuenta asignada) y un rubro.</summary>
-public sealed record LedgerBucket(int Year, int Month, Guid? AccountId, string RubroKey, LedgerDirection Direction, decimal Amount);
+public sealed record LedgerBucket(int Year, int Month, Guid? AccountId, string RubroKey, LedgerDirection Direction, decimal Amount)
+{
+    /// <summary>Transferencia entre cuentas propias: mueve el saldo de cada cuenta pero no es ingreso ni egreso del edificio.</summary>
+    public bool IsTransfer => RubroKey == FinanceChartTemplate.TransferKey;
+}
 
 /// <summary>Un movimiento del libro (una linea de cobro, de gasto o de ingreso).</summary>
 public sealed record LedgerRow(
@@ -204,6 +210,9 @@ public sealed record LedgerRow(
     string Reference)
 {
     public decimal Signed => Direction == LedgerDirection.In ? Amount : -Amount;
+
+    /// <summary>Transferencia entre cuentas propias: mueve el saldo de cada cuenta pero no es ingreso ni egreso del edificio.</summary>
+    public bool IsTransfer => SourceType == LedgerSourceType.Transfer;
 }
 
 /// <summary>Todo lo que hace falta para clasificar y presentar el libro de un edificio.</summary>

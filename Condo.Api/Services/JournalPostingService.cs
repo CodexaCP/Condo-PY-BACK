@@ -157,6 +157,9 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         (JournalDifferenceKind.Changed, LedgerSourceType.BuildingExpense) => "Gasto modificado",
         (JournalDifferenceKind.Changed, LedgerSourceType.BuildingIncome) => "Ingreso modificado",
         (JournalDifferenceKind.Changed, LedgerSourceType.SupplierCreditNote) => "Nota de crédito modificada",
+        (JournalDifferenceKind.Changed, LedgerSourceType.Transfer) => "Transferencia modificada",
+        (JournalDifferenceKind.Removed, LedgerSourceType.Transfer) => "Transferencia anulada",
+        (JournalDifferenceKind.Missing, LedgerSourceType.Transfer) => "Transferencia cargada después de asentar ese día",
         (JournalDifferenceKind.Removed, LedgerSourceType.OwnerPayment) => "Pago revertido",
         (JournalDifferenceKind.Removed, LedgerSourceType.BuildingExpense) => "Gasto eliminado o ya no cuenta en caja",
         (JournalDifferenceKind.Removed, LedgerSourceType.BuildingIncome) => "Ingreso eliminado",
@@ -206,6 +209,16 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
                 .Where(x => noteIds.Contains(x.Id) && x.Status == BuildingExpenseCreditNoteStatus.Voided && x.VoidReason != "")
                 .Select(x => new { x.Id, x.VoidReason }).ToListAsync(ct);
             foreach (var n in notes) reasons[n.Id] = n.VoidReason.Trim();
+        }
+
+        var transferIds = removed.Where(d => SourceTypeOf(d) == LedgerSourceType.Transfer && SourceIdOf(d).HasValue)
+            .Select(d => SourceIdOf(d)!.Value).Distinct().ToList();
+        if (transferIds.Count > 0)
+        {
+            var transfers = await dbContext.FinanceTransfers.AsNoTracking()
+                .Where(x => transferIds.Contains(x.Id) && x.Status == FinanceTransferStatus.Voided && x.VoidReason != "")
+                .Select(x => new { x.Id, x.VoidReason }).ToListAsync(ct);
+            foreach (var t in transfers) reasons[t.Id] = t.VoidReason.Trim();
         }
 
         return reasons;

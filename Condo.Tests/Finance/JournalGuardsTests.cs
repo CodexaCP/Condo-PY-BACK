@@ -312,12 +312,12 @@ public class JournalGuardsTests
         env.T.Db.OwnerPayments.Add(owner);
         env.T.Db.SaveChanges();
 
-        var before = FinanceEnv.Ok(await Api(env).Get(owner.Id, null, null, default));
+        var before = FinanceEnv.Ok(await Api(env).Get(owner.Id, null, null, null, default));
         Assert.False(before.Posted);
 
         await Post(env, [Entry(D1, LedgerSourceType.OwnerPayment, payment.Id)], D2);
 
-        var after = FinanceEnv.Ok(await Api(env).Get(owner.Id, null, null, default));
+        var after = FinanceEnv.Ok(await Api(env).Get(owner.Id, null, null, null, default));
         Assert.True(after.Posted);
         Assert.Equal(1, after.PostedCount);
         Assert.Equal(["2026-000001"], after.Labels.ToArray());
@@ -337,14 +337,14 @@ public class JournalGuardsTests
         };
         await Post(env, entries, D2);
 
-        var impact = FinanceEnv.Ok(await Api(env).Get(null, env.Period.Id, null, default));
+        var impact = FinanceEnv.Ok(await Api(env).Get(null, env.Period.Id, null, null, default));
         Assert.True(impact.Posted);
         Assert.Equal(2, impact.PostedCount);
         Assert.Equal(2, impact.Labels.Count);
 
         // El ingreso se anula con un contraasiento: ya no cuenta como asiento vigente.
         await Post(env, [], D3, Detect(env, [entries[0]]));
-        var after = FinanceEnv.Ok(await Api(env).Get(null, env.Period.Id, null, default));
+        var after = FinanceEnv.Ok(await Api(env).Get(null, env.Period.Id, null, null, default));
         Assert.Equal(1, after.PostedCount);
     }
 
@@ -356,7 +356,7 @@ public class JournalGuardsTests
         var expense = env.AddExpense(null, 80_000m, BuildingExpenseCategory.Other, D1);
         await Post(env, [Entry(D1, LedgerSourceType.BuildingExpense, expense.Id)], D2);
 
-        var impact = FinanceEnv.Ok(await Api(env).Get(null, null, expense.Id, default));
+        var impact = FinanceEnv.Ok(await Api(env).Get(null, null, expense.Id, null, default));
 
         Assert.True(impact.Posted);
         Assert.Equal(1, impact.PostedCount);
@@ -371,20 +371,20 @@ public class JournalGuardsTests
         await Post(env, [Entry(D1, LedgerSourceType.BuildingExpense, expense.Id)], D2);
         var api = Api(env);
 
-        Assert.False(FinanceEnv.Ok(await api.Get(null, null, null, default)).Posted);                  // sin parametros
-        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, expense.Id, default)).Posted);   // dos a la vez
-        Assert.False(FinanceEnv.Ok(await api.Get(Guid.NewGuid(), null, null, default)).Posted);        // pago inexistente
+        Assert.False(FinanceEnv.Ok(await api.Get(null, null, null, null, default)).Posted);                  // sin parametros
+        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, expense.Id, null, default)).Posted);   // dos a la vez
+        Assert.False(FinanceEnv.Ok(await api.Get(Guid.NewGuid(), null, null, null, default)).Posted);        // pago inexistente
 
         env.LoginAs("Owner");                                                                          // rol sin acceso a Finanzas
-        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, default)).Posted);
+        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, null, default)).Posted);
         env.LoginAs("CompanyAdmin");
 
         env.Access.Buildings.Clear();                                                                  // edificio ajeno
-        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, default)).Posted);
+        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, null, default)).Posted);
         env.Access.Buildings.Add(env.Building.Id);
 
         env.T.Db.Buildings.Single(x => x.Id == env.Building.Id).FinanceModuleEnabled = false;          // sin Finanzas
         env.T.Db.SaveChanges();
-        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, default)).Posted);
+        Assert.False(FinanceEnv.Ok(await api.Get(null, env.Period.Id, null, null, default)).Posted);
     }
 }

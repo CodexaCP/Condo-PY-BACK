@@ -1,5 +1,6 @@
 using Condo.Application.Abstractions;
 using Condo.Application.Services;
+using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -61,7 +62,8 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
     /// y borrados. El total de los cobros siempre es la suma de los pagos: lo que no se pueda imputar a un tipo de cargo cae en
     /// expensas ordinarias.
     /// </summary>
-    public async Task<List<LedgerBucket>> GetBucketsAsync(LedgerContext ctx, DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    public async Task<List<LedgerBucket>> GetBucketsAsync(
+        LedgerContext ctx, DateOnly from, DateOnly to, CancellationToken cancellationToken, bool includeTransfers = false)
     {
         from = from < ctx.StartDate ? ctx.StartDate : from;
         var raw = new List<LedgerBucket>();
@@ -148,6 +150,19 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
                 FinanceLedgerRules.ForExpense(n.Category, n.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(n.LedgerCategoryId, n.Category)), -n.Amount);
         }
 
+        // Las transferencias entre cuentas propias mueven el saldo de cada cuenta pero no son ingreso ni egreso: solo se devuelven si el
+        // consumidor las pide (saldos por cuenta, conciliacion, fondo de reserva). Por defecto el libro es solo lo operativo.
+        if (includeTransfers)
+        {
+            foreach (var t in await LoadTransfersAsync(buildingId, from, to, cancellationToken))
+            {
+                AddBucket(raw, t.TransferDate.Year, t.TransferDate.Month,
+                    new LedgerClassification(t.FromAccountId, FinanceChartTemplate.TransferKey, LedgerDirection.Out), t.Amount);
+                AddBucket(raw, t.TransferDate.Year, t.TransferDate.Month,
+                    new LedgerClassification(t.ToAccountId, FinanceChartTemplate.TransferKey, LedgerDirection.In), t.Amount);
+            }
+        }
+
         return raw
             .GroupBy(b => (b.Year, b.Month, b.AccountId, b.RubroKey, b.Direction))
             .Select(g => new LedgerBucket(g.Key.Year, g.Key.Month, g.Key.AccountId, g.Key.RubroKey, g.Key.Direction, g.Sum(b => b.Amount)))
@@ -155,7 +170,8 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
     }
 
     /// <summary>Movimientos linea por linea del rango (acotado a <see cref="MaxRowsRangeDays"/> dias), en orden cronologico.</summary>
-    public async Task<List<LedgerRow>> GetRowsAsync(LedgerContext ctx, DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    public async Task<List<LedgerRow>> GetRowsAsync(
+        LedgerContext ctx, DateOnly from, DateOnly to, CancellationToken cancellationToken, bool includeTransfers = false)
     {
         from = from < ctx.StartDate ? ctx.StartDate : from;
         var rows = new List<LedgerRow>();
@@ -258,6 +274,25 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
                 n.PaidByReserveFund ? description + " (devuelve al fondo de reserva)" : description, n.SupplierName, n.Numero));
         }
 
+        // Transferencia entre cuentas propias: dos movimientos con el mismo origen (sale de una cuenta, entra en la otra) y la misma glosa.
+        if (includeTransfers)
+        {
+            var names = ctx.Accounts.ToDictionary(a => a.Id);
+            foreach (var t in await LoadTransfersAsync(buildingId, from, to, cancellationToken))
+            {
+                if (!names.TryGetValue(t.FromAccountId, out var source) || !names.TryGetValue(t.ToAccountId, out var target))
+                {
+                    continue;
+                }
+
+                var description = FinanceTransferRules.Description(source, target, t.Notes);
+                rows.Add(new LedgerRow(t.TransferDate, t.FromAccountId, FinanceChartTemplate.TransferKey, LedgerDirection.Out, t.Amount,
+                    LedgerSourceType.Transfer, t.Id, description, string.Empty, t.Reference));
+                rows.Add(new LedgerRow(t.TransferDate, t.ToAccountId, FinanceChartTemplate.TransferKey, LedgerDirection.In, t.Amount,
+                    LedgerSourceType.Transfer, t.Id, description, string.Empty, t.Reference));
+            }
+        }
+
         return rows
             .OrderBy(r => r.Date)
             .ThenBy(r => r.SourceType)
@@ -265,6 +300,13 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ThenBy(r => r.Signed)
             .ToList();
     }
+
+    // Transferencias vigentes (no anuladas) del edificio en el rango.
+    private async Task<List<FinanceTransfer>> LoadTransfersAsync(Guid buildingId, DateOnly from, DateOnly to, CancellationToken cancellationToken) =>
+        await dbContext.FinanceTransfers.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Status == FinanceTransferStatus.Active && x.BuildingId == buildingId
+                        && x.TransferDate >= from && x.TransferDate <= to)
+            .ToListAsync(cancellationToken);
 
     // Un gasto pagado desde una cuenta elegida mueve esa cuenta; sin cuenta elegida rige la que le toca por defecto.
     private static LedgerClassification? WithPaidAccount(LedgerClassification? rule, Guid? paidFromAccountId) =>

@@ -76,14 +76,14 @@ public class FinanceReportService(ICondoDbContext dbContext, FinanceLedgerServic
             return (null, "El rubro no existe en este edificio.");
         }
 
-        var rows = await ledger.GetRowsAsync(ctx, begin, end, cancellationToken);
+        var rows = await ledger.GetRowsAsync(ctx, begin, end, cancellationToken, includeTransfers: true);
 
         // Saldo del alcance filtrado al comienzo del rango (solo cuando no se filtra por rubro ni por sentido).
         decimal? opening = null;
         if (!query.CategoryId.HasValue && !query.Direction.HasValue)
         {
             var before = begin > ctx.StartDate
-                ? await ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken)
+                ? await ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken, includeTransfers: true)
                 : [];
 
             static decimal Net(IEnumerable<LedgerBucket> b) => b.Sum(x => x.Direction == LedgerDirection.In ? x.Amount : -x.Amount);
@@ -192,15 +192,15 @@ public class FinanceReportService(ICondoDbContext dbContext, FinanceLedgerServic
             .Select(x => x.ReserveFundPercentage)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, today, cancellationToken);
+        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, today, cancellationToken, includeTransfers: true);
         var fund = FinanceReportBuilder.FundAccountOf(ctx);
 
         var movements = new FinanceMovementsPageDto { From = begin, To = end, Page = 1, PageSize = 500 };
         if (fund is not null)
         {
-            var rows = await ledger.GetRowsAsync(ctx, begin, end, cancellationToken);
+            var rows = await ledger.GetRowsAsync(ctx, begin, end, cancellationToken, includeTransfers: true);
             var before = begin > ctx.StartDate
-                ? await ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken)
+                ? await ledger.GetBucketsAsync(ctx, ctx.StartDate, begin.AddDays(-1), cancellationToken, includeTransfers: true)
                 : [];
             var opening = fund.OpeningBalance + before.Where(b => b.AccountId == fund.Id)
                 .Sum(b => b.Direction == LedgerDirection.In ? b.Amount : -b.Amount);
@@ -216,7 +216,7 @@ public class FinanceReportService(ICondoDbContext dbContext, FinanceLedgerServic
     {
         var today = FinancePeriods.Today();
         var cutoff = asOf is null || asOf.Value > today ? today : asOf.Value;
-        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, cutoff, cancellationToken);
+        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, cutoff, cancellationToken, includeTransfers: true);
         return FinanceReportBuilder.BuildBalances(ctx, buckets, cutoff, ctx.Resolved.DefaultId);
     }
 }

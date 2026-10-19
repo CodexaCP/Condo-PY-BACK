@@ -70,6 +70,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
     public DbSet<JournalSequence> JournalSequences => Set<JournalSequence>();
+    public DbSet<FinanceTransfer> FinanceTransfers => Set<FinanceTransfer>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1245,6 +1246,33 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<JournalSequence>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Operaciones guiadas de Finanzas: transferencias entre cuentas propias ──
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.Amount).HasPrecision(18, 2);
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.Reference).HasMaxLength(100);
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.Notes).HasMaxLength(500);
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.SupportReference).HasMaxLength(500);
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<FinanceTransfer>().Property(x => x.Status).HasConversion<int>();
+        modelBuilder.Entity<FinanceTransfer>().HasIndex(x => new { x.BuildingId, x.TransferDate });
+        // Los triggers de proteccion (ver FinanceTransferProtection) se declaran para que EF no use OUTPUT sin INTO al actualizar (anular).
+        modelBuilder.Entity<FinanceTransfer>().ToTable(t =>
+        {
+            t.HasTrigger(FinanceTransferProtection.DeleteTrigger);
+            t.HasTrigger(FinanceTransferProtection.UpdateTrigger);
+        });
+        modelBuilder.Entity<FinanceTransfer>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinanceTransfer>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinanceTransfer>()
+            .HasOne(x => x.FromAccount).WithMany()
+            .HasForeignKey(x => x.FromAccountId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<FinanceTransfer>()
+            .HasOne(x => x.ToAccount).WithMany()
+            .HasForeignKey(x => x.ToAccountId).OnDelete(DeleteBehavior.Restrict);
 
         // ── Pagos online: conexiones con el proveedor, asignacion a edificios e historial ──
         modelBuilder.Entity<PaymentConnection>().Property(x => x.Name).HasMaxLength(120);

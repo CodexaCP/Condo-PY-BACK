@@ -40,7 +40,8 @@ public sealed class BankReconciliationService(
     public async Task<ReconciliationOverviewDto> OverviewAsync(LedgerContext ctx, bool canEdit, CancellationToken ct)
     {
         var today = FinancePeriods.Today();
-        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, today, ct);
+        // Con transferencias: el deposito o la transferencia entre cuentas figura en el extracto del banco.
+        var buckets = await ledger.GetBucketsAsync(ctx, ctx.StartDate, today, ct, includeTransfers: true);
         var balances = FinanceReportBuilder.BuildBalances(ctx, buckets, today, ctx.Resolved.DefaultId).Accounts.ToDictionary(a => a.Id);
 
         var reconciliations = await dbContext.BankReconciliations.AsNoTracking()
@@ -488,7 +489,7 @@ public sealed class BankReconciliationService(
 
     // Los renglones del libro de la cuenta desde la fecha de arranque hasta la fecha de corte.
     private async Task<List<LedgerRow>> AccountRowsAsync(LedgerContext ctx, Guid accountId, DateOnly to, CancellationToken ct) =>
-        (await ledger.GetRowsAsync(ctx, ctx.StartDate, to, ct)).Where(r => r.AccountId == accountId).ToList();
+        (await ledger.GetRowsAsync(ctx, ctx.StartDate, to, ct, includeTransfers: true)).Where(r => r.AccountId == accountId).ToList();
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 

@@ -66,7 +66,7 @@ public class FinanceBudgetService(ICondoDbContext dbContext, FinanceLedgerServic
     public static Dictionary<(int Year, int Month, string RubroKey), decimal> IncomeActuals(LedgerContext ctx, IEnumerable<LedgerBucket> buckets)
     {
         var result = new Dictionary<(int, int, string), decimal>();
-        foreach (var b in buckets.Where(b => b.Direction == LedgerDirection.In))
+        foreach (var b in buckets.Where(b => b.Direction == LedgerDirection.In && !b.IsTransfer))
         {
             // Cobranzas e ingresos de cuentas de ingresos; los que no tienen cuenta en el plan igual cuentan (el reporte los muestra aparte).
             var category = ctx.CategoryFor(b.RubroKey);

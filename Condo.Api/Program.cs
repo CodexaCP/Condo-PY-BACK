@@ -55,6 +55,7 @@ builder.Services.AddScoped<Condo.Api.Services.AccountingBooksService>();
 builder.Services.AddScoped<Condo.Api.Services.JournalPostingService>();
 builder.Services.AddScoped<Condo.Api.Services.JournalBooksService>();
 builder.Services.AddScoped<Condo.Api.Services.FiscalYearClosingService>();
+builder.Services.AddScoped<Condo.Api.Services.FinanceTransferService>();
 builder.Services.AddScoped<Condo.Api.Services.AssemblyReportService>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.MarketplaceScope>();

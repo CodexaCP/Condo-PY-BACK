@@ -44,6 +44,9 @@ public static class FinanceChartTemplate
     public const string CollectionLateFee = "Collection.LateFee";
     public const string CollectionReserveFund = "Collection.ReserveFund";
 
+    // Clave de los movimientos de una transferencia entre cuentas propias: no es un rubro del plan (no es ingreso ni gasto). Los reportes por rubro la ignoran.
+    public const string TransferKey = "Transfer";
+
     public static string ExpenseKey(BuildingExpenseCategory category) => $"Expense.{category}";
     public static string IncomeKey(BuildingIncomeCategory category) => $"Income.{category}";
 
@@ -120,7 +123,8 @@ public static class FinanceChartTemplate
     /// elegir rubro en un plan que no tiene la cuenta por defecto de su categoria).
     /// </summary>
     public static string FallbackName(string rubroKey) =>
-        FindRole(rubroKey)?.FallbackName
+        rubroKey == TransferKey ? "Transferencia entre cuentas"
+        : FindRole(rubroKey)?.FallbackName
         ?? (rubroKey == ExpenseKey(BuildingExpenseCategory.ReserveFund) ? "Fondo de reserva (sin rubro)" : rubroKey);
 
     // ── Categoria de la liquidacion de una cuenta ─────────────────────────────

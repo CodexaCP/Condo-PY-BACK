@@ -284,7 +284,7 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
     /// </summary>
     public async Task<AccountingBuildResult> BuildAsync(LedgerContext ctx, DateOnly start, DateOnly end, CancellationToken ct)
     {
-        var rows = await ledger.GetRowsAsync(ctx, start < ctx.StartDate ? ctx.StartDate : start, end, ct);
+        var rows = await ledger.GetRowsAsync(ctx, start < ctx.StartDate ? ctx.StartDate : start, end, ct, includeTransfers: true);
 
         var roles = await dbContext.LedgerAccountRoles.AsNoTracking()
             .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)

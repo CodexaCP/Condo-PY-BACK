@@ -65,7 +65,8 @@ public static class FinanceReportBuilder
 
     public static FinanceFlowDto Flow(IEnumerable<LedgerBucket> buckets)
     {
-        var list = buckets as IReadOnlyCollection<LedgerBucket> ?? buckets.ToList();
+        // Una transferencia entre cuentas propias no es ingreso ni egreso: nunca entra en el flujo, aunque venga en la lista.
+        var list = buckets.Where(b => !b.IsTransfer).ToList();
         var inflow = list.Where(b => b.Direction == LedgerDirection.In).Sum(b => b.Amount);
         var outflow = list.Where(b => b.Direction == LedgerDirection.Out).Sum(b => b.Amount);
         return new FinanceFlowDto { In = inflow, Out = outflow, Net = inflow - outflow };
@@ -73,7 +74,7 @@ public static class FinanceReportBuilder
 
     public static List<FinanceRubroAmountDto> RubroAmounts(LedgerContext ctx, IEnumerable<LedgerBucket> buckets, LedgerDirection direction) =>
         buckets
-            .Where(b => b.Direction == direction)
+            .Where(b => b.Direction == direction && !b.IsTransfer)
             .GroupBy(b => b.RubroKey)
             .Select(g =>
             {
@@ -133,7 +134,8 @@ public static class FinanceReportBuilder
         int Index(LedgerBucket b) => months.IndexOf((b.Year, b.Month));
 
         var before = buckets.Where(b => b.Year < first.Year || (b.Year == first.Year && b.Month < first.Month)).Sum(Signed);
-        var inYear = buckets.Where(b => Index(b) >= 0).ToList();
+        // Las transferencias entre cuentas propias no son ingresos ni egresos: no entran en las lineas ni en los totales (el saldo no cambia).
+        var inYear = buckets.Where(b => Index(b) >= 0 && !b.IsTransfer).ToList();
 
         List<FinanceCashFlowLineDto> Lines(LedgerDirection direction) =>
             inYear
@@ -308,6 +310,13 @@ public static class FinanceReportBuilder
     {
         IEnumerable<LedgerRow> filtered = rows;
 
+        // Las transferencias entre cuentas propias se ven en la vista de una cuenta y en el listado completo; con un filtro por rubro o por
+        // sentido no (no son ingreso ni egreso, y mezclarlas inflaria esos filtros).
+        if (!accountId.HasValue && (categoryId.HasValue || direction.HasValue))
+        {
+            filtered = filtered.Where(r => !r.IsTransfer);
+        }
+
         if (accountId.HasValue)
         {
             filtered = filtered.Where(r => r.AccountId == accountId.Value);
@@ -371,8 +380,11 @@ public static class FinanceReportBuilder
             });
         }
 
-        var totalIn = ordered.Where(r => r.Direction == LedgerDirection.In).Sum(r => r.Amount);
-        var totalOut = ordered.Where(r => r.Direction == LedgerDirection.Out).Sum(r => r.Amount);
+        // Los totales de entradas y salidas del listado completo son del edificio: sin las transferencias (se compensan). En la vista de una
+        // cuenta si cuentan, porque mueven su saldo.
+        var counted = accountId.HasValue ? ordered : ordered.Where(r => !r.IsTransfer).ToList();
+        var totalIn = counted.Where(r => r.Direction == LedgerDirection.In).Sum(r => r.Amount);
+        var totalOut = counted.Where(r => r.Direction == LedgerDirection.Out).Sum(r => r.Amount);
 
         if (descending)
         {
@@ -400,7 +412,7 @@ public static class FinanceReportBuilder
             TotalIn = totalIn,
             TotalOut = totalOut,
             OpeningBalance = hasRunning ? openingForScope : null,
-            ClosingBalance = hasRunning ? openingForScope + totalIn - totalOut : null
+            ClosingBalance = hasRunning ? running : null
         };
     }
 }

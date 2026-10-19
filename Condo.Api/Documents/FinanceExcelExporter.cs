@@ -876,6 +876,7 @@ public static class FinanceExcelExporter
         LedgerSourceType.OwnerPayment => "Cobro de propietario",
         LedgerSourceType.BuildingExpense => "Gasto del edificio",
         LedgerSourceType.SupplierCreditNote => "Nota de crédito de proveedor",
+        LedgerSourceType.Transfer => "Transferencia entre cuentas",
         _ => "Ingreso del edificio"
     };
 

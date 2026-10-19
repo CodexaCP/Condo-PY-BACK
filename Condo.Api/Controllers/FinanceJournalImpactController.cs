@@ -22,9 +22,21 @@ public class FinanceJournalImpactController(
 {
     [HttpGet]
     public async Task<ActionResult<JournalImpactDto>> Get(
-        [FromQuery] Guid? ownerPaymentId, [FromQuery] Guid? periodId, [FromQuery] Guid? expenseId, CancellationToken cancellationToken)
+        [FromQuery] Guid? ownerPaymentId, [FromQuery] Guid? periodId, [FromQuery] Guid? expenseId, [FromQuery] Guid? transferId,
+        CancellationToken cancellationToken)
     {
-        if (!IsFinanceRole || new[] { ownerPaymentId, periodId, expenseId }.Count(x => x.HasValue) != 1) return Ok(new JournalImpactDto());
+        if (!IsFinanceRole || new[] { ownerPaymentId, periodId, expenseId, transferId }.Count(x => x.HasValue) != 1) return Ok(new JournalImpactDto());
+
+        if (transferId is { } transfer)
+        {
+            var building = await Db.FinanceTransfers.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.Id == transfer).Select(x => (Guid?)x.BuildingId).FirstOrDefaultAsync(cancellationToken);
+            if (building is null) return Ok(new JournalImpactDto());
+
+            var allowed = await UsableBuildingsAsync([building.Value], cancellationToken);
+            return Ok(await WithPostedThroughAsync(
+                await journal.ImpactAsync(allowed, LedgerSourceType.Transfer, [transfer], cancellationToken), allowed));
+        }
 
         if (expenseId is { } expense)
         {

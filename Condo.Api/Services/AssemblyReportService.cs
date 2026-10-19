@@ -40,13 +40,14 @@ public class AssemblyReportService(
         if (cleanNotes is not null && cleanNotes.Length > NotesMaxLength) return (null, $"Las notas no pueden superar los {NotesMaxLength} caracteres.");
 
         // Todo el libro hasta el cierre del rango: de ahi salen los saldos de apertura y de cierre y los movimientos del rango.
-        var rows = await ledger.GetRowsAsync(ctx, ctx.StartDate, end, ct);
+        // Con las transferencias entre cuentas propias: los saldos por cuenta las necesitan. El estado de resultados no (ver mas abajo).
+        var rows = await ledger.GetRowsAsync(ctx, ctx.StartDate, end, ct, includeTransfers: true);
         var inRange = rows.Where(r => r.Date >= begin).ToList();
         var before = rows.Where(r => r.Date < begin).ToList();
 
         var accounts = BuildAccounts(ctx, before, inRange);
-        var income = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.In));
-        var expense = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.Out));
+        var income = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.In && !r.IsTransfer));
+        var expense = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.Out && !r.IsTransfer));
         var totalIncome = income.Sum(l => l.Amount);
         var totalExpense = expense.Sum(l => l.Amount);
 
@@ -54,6 +55,12 @@ public class AssemblyReportService(
         if (accounts.Any(a => a.IsUnassigned))
         {
             warnings.Add("Hay movimientos sin cuenta asignada: figuran en una fila aparte de los saldos.");
+        }
+
+        var transfers = inRange.Where(r => r.IsTransfer && r.Direction == LedgerDirection.In).Sum(r => r.Amount);
+        if (transfers != 0m)
+        {
+            warnings.Add($"Las entradas y salidas de cada cuenta incluyen {transfers:N0} Gs. de transferencias entre cuentas propias: no son ingresos ni egresos y no figuran en el estado de resultados.");
         }
 
         var budget = await BudgetAsync(ctx, end, ct);

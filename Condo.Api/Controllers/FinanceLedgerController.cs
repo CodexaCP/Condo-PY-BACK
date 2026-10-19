@@ -84,7 +84,8 @@ public class FinanceLedgerController(
             asOf = today;
         }
 
-        var buckets = await Ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken);
+        // Con las transferencias entre cuentas: los saldos por cuenta las necesitan; los flujos y el presupuesto las ignoran solos.
+        var buckets = await Ledger.GetBucketsAsync(ctx, ctx.StartDate, asOf, cancellationToken, includeTransfers: true);
         var monthBuckets = buckets.Where(b => b.Year == monthStart.Year && b.Month == monthStart.Month).ToList();
 
         var fiscalYear = FinancePeriods.FiscalYearOf(monthStart, ctx.FiscalYearStartMonth);

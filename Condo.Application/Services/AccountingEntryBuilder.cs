@@ -51,7 +51,8 @@ public static class AccountingEntryBuilder
     public static AccountingBuildResult Build(IEnumerable<LedgerRow> rows, AccountingBuildInput input)
     {
         var groups = rows
-            .GroupBy(r => (r.SourceType, r.SourceId, r.Date, r.AccountId))
+            // Una transferencia entre cuentas propias son dos movimientos (sale de una cuenta, entra en la otra) de un solo asiento.
+            .GroupBy(r => (r.SourceType, r.SourceId, r.Date, AccountId: r.IsTransfer ? null : r.AccountId))
             .OrderBy(g => g.Key.Date)
             .ThenBy(g => g.Key.SourceType)
             .ThenBy(g => g.First().Description, StringComparer.CurrentCultureIgnoreCase)
@@ -160,7 +161,9 @@ public static class AccountingEntryBuilder
                 lines, group.Key.Date, string.Join(" · ", descriptions),
                 group.Select(r => r.ThirdParty).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
                 group.Select(r => r.Reference).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
-                group.First().SourceType, group.First().SourceId, group.Key.AccountId);
+                group.First().SourceType, group.First().SourceId,
+                // Una transferencia se identifica por la cuenta de la que sale.
+                group.Key.AccountId ?? group.FirstOrDefault(r => r.IsTransfer && r.Direction == LedgerDirection.Out)?.AccountId);
         }
 
         return new AccountingBuildResult(
@@ -189,6 +192,12 @@ public static class AccountingEntryBuilder
         }
 
         Add(lines, "Financial", financial, financialLabel, cash);
+
+        // Entre cuentas propias no hay contrapartida de rubro ni IVA: las dos cuentas financieras se compensan solas.
+        if (row.IsTransfer)
+        {
+            return;
+        }
 
         var vat = 0m;
         if (row.Direction == LedgerDirection.Out && input.VatRates.TryGetValue((row.SourceType, row.SourceId), out var rate) && rate > 0m)

@@ -71,6 +71,7 @@ public interface ICondoDbContext
     DbSet<JournalEntry> JournalEntries { get; }
     DbSet<JournalEntryLine> JournalEntryLines { get; }
     DbSet<JournalSequence> JournalSequences { get; }
+    DbSet<FinanceTransfer> FinanceTransfers { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }
