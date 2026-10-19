@@ -347,6 +347,8 @@ public static class FinanceChartTemplate
         4.3.06|Venta de bienes / rezagos
         4.3.07|Ingresos varios|* K:Income.Other
         4.3.08|Diferencia de cambio positiva
+        4.3.09|Aportes extraordinarios|* I:ExtraordinaryContribution K:Income.ExtraordinaryContribution
+        4.3.10|Ajustes a favor|* I:CreditAdjustment K:Income.CreditAdjustment
         5|EGRESOS
         5.01|Personal|E:Payroll
         5.01.01|Sueldos encargado y ayudantes|* K:Expense.Payroll

@@ -12,8 +12,8 @@ Excel están en `Condo.Tests/Finance`): las reglas de abajo. Esta guía es para 
 
 | Antes | Ahora |
 |---|---|
-| Plantilla corta: ~28 subrubros en 2 niveles | **Tu plan genérico completo**: 5 clases (Activo, Pasivo, Patrimonio / Fondos, Ingresos, Egresos), **30 grupos** y **162 cuentas finales** (197 nodos), hasta 6 niveles |
-| Todo el plan nacía activo | Solo **54 cuentas recomendadas** nacen activas (81 nodos activos con sus grupos y clases). El resto está inactivo y lo activás con el tilde **Usar** |
+| Plantilla corta: ~28 subrubros en 2 niveles | **Tu plan genérico completo**: 5 clases (Activo, Pasivo, Patrimonio / Fondos, Ingresos, Egresos), **30 grupos** y **164 cuentas finales** (199 nodos), hasta 6 niveles |
+| Todo el plan nacía activo | Solo **56 cuentas recomendadas** nacen activas (83 nodos activos con sus grupos y clases). El resto está inactivo y lo activás con el tilde **Usar** |
 | Solo gastos e ingresos | Además hay **Activo, Pasivo y Patrimonio**, pero son **de referencia**: no reciben gastos ni ingresos, se exportan al contador |
 | Plan fijo por edificio | El SuperAdmin puede **reemplazar el plan por el del cliente (Excel)**, volver a aplicar el genérico, copiar de otro edificio o editar a mano |
 | «Plantilla» = no se puede borrar | Ahora lo que no se borra ni se mueve son las cuentas con **función especial** (cobranza de expensas y «cuenta por defecto» de cada categoría) |
@@ -48,7 +48,7 @@ El tipo de cuenta se guarda como texto y no se agregaron columnas: **no hay scri
 **Habilitar el módulo en un edificio que nunca lo tuvo** (SuperAdmin → Finanzas por edificio → Habilitar). Después abrir *Configuración → Plan de cuentas*.
 
 - [ ] Aparece el árbol con 5 clases arriba: **1 ACTIVO, 2 PASIVO, 3 PATRIMONIO / FONDOS, 4 INGRESOS, 5 EGRESOS**, con sus grupos y cuentas (por ejemplo 5 → 5.02 Servicios públicos → 5.02.01 Electricidad (ANDE)).
-- [ ] Arriba a la derecha de la lista dice **«81 de 197 activas»**.
+- [ ] Arriba a la derecha de la lista dice **«83 de 199 activas»**.
 - [ ] Las cuentas **recomendadas** están con el tilde *Usar* (por ejemplo 5.02.01, 5.04.01, 4.1.01, 4.3.01); las no recomendadas (por ejemplo 5.03.07 Portones automáticos, 1.2.01 Plazo fijo) están **atenuadas** y sin tilde.
 - [ ] 5.02.01 tiene una etiqueta azul **«Cuenta por defecto de gastos: ANDE»** y debajo dice «En la liquidación: ANDE».
 - [ ] 4.1.01 «Expensas ordinarias» tiene la etiqueta **«Cobranza de expensas ordinarias»**. Lo mismo 4.1.02 (extraordinarias), 4.1.03 (aportes al fondo), 4.1.04 (cargos particulares) y 4.2.01 (mora).
@@ -60,7 +60,7 @@ El tipo de cuenta se guarda como texto y no se agregaron columnas: **no hay scri
 
 ## 4. Elegir qué cuentas usa el edificio
 
-- [ ] Tildar *Usar* en **5.03.07 Portones automáticos**: se activa, y su grupo **5.03** ya estaba activo. El contador sube a **82 de 197**.
+- [ ] Tildar *Usar* en **5.03.07 Portones automáticos**: se activa, y su grupo **5.03** ya estaba activo. El contador sube a **84 de 199**.
 - [ ] Destildar *Usar* en esa misma cuenta: vuelve a 81.
 - [ ] Destildar el **grupo 5.02 «Servicios públicos»**: **todas** sus cuentas quedan inactivas (5.02.01 a 5.02.05). El contador baja.
 - [ ] Tildar *Usar* solo en **5.02.03 Gas**: se activa la cuenta **y también su grupo 5.02 y la clase 5** (una cuenta activa necesita sus grupos activos). 5.02.01 sigue inactiva.
@@ -120,7 +120,7 @@ Botón **Plan genérico**.
 - [ ] Si hay algo que perder, el botón **Reemplazar el plan** está **desactivado** hasta tildar «Entiendo que se pierde esto…».
 - [ ] Probar con un edificio que tenga gastos con rubro y presupuesto cargado: tras reemplazar, los gastos **siguen existiendo** (en *Gastos del período* se ven igual, ahora con rubro vacío), el presupuesto quedó vacío, y el resultado verde de arriba dice los números exactos.
 - [ ] La liquidación del período, los pagos y los saldos **no cambian**.
-- [ ] Después de reemplazar: **81 de 197 activas** otra vez, plan nuevo y limpio.
+- [ ] Después de reemplazar: **83 de 199 activas** otra vez, plan nuevo y limpio.
 
 ## 9. Importar el plan del cliente (Excel)
 
@@ -164,7 +164,7 @@ Con movimientos en varias cuentas:
 - [ ] **Presupuesto vs. real**: el real de cada cuenta coincide con lo cargado en ella; los gastos sin rubro cuentan en la cuenta por defecto de su categoría (caso 7).
 - [ ] **Flujo de caja**: cada cuenta con movimientos tiene su línea, con el código y el grupo.
 - [ ] **Movimientos**: filtrar por una **clase**, un **grupo** o una **cuenta** incluye todo lo que cuelga de ella.
-- [ ] **Paquete para el contador** (Excel): la hoja *Plan de cuentas* trae las 197 cuentas (o las del cliente) con su ruta, clase, función, estado y nivel; el resto de las hojas usa los códigos del plan.
+- [ ] **Paquete para el contador** (Excel): la hoja *Plan de cuentas* trae las 199 cuentas (o las del cliente) con su ruta, clase, función, estado y nivel; el resto de las hojas usa los códigos del plan.
 
 ## 12. Permisos (con el Administrador de empresa)
 - [ ] Ve el árbol completo y puede **buscar, expandir y exportar**, pero **no** ve botones de edición ni los tildes *Usar*.

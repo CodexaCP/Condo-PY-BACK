@@ -34,20 +34,31 @@ public class FinanceChartTemplateTests
         var parents = Nodes.Where(n => n.ParentCode is not null).Select(n => n.ParentCode!).ToHashSet();
         bool Leaf(FinanceChartTemplate.Node n) => !parents.Contains(n.Code);
 
-        Assert.Equal(197, Nodes.Count);
+        Assert.Equal(199, Nodes.Count);
         Assert.Equal(30, Nodes.Count(n => n.ParentCode is not null && parents.Contains(n.Code)));   // grupos
-        Assert.Equal(162, Nodes.Count(Leaf));                                                        // cuentas finales
-        Assert.Equal(54, Nodes.Count(n => n.Core));
+        Assert.Equal(164, Nodes.Count(Leaf));                                                        // cuentas finales
+        Assert.Equal(56, Nodes.Count(n => n.Core));
         Assert.Equal(34, Nodes.Count(n => n.Type == LedgerCategoryType.Asset && Leaf(n)));
         Assert.Equal(22, Nodes.Count(n => n.Type == LedgerCategoryType.Liability && Leaf(n)));
         Assert.Equal(6, Nodes.Count(n => n.Type == LedgerCategoryType.Fund && Leaf(n)));
-        Assert.Equal(15, Nodes.Count(n => n.Type == LedgerCategoryType.Income && Leaf(n)));
+        Assert.Equal(17, Nodes.Count(n => n.Type == LedgerCategoryType.Income && Leaf(n)));
         Assert.Equal(85, Nodes.Count(n => n.Type == LedgerCategoryType.Expense && Leaf(n)));
 
         var active = FinanceChartTemplate.Specs.Where(s => s.IsActive).ToList();
-        Assert.Equal(81, active.Count);
+        Assert.Equal(83, active.Count);
         Assert.Equal(28, active.Count(s => s.Type == LedgerCategoryType.Expense && !parents.Contains(s.Code)));
-        Assert.Equal(10, active.Count(s => s.Type == LedgerCategoryType.Income && !parents.Contains(s.Code)));
+        Assert.Equal(12, active.Count(s => s.Type == LedgerCategoryType.Income && !parents.Contains(s.Code)));
+    }
+
+    [Fact]
+    public void CadaCategoriaDeIngresoDelEdificioTieneSuCuentaPorDefectoEnElPlan()
+    {
+        // Sin esa cuenta, un ingreso cargado sin rubro (por ejemplo un aporte extraordinario) deja el asiento incompleto y no se puede asentar.
+        var keys = Nodes.Where(n => n.SystemKey is not null).Select(n => n.SystemKey!).ToHashSet();
+        foreach (var role in FinanceChartTemplate.Roles.Where(r => r.IncomeCategory.HasValue))
+        {
+            Assert.True(keys.Contains(role.Key), $"Falta la cuenta por defecto {role.Key} en el plan genérico.");
+        }
     }
 
     [Fact]
