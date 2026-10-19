@@ -85,6 +85,8 @@ public class AccountingEntryDto
     public string Reference { get; set; } = string.Empty;
     public LedgerSourceType SourceType { get; set; }
     public Guid SourceId { get; set; }
+    // Cuenta financiera del movimiento (parte de la identidad del asiento al asentarlo).
+    public Guid? SourceAccountId { get; set; }
     public IReadOnlyList<AccountingLineDto> Lines { get; set; } = [];
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
@@ -118,6 +120,8 @@ public class AccountingEntriesDto
     public decimal TotalCredit { get; set; }
     // Cuentas financieras y rubros sin cuenta del plan que hicieron incompletos a algunos asientos.
     public IReadOnlyList<string> Pending { get; set; } = [];
+    // Ultimo dia asentado en el Libro Diario: los sugeridos hasta esa fecha ya tienen su numero real.
+    public DateOnly? PostedThrough { get; set; }
 }
 
 // ── Libros contables del edificio (titular, contador y rubrica) ───────────────
@@ -167,4 +171,90 @@ public class UpdateAccountingBooksRequest
     public DateOnly? RubricDate { get; set; }
     public int? AuthorizedFolios { get; set; }
     public int? UsedFolios { get; set; }
+}
+
+// ── Libro Diario: asientos asentados ──────────────────────────────────────────
+
+public class JournalEntryLineDto
+{
+    public Guid? LedgerCategoryId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string? ExternalCode { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public string Kind { get; set; } = string.Empty;
+}
+
+public class JournalEntryDto
+{
+    public Guid Id { get; set; }
+    public int FiscalYear { get; set; }
+    public int Number { get; set; }
+    // Numero completo para mostrar y citar, por ejemplo 2026-000012.
+    public string Label { get; set; } = string.Empty;
+    public DateOnly Date { get; set; }
+    public DateOnly OperationDate { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string ThirdParty { get; set; } = string.Empty;
+    public string Reference { get; set; } = string.Empty;
+    public JournalEntryKind Kind { get; set; }
+    public LedgerSourceType? SourceType { get; set; }
+    public Guid? SourceId { get; set; }
+    public Guid? ReversesEntryId { get; set; }
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public DateTime PostedAtUtc { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public IReadOnlyList<JournalEntryLineDto> Lines { get; set; } = [];
+}
+
+public class JournalDto
+{
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public int FiscalYear { get; set; }
+    // Ejercicios que ya tienen asientos (para elegir en el filtro).
+    public IReadOnlyList<int> FiscalYears { get; set; } = [];
+    public DateOnly? PostedThrough { get; set; }
+    public IReadOnlyList<JournalEntryDto> Entries { get; set; } = [];
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    // Sumas de todo lo que cumple el filtro (no solo de la pagina).
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    public bool CanPost { get; set; }
+}
+
+/// <summary>Lo que se asentaria hasta una fecha, sin asentar nada.</summary>
+public class JournalPreviewDto
+{
+    public Guid BuildingId { get; set; }
+    public DateOnly? PostedThrough { get; set; }
+    public DateOnly From { get; set; }
+    public DateOnly Through { get; set; }
+    public int EntryCount { get; set; }
+    public int IncompleteCount { get; set; }
+    public IReadOnlyList<string> Pending { get; set; } = [];
+    public string? FirstLabel { get; set; }
+    public string? LastLabel { get; set; }
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    // Hay algo para asentar y todos los asientos estan completos.
+    public bool CanPost { get; set; }
+}
+
+public class PostJournalRequest
+{
+    // Se asienta todo lo posterior a lo ya asentado, hasta este dia inclusive.
+    public DateOnly Through { get; set; }
+}
+
+public class PostJournalResultDto
+{
+    public int PostedCount { get; set; }
+    public string? FirstLabel { get; set; }
+    public string? LastLabel { get; set; }
+    public DateOnly PostedThrough { get; set; }
 }

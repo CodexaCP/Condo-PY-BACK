@@ -99,6 +99,7 @@ public static class AccountingEntryBuilder
                 Reference = group.Select(r => r.Reference).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
                 SourceType = first.SourceType,
                 SourceId = first.SourceId,
+                SourceAccountId = group.Key.AccountId,
                 Lines = dtoLines,
                 Debit = dtoLines.Sum(l => l.Debit),
                 Credit = dtoLines.Sum(l => l.Credit),

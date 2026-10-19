@@ -67,6 +67,9 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
     public DbSet<AccountingBookSettings> AccountingBookSettings => Set<AccountingBookSettings>();
+    public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
+    public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
+    public DbSet<JournalSequence> JournalSequences => Set<JournalSequence>();
     public DbSet<MarketplaceListing> MarketplaceListings => Set<MarketplaceListing>();
     public DbSet<MarketplaceReservation> MarketplaceReservations => Set<MarketplaceReservation>();
     public DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots => Set<MarketplaceReservationSlot>();
@@ -1194,6 +1197,49 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Company).WithMany()
             .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<AccountingBookSettings>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+
+        // ── Libro Diario: asientos asentados (numero correlativo por edificio y ejercicio; no se editan ni se borran) ──
+        modelBuilder.Entity<JournalEntry>().Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.ThirdParty).HasMaxLength(200);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.Reference).HasMaxLength(200);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.ContentHash).HasMaxLength(64);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.TotalDebit).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<JournalEntry>().Property(x => x.TotalCredit).HasColumnType("decimal(18,2)");
+        // El numero no se repite dentro de un edificio y ejercicio: es lo que frena a dos personas que asientan a la vez.
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.FiscalYear, x.Number }).IsUnique();
+        // Un movimiento de origen se asienta una sola vez por version.
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.SourceType, x.SourceId, x.Date, x.SourceAccountId, x.Revision })
+            .IsUnique().HasFilter("[SourceType] IS NOT NULL");
+        modelBuilder.Entity<JournalEntry>().HasIndex(x => new { x.BuildingId, x.Date });
+        modelBuilder.Entity<JournalEntry>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<JournalEntry>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<JournalEntry>()
+            .HasOne<JournalEntry>().WithMany()
+            .HasForeignKey(x => x.ReversesEntryId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.Code).HasMaxLength(50);
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.ExternalCode).HasMaxLength(50);
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.Name).HasMaxLength(300);
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.Kind).HasMaxLength(20);
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.Debit).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.Credit).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<JournalEntryLine>().HasIndex(x => new { x.EntryId, x.LineNo }).IsUnique();
+        modelBuilder.Entity<JournalEntryLine>()
+            .HasOne(x => x.Entry).WithMany(x => x.Lines)
+            .HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<JournalSequence>().HasIndex(x => new { x.BuildingId, x.FiscalYear }).IsUnique();
+        modelBuilder.Entity<JournalSequence>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<JournalSequence>()
             .HasOne(x => x.Building).WithMany()
             .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
 

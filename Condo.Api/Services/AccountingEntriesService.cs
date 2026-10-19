@@ -202,6 +202,33 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
         if (end < start) return (null, "La fecha desde no puede ser posterior a la fecha hasta.");
         if (end.DayNumber - start.DayNumber > MaxRangeDays) return (null, $"Los asientos no pueden abarcar más de {MaxRangeDays} días.");
 
+        var built = await BuildAsync(ctx, start, end, ct);
+        var postedThrough = await dbContext.FinanceSettings.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
+            .Select(x => x.JournalPostedThrough)
+            .FirstOrDefaultAsync(ct);
+        return (new AccountingEntriesDto
+        {
+            BuildingId = ctx.BuildingId,
+            BuildingName = ctx.BuildingName,
+            From = start,
+            To = end,
+            Entries = built.Entries,
+            Totals = built.Totals,
+            EntryCount = built.Entries.Count,
+            IncompleteCount = built.Entries.Count(e => !e.IsComplete),
+            TotalDebit = built.Entries.Sum(e => e.Debit),
+            TotalCredit = built.Entries.Sum(e => e.Credit),
+            Pending = built.Pending,
+            PostedThrough = postedThrough
+        }, null);
+    }
+
+    /// <summary>
+    /// Arma los asientos sugeridos de un rango de fechas (sin tope de dias: lo usan tambien las vistas previas y el asentado del Libro Diario).
+    /// </summary>
+    public async Task<AccountingBuildResult> BuildAsync(LedgerContext ctx, DateOnly start, DateOnly end, CancellationToken ct)
+    {
         var rows = await ledger.GetRowsAsync(ctx, start < ctx.StartDate ? ctx.StartDate : start, end, ct);
 
         var roles = await dbContext.LedgerAccountRoles.AsNoTracking()
@@ -227,21 +254,7 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             VatRates = await VatRatesAsync(rows, ct)
         };
 
-        var built = AccountingEntryBuilder.Build(rows, input);
-        return (new AccountingEntriesDto
-        {
-            BuildingId = ctx.BuildingId,
-            BuildingName = ctx.BuildingName,
-            From = start,
-            To = end,
-            Entries = built.Entries,
-            Totals = built.Totals,
-            EntryCount = built.Entries.Count,
-            IncompleteCount = built.Entries.Count(e => !e.IsComplete),
-            TotalDebit = built.Entries.Sum(e => e.Debit),
-            TotalCredit = built.Entries.Sum(e => e.Credit),
-            Pending = built.Pending
-        }, null);
+        return AccountingEntryBuilder.Build(rows, input);
     }
 
     // La tasa de IVA de cada gasto y, en las notas de credito del proveedor, la del gasto que corrigen.

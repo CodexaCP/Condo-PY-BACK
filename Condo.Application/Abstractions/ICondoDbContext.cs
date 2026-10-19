@@ -68,6 +68,9 @@ public interface ICondoDbContext
     DbSet<BankReconciledMovement> BankReconciledMovements { get; }
     DbSet<LedgerAccountRole> LedgerAccountRoles { get; }
     DbSet<AccountingBookSettings> AccountingBookSettings { get; }
+    DbSet<JournalEntry> JournalEntries { get; }
+    DbSet<JournalEntryLine> JournalEntryLines { get; }
+    DbSet<JournalSequence> JournalSequences { get; }
     DbSet<MarketplaceListing> MarketplaceListings { get; }
     DbSet<MarketplaceReservation> MarketplaceReservations { get; }
     DbSet<MarketplaceReservationSlot> MarketplaceReservationSlots { get; }

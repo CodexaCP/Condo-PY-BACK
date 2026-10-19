@@ -110,7 +110,22 @@ Cada paso es independiente, compila y se prueba solo. Las fases 1 a 3 cubren H1,
 - **0.2** Confirmar con escribano la ley de propiedad horizontal y las obligaciones de rendición.
 - **Aceptación:** respuestas escritas guardadas en `docs/`.
 
-### Fase 1 — Asiento con número real y persistido (backend)
+### Fase 1 — Asiento con número real y persistido (backend) — HECHA 2026-10-19 (sin commit ni deploy)
+
+**Qué quedó (difiere en detalles del diseño de abajo):**
+- **Tablas** (migración `20261019120048_JournalEntries` + `.sql` idempotente, va después de `AccountingBooks`): `JournalEntries`, `JournalEntryLines`, `JournalSequences` y la columna `FinanceSettings.JournalPostedThrough` (la marca «asentado hasta» vive ahí, no en el edificio). Los renglones **no** tienen llave foránea a la cuenta del plan (guardan copia de código y nombre), para que reemplazar el plan no toque lo asentado.
+- **Servicio** `JournalPostingService`: `PreviewAsync`, `PostAsync`/`PostBuiltAsync`, `GetAsync`, `Allocate` (numeración pura), `HashOf`. Reusa el armado de asientos (`AccountingEntriesService.BuildAsync`, sin tope de 400 días).
+- **API** `api/finance/journal`: `GET` (libro por ejercicio, filtros de número y fechas, páginas de 100), `GET preview?through=`, `POST post`. Ven los cuatro roles; asientan solo SuperAdmin y Administrador (403 `journal_forbidden`). Los sugeridos ahora traen `postedThrough` y `sourceAccountId`.
+- **Reglas:** se asienta lo posterior a «asentado hasta» y hasta el día elegido (no futuro, no anterior al arranque); en orden cronológico; **todo o nada** en una sola transacción; un asiento incompleto o que no cuadra frena todo (409) y no consume números; el número es `AAAA-000001` por edificio y ejercicio fiscal y reinicia al cambiar de ejercicio. Dos personas a la vez: los índices únicos (número y movimiento de origen) dejan pasar a una sola y la otra recibe 409 sin guardar nada. Cada asentado queda en el historial (acción «Asentó»).
+- **Web:** pestaña «Libro diario» (por defecto) con el **N° real** destacado (`2026-000001`), banner «Asentado hasta…», panel «Asentar período» con vista previa y confirmación, filtros por ejercicio, número y fechas, y paginación. Los sugeridos pasan a llamarse «Sugerido n» (es solo el orden de la lista) y marcan «Ya asentado» hasta la marca.
+- **Pruebas:** 23 nuevas (`JournalPostingTests`, 3 de ellas de punta a punta con el libro real en SQL Server); suite completa con SQL Server: 1201 pasan, 0 omitidas.
+
+**Límites que quedan para la Fase 2 (a propósito):**
+- Un movimiento **fechado en un día ya asentado** (cargado o corregido después) **no se asienta** todavía y el Libro Diario **no se entera** si el origen cambió o se revirtió: eso lo resuelven la detección de diferencias y el contraasiento (2.1 a 2.4).
+- La inmutabilidad es de aplicación (no hay endpoint que edite o borre); el bloqueo a nivel base (trigger o permisos) es el paso 2.4.
+- No hay Libro Diario imprimible con folios ni Excel del libro asentado (Fase 3); el Excel actual sigue siendo el de los sugeridos.
+
+**Diseño original (referencia):**
 - **1.1 Tablas.** `JournalEntries` (`Id, CompanyId, BuildingId, FiscalYear, Number, Date, OperationDate, Description, ThirdParty, Reference, SourceType, SourceId, Kind {Auto, Opening, Adjustment, Reversal, Closing}, ReversesEntryId?, PostedAtUtc, PostedByUserId, TotalDebit, TotalCredit, ContentHash`), `JournalEntryLines` (`EntryId, LineNo, LedgerCategoryId?, Code, Name, Debit, Credit`, con **copia** del código y nombre de la cuenta al asentar) y `JournalSequences` (`BuildingId, FiscalYear, LastNumber`).
   - Índice único `(BuildingId, FiscalYear, Number)`.
   - Sin `IsDeleted` en estas tablas: no se borran.
