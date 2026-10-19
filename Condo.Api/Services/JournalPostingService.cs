@@ -133,11 +133,12 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
     {
         var postedThrough = await PostedThroughAsync(ctx.BuildingId, ct);
         var items = await DetectAsync(ctx, postedThrough, ct);
+        var reasons = await ReasonsAsync(items, ct);
         return new JournalDifferencesDto
         {
             BuildingId = ctx.BuildingId,
             PostedThrough = postedThrough,
-            Items = items.Select(ToDto).ToList(),
+            Items = items.Select(d => ToDto(d, reasons)).ToList(),
             ChangedCount = items.Count(d => d.Kind == JournalDifferenceKind.Changed),
             MissingCount = items.Count(d => d.Kind == JournalDifferenceKind.Missing),
             RemovedCount = items.Count(d => d.Kind == JournalDifferenceKind.Removed),
@@ -146,9 +147,76 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         };
     }
 
-    private static JournalDifferenceDto ToDto(JournalDifference d) => new()
+    /// <summary>Que paso con el movimiento, en palabras, segun su tipo y el tipo de diferencia.</summary>
+    public static string CauseOf(JournalDifferenceKind kind, LedgerSourceType type) => (kind, type) switch
+    {
+        (JournalDifferenceKind.Changed, LedgerSourceType.OwnerPayment) => "Pago modificado",
+        (JournalDifferenceKind.Changed, LedgerSourceType.BuildingExpense) => "Gasto modificado",
+        (JournalDifferenceKind.Changed, LedgerSourceType.BuildingIncome) => "Ingreso modificado",
+        (JournalDifferenceKind.Changed, LedgerSourceType.SupplierCreditNote) => "Nota de crédito modificada",
+        (JournalDifferenceKind.Removed, LedgerSourceType.OwnerPayment) => "Pago revertido",
+        (JournalDifferenceKind.Removed, LedgerSourceType.BuildingExpense) => "Gasto eliminado o ya no cuenta en caja",
+        (JournalDifferenceKind.Removed, LedgerSourceType.BuildingIncome) => "Ingreso eliminado",
+        (JournalDifferenceKind.Removed, LedgerSourceType.SupplierCreditNote) => "Nota de crédito anulada",
+        (JournalDifferenceKind.Missing, LedgerSourceType.OwnerPayment) => "Pago cargado después de asentar ese día",
+        (JournalDifferenceKind.Missing, LedgerSourceType.BuildingExpense) => "Gasto cargado después de asentar ese día",
+        (JournalDifferenceKind.Missing, LedgerSourceType.BuildingIncome) => "Ingreso cargado después de asentar ese día",
+        _ => "Movimiento cargado después de asentar ese día"
+    };
+
+    private static LedgerSourceType SourceTypeOf(JournalDifference d) =>
+        d.Current?.SourceType ?? (LedgerSourceType)(d.Original?.SourceType ?? (int)LedgerSourceType.BuildingExpense);
+
+    private static Guid? SourceIdOf(JournalDifference d) => d.Current?.SourceId ?? d.Original?.SourceId;
+
+    /// <summary>
+    /// Motivo que dejo quien hizo el cambio, para los movimientos que lo guardan: la reversa de un pago (queda en el pago del propietario) y la
+    /// anulacion de una nota de credito del proveedor. Se usa en la glosa del contraasiento. Indexado por el id del movimiento de origen.
+    /// </summary>
+    public async Task<Dictionary<Guid, string>> ReasonsAsync(IReadOnlyList<JournalDifference> differences, CancellationToken ct)
+    {
+        var reasons = new Dictionary<Guid, string>();
+        var removed = differences.Where(d => d.Kind == JournalDifferenceKind.Removed).ToList();
+
+        var paymentIds = removed.Where(d => SourceTypeOf(d) == LedgerSourceType.OwnerPayment && SourceIdOf(d).HasValue)
+            .Select(d => SourceIdOf(d)!.Value).Distinct().ToList();
+        if (paymentIds.Count > 0)
+        {
+            var payments = await dbContext.Payments.AsNoTracking().Where(x => paymentIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.CompanyId, x.Reference }).ToListAsync(ct);
+            var references = payments.Select(x => x.Reference).Distinct().ToList();
+            var owners = await dbContext.OwnerPayments.AsNoTracking()
+                .Where(x => references.Contains(x.Reference) && x.RejectionReason.StartsWith(ReversalPrefix))
+                .Select(x => new { x.CompanyId, x.Reference, x.RejectionReason }).ToListAsync(ct);
+            foreach (var p in payments)
+            {
+                var owner = owners.FirstOrDefault(o => o.CompanyId == p.CompanyId && o.Reference == p.Reference);
+                if (owner is not null) reasons[p.Id] = owner.RejectionReason[ReversalPrefix.Length..].Trim();
+            }
+        }
+
+        var noteIds = removed.Where(d => SourceTypeOf(d) == LedgerSourceType.SupplierCreditNote && SourceIdOf(d).HasValue)
+            .Select(d => SourceIdOf(d)!.Value).Distinct().ToList();
+        if (noteIds.Count > 0)
+        {
+            var notes = await dbContext.BuildingExpenseCreditNotes.AsNoTracking()
+                .Where(x => noteIds.Contains(x.Id) && x.Status == BuildingExpenseCreditNoteStatus.Voided && x.VoidReason != "")
+                .Select(x => new { x.Id, x.VoidReason }).ToListAsync(ct);
+            foreach (var n in notes) reasons[n.Id] = n.VoidReason.Trim();
+        }
+
+        return reasons;
+    }
+
+    // «PAGO REVERTIDO: motivo»: asi guarda la reversa de un pago el pago del propietario.
+    private const string ReversalPrefix = "PAGO REVERTIDO: ";
+
+    private static JournalDifferenceDto ToDto(JournalDifference d, IReadOnlyDictionary<Guid, string> reasons) => new()
     {
         Kind = d.Kind,
+        SourceType = SourceTypeOf(d),
+        Cause = CauseOf(d.Kind, SourceTypeOf(d)),
+        Reason = SourceIdOf(d) is { } sourceId && reasons.TryGetValue(sourceId, out var reason) ? reason : null,
         EntryId = d.Original?.Id,
         EntryLabel = d.Original is null ? null : LabelOf(d.Original.FiscalYear, d.Original.Number),
         OperationDate = d.Original?.OperationDate ?? d.Current!.Date,
@@ -186,6 +254,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             .Concat(differences.SelectMany(d => Enumerable.Repeat(through, d.EntryCount))).ToList();
         var numbers = AllocateDates(dates, ctx.FiscalYearStartMonth, lastNumbers);
         var incomplete = entries.Count(e => !e.IsComplete) + differences.Count(d => d.Current is { IsComplete: false });
+        var reasons = await ReasonsAsync(differences, ct);
+        var drafts = await DraftPeriodNamesAsync(entries.Concat(differences.Where(d => d.Current is not null).Select(d => d.Current!)), ct);
 
         return (new JournalPreviewDto
         {
@@ -200,9 +270,10 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             LastLabel = numbers.Count > 0 ? LabelOf(numbers[^1].FiscalYear, numbers[^1].Number) : null,
             TotalDebit = entries.Sum(e => e.Debit),
             TotalCredit = entries.Sum(e => e.Credit),
-            Differences = differences.Select(ToDto).ToList(),
+            Differences = differences.Select(d => ToDto(d, reasons)).ToList(),
             CorrectionEntryCount = differences.Sum(d => d.EntryCount),
-            CanPost = numbers.Count > 0 && incomplete == 0
+            DraftPeriods = drafts,
+            CanPost = numbers.Count > 0 && incomplete == 0 && drafts.Count == 0
         }, null);
     }
 
@@ -249,6 +320,13 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             return (null, $"Hay {incomplete.Count} asientos incompletos porque falta la cuenta del plan de: {pending}. Asignalas y volvé a asentar.", true);
         }
 
+        // Un gasto o ingreso de un periodo en borrador todavia se puede editar o borrar: no se asienta hasta que el periodo se publique.
+        var drafts = await DraftPeriodNamesAsync(toCheck, ct);
+        if (drafts.Count > 0)
+        {
+            return (null, $"No se puede asentar: hay gastos o ingresos en períodos en borrador ({string.Join(", ", drafts)}). Publicá esos períodos o asentá hasta una fecha anterior: mientras estén en borrador pueden cambiar.", true);
+        }
+
         var unbalanced = toCheck.FirstOrDefault(e => e.Debit != e.Credit);
         if (unbalanced is not null)
         {
@@ -262,6 +340,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             : await dbContext.JournalEntries.AsNoTracking().Include(x => x.Lines)
                 .Where(x => originalIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
 
+        var reasons = await ReasonsAsync(differences, ct);
         var now = DateTime.UtcNow;
         var rows = new List<JournalEntry>();
         foreach (var entry in entries.OrderBy(e => e.Date))
@@ -274,7 +353,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         {
             if (d.Original is not null)
             {
-                rows.Add(ReversalRow(originals[d.Original.Id], through, companyId, ctx.BuildingId, now));
+                var why = SourceIdOf(d) is { } sourceId && reasons.TryGetValue(sourceId, out var reason) ? reason : null;
+                rows.Add(ReversalRow(originals[d.Original.Id], through, companyId, ctx.BuildingId, now, CauseOf(d.Kind, SourceTypeOf(d)), why));
                 correctionCount++;
             }
 
@@ -391,7 +471,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
     }
 
     // Contraasiento: los mismos renglones con el debe y el haber invertidos. No tiene origen propio (lo identifica ReversesEntryId).
-    private JournalEntry ReversalRow(JournalEntry original, DateOnly date, Guid companyId, Guid buildingId, DateTime now)
+    private JournalEntry ReversalRow(JournalEntry original, DateOnly date, Guid companyId, Guid buildingId, DateTime now, string cause, string? reason)
     {
         var row = new JournalEntry
         {
@@ -399,7 +479,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             BuildingId = buildingId,
             Date = date,
             OperationDate = original.OperationDate,
-            Description = Truncate($"Contraasiento del asiento {LabelOf(original.FiscalYear, original.Number)}: {original.Description}"),
+            Description = Truncate($"Contraasiento del asiento {LabelOf(original.FiscalYear, original.Number)} ({cause.ToLowerInvariant()}{(string.IsNullOrWhiteSpace(reason) ? string.Empty : $". Motivo: {reason}")}): {original.Description}"),
             ThirdParty = original.ThirdParty,
             Reference = original.Reference,
             Kind = JournalEntryKind.Reversal,
@@ -431,6 +511,68 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
 
     private static string Truncate(string text) =>
         text.Length > MaxDescriptionLength ? text[..MaxDescriptionLength] : text;
+
+    // ─── Periodos en borrador e impacto sobre lo asentado ─────────────────────
+
+    /// <summary>
+    /// Nombres de los periodos en borrador a los que pertenecen los gastos e ingresos de estos asientos. Un periodo en borrador todavia se
+    /// puede editar, asi que lo que sale de el no se asienta hasta que se publique.
+    /// </summary>
+    public async Task<List<string>> DraftPeriodNamesAsync(IEnumerable<AccountingEntryDto> entries, CancellationToken ct)
+    {
+        var list = entries.ToList();
+        var expenseIds = list.Where(e => e.SourceType == LedgerSourceType.BuildingExpense).Select(e => e.SourceId).Distinct().ToList();
+        var incomeIds = list.Where(e => e.SourceType == LedgerSourceType.BuildingIncome).Select(e => e.SourceId).Distinct().ToList();
+        var names = new List<string>();
+
+        if (expenseIds.Count > 0)
+        {
+            names.AddRange(await dbContext.BuildingExpenses.AsNoTracking()
+                .Where(x => expenseIds.Contains(x.Id) && x.ExpensePeriod!.Status == ExpensePeriodStatus.Draft)
+                .Select(x => x.ExpensePeriod!.Name).Distinct().ToListAsync(ct));
+        }
+
+        if (incomeIds.Count > 0)
+        {
+            names.AddRange(await dbContext.BuildingIncomes.AsNoTracking()
+                .Where(x => incomeIds.Contains(x.Id) && x.ExpensePeriod!.Status == ExpensePeriodStatus.Draft)
+                .Select(x => x.ExpensePeriod!.Name).Distinct().ToListAsync(ct));
+        }
+
+        return names.Distinct().OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Cuantos asientos vigentes (asentados y no anulados) salen de estos movimientos. Sirve para avisar, antes de revertir un pago o deshacer la
+    /// publicacion de un periodo, que eso va a generar un contraasiento.
+    /// </summary>
+    public async Task<JournalImpactDto> ImpactAsync(
+        IReadOnlyCollection<Guid> buildingIds, LedgerSourceType sourceType, IReadOnlyCollection<Guid> sourceIds, CancellationToken ct)
+    {
+        if (buildingIds.Count == 0 || sourceIds.Count == 0) return new JournalImpactDto();
+
+        var type = (int)sourceType;
+        var entries = await dbContext.JournalEntries.AsNoTracking()
+            .Where(x => !x.IsDeleted && buildingIds.Contains(x.BuildingId) && x.Kind == JournalEntryKind.Auto
+                        && x.SourceType == type && x.SourceId != null && sourceIds.Contains(x.SourceId.Value))
+            .Select(x => new { x.Id, x.FiscalYear, x.Number })
+            .ToListAsync(ct);
+        if (entries.Count == 0) return new JournalImpactDto();
+
+        var ids = entries.Select(e => e.Id).ToList();
+        var reversed = (await dbContext.JournalEntries.AsNoTracking()
+                .Where(x => x.ReversesEntryId != null && ids.Contains(x.ReversesEntryId.Value))
+                .Select(x => x.ReversesEntryId!.Value).ToListAsync(ct))
+            .ToHashSet();
+        var active = entries.Where(e => !reversed.Contains(e.Id)).OrderBy(e => e.FiscalYear).ThenBy(e => e.Number).ToList();
+
+        return new JournalImpactDto
+        {
+            Posted = active.Count > 0,
+            PostedCount = active.Count,
+            Labels = active.Take(5).Select(e => LabelOf(e.FiscalYear, e.Number)).ToList()
+        };
+    }
 
     // ─── Lectura del Libro Diario ─────────────────────────────────────────────
 

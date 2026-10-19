@@ -247,6 +247,8 @@ public class JournalPreviewDto
     // Asientos ya asentados que cambiaron y se corrigen al asentar (contraasiento + asiento nuevo), y cuantos asientos nuevos eso crea.
     public IReadOnlyList<JournalDifferenceDto> Differences { get; set; } = [];
     public int CorrectionEntryCount { get; set; }
+    // Periodos en borrador con gastos o ingresos en lo que se asentaria: mientras esten en borrador pueden cambiar, asi que no se asienta.
+    public IReadOnlyList<string> DraftPeriods { get; set; } = [];
     // Hay algo para asentar y todos los asientos estan completos.
     public bool CanPost { get; set; }
 }
@@ -282,6 +284,10 @@ public enum JournalDifferenceKind
 public class JournalDifferenceDto
 {
     public JournalDifferenceKind Kind { get; set; }
+    public LedgerSourceType SourceType { get; set; }
+    // Que paso, en palabras («Pago revertido», «Gasto modificado»…), y el motivo si el sistema lo guardo (reversa de un pago, nota anulada).
+    public string Cause { get; set; } = string.Empty;
+    public string? Reason { get; set; }
     // Asiento asentado que se corrige (nulo si el movimiento nunca se asento).
     public Guid? EntryId { get; set; }
     public string? EntryLabel { get; set; }
@@ -305,4 +311,14 @@ public class JournalDifferencesDto
     public int RemovedCount { get; set; }
     public int IncompleteCount { get; set; }
     public IReadOnlyList<string> Pending { get; set; } = [];
+}
+
+/// <summary>Cuantos asientos asentados (y vigentes) toca un hecho que se esta por hacer: revertir un pago o deshacer la publicacion de un periodo.</summary>
+public class JournalImpactDto
+{
+    public bool Posted { get; set; }
+    public int PostedCount { get; set; }
+    // Numeros de los primeros asientos afectados (hasta cinco).
+    public IReadOnlyList<string> Labels { get; set; } = [];
+    public DateOnly? PostedThrough { get; set; }
 }

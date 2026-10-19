@@ -150,6 +150,12 @@ Cada paso es independiente, compila y se prueba solo. Las fases 1 a 3 cubren H1,
 - **Web:** aviso y tabla de «asientos que cambiaron desde que se asentaron» (qué pasó, fecha de operación, asiento, importe antes y ahora); la vista previa suma las correcciones; las tarjetas muestran «Anulado por el N° …», «Contraasiento del N° …» y la fecha de operación cuando difiere.
 - **Pruebas:** 23 nuevas (`JournalCorrectionsTests`, con 3 de punta a punta en SQL Server: corrección con el libro real, cierre de mes bloqueado y triggers). Suite completa con SQL Server: 1224 pasan, 0 omitidas.
 
+**Ajustes a la Fase 2 (2026-10-19, tras la revisión del flujo real):** en el sistema los gastos e ingresos solo se editan con el período en borrador y los pagos se pueden revertir aunque el período esté publicado, así que:
+1. **No se asientan gastos ni ingresos de períodos en borrador** (todavía se pueden editar): el asentado se frena con el aviso de cuáles períodos (la vista previa también), y se asienta recién al publicar o eligiendo una fecha anterior. Los cobros no dependen del período. Orden de trabajo: calcular → aprobar → publicar → asentar → cerrar el mes.
+2. **Aviso antes de revertir un pago, deshacer la publicación de un período o deshacer el pago de un gasto** ya asentado (`GET api/finance/journal/impact`; componente `journal-impact-notice` y confirmación en «Gastos a pagar»): dice los números de asiento y que se va a generar un contraasiento. Solo informa, nunca bloquea.
+3. **Causa y motivo en cada corrección:** la tabla de diferencias dice «Pago revertido», «Gasto modificado», etc., y la glosa del contraasiento lleva la causa y el motivo que dejó quien revirtió el pago o anuló la nota de crédito.
+4. **Pruebas:** 22 nuevas (`JournalGuardsTests`); suite completa con SQL Server: 1246 pasan, 0 omitidas.
+
 **Límites que quedan:** no hay Libro Diario imprimible con folios ni Excel de lo asentado (Fase 3); no hay asiento de apertura, de transferencias ni de cierre (Fase 4); no se exige que el mes esté asentado para cerrarlo.
 
 **Diseño original (referencia):**

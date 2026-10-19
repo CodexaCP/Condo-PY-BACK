@@ -468,6 +468,8 @@ public class JournalPostingTests
     private static async Task<FinancialAccount> Seed(FinanceEnv env, bool assign = true)
     {
         var bank = env.Setup();
+        env.T.Db.ExpensePeriods.Single(x => x.Id == env.Period.Id).Status = ExpensePeriodStatus.Published;   // los de borrador no se asientan
+        env.T.Db.SaveChanges();
         env.SeedTemplate();
         env.AddIncome(null, 1_000_000m, FinanceEnv.Yesterday.AddDays(-10));
         var expense = env.AddExpense(null, 110_000m, BuildingExpenseCategory.Other, FinanceEnv.Yesterday.AddDays(-6));
