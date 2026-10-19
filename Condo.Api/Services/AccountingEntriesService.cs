@@ -250,7 +250,8 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             FinancialNames = ctx.Accounts.ToDictionary(a => a.Id, a => a.Name),
             VatCredit = vatCredit,
             RubroPlan = key => ctx.CategoryFor(key) is { } c ? ToPlan(c) : null,
-            RubroLabel = key => ctx.CategoryFor(key) is { } c ? $"{c.Code} {c.Name}" : key,
+            // Sin cuenta en el plan, el nombre que ya usa el libro («Aportes extraordinarios (sin rubro)») y no la clave interna.
+            RubroLabel = key => ctx.CategoryFor(key) is { } c ? $"{c.Code} {c.Name}" : FinanceChartTemplate.FallbackName(key),
             VatRates = await VatRatesAsync(rows, ct)
         };
 
