@@ -1,4 +1,5 @@
 using Condo.Domain.Common;
+using Condo.Domain.Enums;
 
 namespace Condo.Domain.Entities;
 
@@ -17,8 +18,12 @@ public class JournalEntryLine : BaseEntity
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
 
-    // Financial (banco, caja o fondo), Rubro (ingreso o gasto) o VatCredit.
+    // Financial (banco, caja o fondo), Rubro (ingreso o gasto), VatCredit o Equity.
     public string Kind { get; set; } = string.Empty;
+
+    // Clase de la cuenta del plan al asentar (Asset, Liability, Fund, Income o Expense). Nula en lo asentado antes de guardarla: se deduce de
+    // LedgerCategoryId o del codigo. Sirve para el cierre del ejercicio y los estados.
+    public LedgerCategoryType? AccountType { get; set; }
 
     public JournalEntry? Entry { get; set; }
 }

@@ -41,6 +41,12 @@ public class AccountingRolesDto
     public string? VatCreditCode { get; set; }
     public string? VatCreditName { get; set; }
     public Guid? SuggestedVatCreditCategoryId { get; set; }
+    // Contrapartida de la apertura (saldos iniciales) y cuenta del resultado del ejercicio: la asignada al edificio y la que rige por defecto
+    // cuando no hay ninguna asignada (3.2.01 «Resultados acumulados» y 3.2.02 «Resultado del periodo» del plan generico).
+    public Guid? OpeningEquityCategoryId { get; set; }
+    public Guid? DefaultOpeningEquityCategoryId { get; set; }
+    public Guid? PeriodResultCategoryId { get; set; }
+    public Guid? DefaultPeriodResultCategoryId { get; set; }
     public IReadOnlyList<AccountingPlanOptionDto> Options { get; set; } = [];
     // Todas las cuentas financieras activas y el IVA credito tienen su cuenta del plan.
     public bool IsComplete { get; set; }
@@ -60,6 +66,11 @@ public class UpdateAccountingRolesRequest
     // Se aplica solo cuando viene SetVatCredit: nula = quitar la asignacion.
     public bool SetVatCredit { get; set; }
     public Guid? VatCreditCategoryId { get; set; }
+    // Se aplican solo cuando vienen sus Set*: nula = volver a la cuenta por defecto. Deben ser cuentas finales de fondos.
+    public bool SetOpeningEquity { get; set; }
+    public Guid? OpeningEquityCategoryId { get; set; }
+    public bool SetPeriodResult { get; set; }
+    public Guid? PeriodResultCategoryId { get; set; }
 }
 
 public class AccountingLineDto
@@ -71,8 +82,10 @@ public class AccountingLineDto
     public string Name { get; set; } = string.Empty;
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
-    // Financial (banco, caja o fondo), Rubro (ingreso o gasto) o VatCredit.
+    // Financial (banco, caja o fondo), Rubro (ingreso o gasto), VatCredit o Equity (contrapartida de la apertura).
     public string Kind { get; set; } = string.Empty;
+    // Clase de la cuenta del plan (activo, pasivo, fondos, ingresos o gastos); nula si falta la cuenta.
+    public LedgerCategoryType? AccountType { get; set; }
     public bool Missing { get; set; }
 }
 

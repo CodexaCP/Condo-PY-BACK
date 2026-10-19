@@ -1230,6 +1230,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<JournalEntryLine>().Property(x => x.ExternalCode).HasMaxLength(50);
         modelBuilder.Entity<JournalEntryLine>().Property(x => x.Name).HasMaxLength(300);
         modelBuilder.Entity<JournalEntryLine>().Property(x => x.Kind).HasMaxLength(20);
+        modelBuilder.Entity<JournalEntryLine>().Property(x => x.AccountType).HasConversion<string>().HasMaxLength(20);
         modelBuilder.Entity<JournalEntryLine>().Property(x => x.Debit).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<JournalEntryLine>().Property(x => x.Credit).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<JournalEntryLine>().HasIndex(x => new { x.EntryId, x.LineNo }).IsUnique();

@@ -77,6 +77,32 @@ public class FinanceJournalBooksController(
             FinanceExcelExporter.FileName("sumas-y-saldos", ctx!.BuildingName, $"{balance.FiscalYear}"));
     }
 
+    // ─── Balance general y estado de resultados ───────────────────────────────
+
+    [HttpGet("statements")]
+    public async Task<ActionResult<JournalStatementsDto>> Statements(
+        [FromQuery] Guid buildingId, [FromQuery] int? fiscalYear, [FromQuery] DateOnly? asOf, CancellationToken cancellationToken)
+    {
+        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
+        if (denied is not null) return denied;
+
+        return Ok(await books.StatementsAsync(ctx!, fiscalYear, asOf, cancellationToken));
+    }
+
+    [HttpGet("statements/export")]
+    public async Task<IActionResult> ExportStatements(
+        [FromQuery] Guid buildingId, [FromQuery] int? fiscalYear, [FromQuery] DateOnly? asOf, CancellationToken cancellationToken)
+    {
+        var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
+        if (denied is not null) return denied;
+
+        var statements = await books.StatementsAsync(ctx!, fiscalYear, asOf, cancellationToken);
+        using var workbook = new XLWorkbook();
+        FinanceExcelExporter.AddJournalStatements(workbook, statements);
+        return File(FinanceExcelExporter.Save(workbook), FinanceExcelExporter.ContentType,
+            FinanceExcelExporter.FileName("balance-y-resultados", ctx!.BuildingName, $"{statements.FiscalYear}"));
+    }
+
     // ─── Libro Diario imprimible ──────────────────────────────────────────────
 
     [HttpGet("book/pdf")]

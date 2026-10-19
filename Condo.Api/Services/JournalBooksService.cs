@@ -2,6 +2,7 @@ using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Application.Services;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Condo.Api.Services;
@@ -100,6 +101,27 @@ public class JournalBooksService(ICondoDbContext dbContext, AccountingBooksServi
             IsBalanced = balanced,
             Difference = difference
         };
+    }
+
+    // ─── Estados: balance general y estado de resultados ──────────────────────
+
+    /// <summary>Plan de cuentas del edificio por id (la clase de cada cuenta, para los renglones asentados antes de guardarla).</summary>
+    public static Dictionary<Guid, LedgerCategoryType> PlanTypes(LedgerContext ctx) =>
+        ctx.Categories.ToDictionary(c => c.Id, c => c.Type);
+
+    public async Task<JournalStatementsDto> StatementsAsync(LedgerContext ctx, int? fiscalYear, DateOnly? asOf, CancellationToken ct)
+    {
+        var (year, start, end, years) = await PeriodAsync(ctx, fiscalYear, ct);
+        var date = asOf.HasValue && asOf.Value < end ? asOf.Value : end;
+        if (date < start) date = start;
+
+        var lines = await LinesAsync(ctx.BuildingId, date, ct);
+        var statements = JournalStatementsCalculator.Build(lines, PlanTypes(ctx), start, date);
+        statements.BuildingId = ctx.BuildingId;
+        statements.BuildingName = ctx.BuildingName;
+        statements.FiscalYear = year;
+        statements.FiscalYears = years;
+        return statements;
     }
 
     // ─── Libro Diario imprimible ──────────────────────────────────────────────

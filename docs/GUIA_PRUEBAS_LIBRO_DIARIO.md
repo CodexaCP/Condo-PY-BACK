@@ -3,7 +3,7 @@
 Para probar a mano lo hecho el 2026-10-19: **Libros contables** (Centro de configuración), **Libro diario** con número de asiento real (Fase 1) y
 **correcciones con contraasiento** (Fase 2). Plan y decisiones en `PLAN_ALINEACION_ASIENTOS_CONTABLES_PY.md`. Marcá cada casilla `[ ]` a medida que lo verificás.
 
-Lo que ya comprueban las pruebas automáticas (1268 en total, 0 errores, incluidas las de SQL Server real): numeración sin huecos, todo o nada, detección
+Lo que ya comprueban las pruebas automáticas (1293 en total, 0 errores, incluidas las de SQL Server real): numeración sin huecos, todo o nada, detección
 de diferencias, contraasientos, bloqueo del cierre de mes y triggers de la base. Esta guía es para que veas **la pantalla** y confirmes que se entiende.
 
 ---
@@ -12,7 +12,7 @@ de diferencias, contraasientos, bloqueo del cierre de mes y triggers de la base.
 
 - **Lo asentado no se puede borrar ni editar, ni siquiera desde la base** (hay triggers). Probá en un **edificio de prueba**, no en uno real. Si después querés limpiar los datos de prueba, mirá la sección 12.
 - El backend **aplica solo las migraciones al arrancar** (`MigrateAsync`): reinicialo y, si usás un VPS, corré antes los tres `.sql` en este orden:
-  `20261019110927_AccountingBooks.sql` → `20261019120048_JournalEntries.sql` → `20261019125025_JournalReversals.sql`.
+  `20261019110927_AccountingBooks.sql` → `20261019120048_JournalEntries.sql` → `20261019125025_JournalReversals.sql` → `20261019152854_JournalAccountTypes.sql`.
 - Entrá como **SuperAdmin** o **Administrador de empresa** (los únicos que asientan). Más abajo hay un caso con **Operador**.
 - El edificio necesita: Finanzas habilitado, configuración inicial completa, y en **Asientos contables → Cuentas del plan** todas las cuentas financieras y el IVA crédito asignados (si no, no se puede asentar: caso 6).
 - Ese edificio tiene que tener movimientos: cobros de propietarios, gastos e ingresos propios con fecha **desde la fecha de arranque hasta ayer**.
@@ -127,6 +127,30 @@ Con el Libro diario ya asentado (al menos algunos asientos):
 - [ ] **Sumas y saldos:** columnas Saldo inicial, Sumas del período y Saldo final, cada una en **Deudor / Acreedor**, con totales. Arriba dice **«El balance cuadra…»**. Si alguna vez dijera «NO cuadra», avisá: indica un asiento descuadrado.
 - [ ] Cambiá de **ejercicio** en el selector (si hay más de uno asentado): las tres pestañas siguen al ejercicio elegido.
 - [ ] Recordá lo que **todavía no está**: sin asiento de apertura, el saldo del banco acá **no coincide con el saldo real**; sin asiento de cierre, las cuentas de resultado arrastran su saldo al ejercicio siguiente (la pantalla lo dice).
+
+## 7d. Apertura, cierre del ejercicio y balance general (Fase 4)
+
+**Apertura (saldos iniciales):**
+- [ ] En **Cuentas del plan** aparecen dos filas nuevas: **«Contrapartida de la apertura»** y **«Resultado del ejercicio»**, con «Por defecto: 3.2.01 Resultados acumulados» y «Por defecto: 3.2.02 Resultado del período». Elegí otra cuenta de fondos, guardá, y volvé a «Por defecto»: se guarda y queda en el historial.
+- [ ] Con saldos iniciales cargados en las cuentas financieras (banco, caja o fondo): en **Asientos sugeridos**, el primer asiento es la **Apertura** (etiqueta azul): Debe cada cuenta con saldo, Haber 3.2.01 por la suma.
+- [ ] En un edificio **sin asentar nada**, «Asentar» incluye la apertura como **primer asiento** (N° 2026-000001, etiqueta «Apertura»). Después el **Libro mayor** del banco arranca con su saldo inicial y **coincide con el saldo real**.
+- [ ] Si cambiás un saldo inicial **después** de asentar, el Libro diario avisa **«Saldos iniciales modificados»** y se corrige con contraasiento.
+
+**Cierre del ejercicio:**
+- [ ] Pestaña **«Cierre del ejercicio»**: estado (abierto o cerrado), ingresos, gastos, superávit o déficit, y la lista de cuentas que se saldan. Si no se puede cerrar, dice **por qué** (ejercicio en curso, falta asentar hasta el último día, hay diferencias, falta cerrar el ejercicio anterior…).
+- [ ] Con el ejercicio terminado y asentado: **Cerrar el ejercicio** → confirmás → aviso con los 2 números de asiento. En el Libro diario aparecen con la etiqueta **«Cierre del ejercicio»**, fechados el 31/12: (1) ingresos Debe, gastos Haber, resultado Haber; (2) resultado Debe, 3.2.01 Haber.
+- [ ] En **Sumas y saldos** del ejercicio cerrado: las cuentas de ingresos y gastos quedan en **cero**; y el **ejercicio siguiente** arranca con ellas en cero y el saldo del banco arrastrado.
+- [ ] **Reabrir** (solo si el siguiente no está cerrado): pide motivo, genera **contraasientos** de los dos asientos de cierre; el ejercicio vuelve a «abierto» y se puede cerrar de nuevo.
+
+**Balance general:**
+- [ ] Pestaña **«Balance general»**: a la izquierda activo, pasivo y patrimonio y fondos con totales; a la derecha el estado de resultados del ejercicio. Arriba dice **«El balance cuadra…»**.
+- [ ] Con el ejercicio **sin cerrar** aparece la línea **«Resultado del ejercicio (todavía sin cerrar)»** dentro del patrimonio; con el ejercicio **cerrado** ese resultado ya está en «Resultados acumulados» y el estado de resultados **sigue mostrando** los ingresos y gastos del año.
+- [ ] **Excel (balance y resultados):** dos hojas.
+
+**Cierre de mes:**
+- [ ] Con el Libro diario en uso, **cerrar el mes** pide que esté **asentado hasta su último día**; si no, avisa «Antes de cerrar … asentá el Libro diario hasta el …». Después de asentar, cierra.
+
+**Todavía no está:** las **transferencias entre cuentas propias** (no existen en el sistema), el asiento de cierre y apertura de las cuentas de balance, el asiento manual de ajuste y el devengado.
 
 ## 8. Cierre de mes
 

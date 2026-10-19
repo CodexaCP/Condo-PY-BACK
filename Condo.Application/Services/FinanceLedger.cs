@@ -14,7 +14,9 @@ public enum LedgerSourceType
     BuildingExpense = 2,
     BuildingIncome = 3,
     // Nota de credito del proveedor sobre un gasto de un periodo ya publicado (movimiento negativo con la fecha de la nota).
-    SupplierCreditNote = 4
+    SupplierCreditNote = 4,
+    // Asiento de apertura: los saldos iniciales de las cuentas financieras a la fecha de arranque (un asiento por edificio; su origen es el edificio).
+    OpeningBalance = 5
 }
 
 public enum LedgerDirection

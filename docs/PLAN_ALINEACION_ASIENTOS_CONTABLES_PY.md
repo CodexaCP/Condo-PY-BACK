@@ -190,6 +190,25 @@ Cada paso es independiente, compila y se prueba solo. Las fases 1 a 3 cubren H1,
 - **3.6 Glosa sin corte** (campo `nvarchar(max)` o 1000) y con datos del respaldo.
 - **Aceptación:** el Diario del ejercicio tiene números consecutivos, el total Debe = total Haber, y los saldos del Mayor coinciden con el libro de Finanzas.
 
+### Fase 4 — HECHA 2026-10-19 (sin commit ni deploy; una migración)
+
+**Qué quedó (difiere en detalles del diseño de abajo):**
+- **Asiento de apertura:** un asiento por edificio con los saldos iniciales de las cuentas financieras (Debe cada cuenta con saldo, Haber la contrapartida; un saldo negativo va al Haber). La contrapartida es **3.2.01 «Resultados acumulados» por defecto y se puede cambiar por edificio** (Cuentas del plan → «Contrapartida de la apertura»; rol `OpeningEquity`). Entra en los sugeridos y en el primer asentado (primer asiento del ejercicio, `Kind=Opening`, fecha = arranque de Finanzas); si se olvidó, se asienta después como «Asiento de apertura sin asentar», y si los saldos iniciales cambian se corrige con contraasiento (mismo mecanismo de diferencias).
+- **Cierre del ejercicio** (`GET/POST api/finance/journal/closing`, `close`, `reopen`): dos asientos fechados el último día del ejercicio: (1) ingresos y gastos contra **«Resultado del período» (3.2.02 por defecto, rol `PeriodResult`, cambiable por edificio)** y (2) ese resultado contra Resultados acumulados. Solo cierran SuperAdmin y Administrador. Se cierra un ejercicio **terminado, asentado hasta su último día, sin diferencias pendientes y en orden** (el anterior primero); la pantalla dice qué falta. **Reabrir** (con motivo) anula los cierres con contraasientos; no se reabre uno si el siguiente está cerrado. El estado «cerrado» se deduce de los asientos de cierre vigentes.
+- **Estados** (`GET journal/statements`, `statements/export`): balance general a una fecha y estado de resultados del ejercicio (sin contar los asientos de cierre). Con el ejercicio sin cerrar, el resultado que sigue en ingresos y gastos se suma al patrimonio para que cuadre; con renglones de clase desconocida se avisa y no se da por cuadrado.
+- **Cierre de mes:** con el Libro Diario en uso, el mes tiene que estar asentado hasta su último día (409 `journal_not_posted`): se asienta y después se cierra.
+- **Migración** `20261019152854_JournalAccountTypes` + `.sql` (columna `JournalEntryLines.AccountType`, la clase de la cuenta al asentar; en lo asentado antes se deduce del id de la cuenta o del primer dígito del código).
+- **Web:** pestañas «Balance general» y «Cierre del ejercicio», las dos filas nuevas en «Cuentas del plan» y las etiquetas «Apertura» y «Cierre del ejercicio» en los asientos.
+- **Pruebas:** 25 nuevas (`JournalOpeningTests`, `FiscalYearClosingTests`); suite completa con SQL Server: 1293 pasan, 0 omitidas.
+
+**Decisiones y límites:**
+- **No hay asiento de apertura de cada ejercicio nuevo:** el Mayor y las sumas y saldos arrastran el saldo inicial de todo lo asentado antes (con el cierre, las cuentas de resultado arrancan en cero). Si el contador quiere el asiento de cierre/apertura de las cuentas de balance, se agrega después.
+- **Transferencias entre cuentas propias: NO se hicieron.** En el sistema no existen (no hay movimiento de «transferencia» en Finanzas), así que no hay nada que asentar. Hacerlas es una función nueva de Finanzas (alta, saldos por cuenta, libro) y queda como decisión aparte; mientras tanto se resolverían con el asiento manual de ajuste (Fase 6).
+- Las correcciones (contraasientos) se fechan el día de asentado, así que un error de un ejercicio cerrado se corrige en el ejercicio en curso; reabrir el cierre sirve para rehacer el cierre, no para meter movimientos al ejercicio cerrado.
+- El balance general no distingue corriente de no corriente ni agrupa por rubros: lista las cuentas por clase (activo, pasivo, patrimonio y fondos).
+
+**Diseño original (referencia):**
+
 ### Fase 4 — Apertura, transferencias y cierre (backend)
 - **4.1 Asiento de apertura** por edificio a la fecha de arranque: Debe cuentas financieras con su `OpeningBalance`, Haber patrimonio / saldo inicial. Primer asiento del ejercicio (`Kind=Opening`).
 - **4.2 Transferencias entre cuentas propias** (banco ↔ caja ↔ fondo): asiento propio. Hoy fuera de alcance.

@@ -441,6 +441,82 @@ public static class FinanceExcelExporter
         Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [12, 36, 12, 14, 60, 16, 16, 18], filter: false);
     }
 
+    /// <summary>Balance general (situacion patrimonial) a una fecha y estado de resultados del ejercicio, en dos hojas (Ley 1034/83, arts. 82-83).</summary>
+    public static void AddJournalStatements(XLWorkbook wb, JournalStatementsDto s)
+    {
+        var ws = Sheet(wb, "Balance general", $"Balance general — {s.BuildingName}",
+            $"Al {s.AsOf:dd/MM/yyyy}. Sale de lo asentado en el Libro Diario. Importes en guaraníes.");
+        Header(ws, 4, "Código", "Cuenta", "Importe");
+        var row = 5;
+
+        void Section(string title, IReadOnlyList<StatementAccountDto> accounts, decimal total)
+        {
+            ws.Cell(row, 2).Value = title;
+            ws.Range(row, 1, row, 3).Style.Font.SetBold().Fill.SetBackgroundColor(XLColor.FromHtml("#e8f4f8"));
+            row++;
+            foreach (var a in accounts)
+            {
+                ws.Cell(row, 1).Value = a.Code;
+                ws.Cell(row, 2).Value = a.Name;
+                Amount(ws, row, 3, a.Amount);
+                row++;
+            }
+
+            ws.Cell(row, 2).Value = $"Total {title.ToLowerInvariant()}";
+            Amount(ws, row, 3, total);
+            ws.Range(row, 1, row, 3).Style.Font.SetBold();
+            ws.Range(row, 1, row, 3).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            row += 2;
+        }
+
+        Section("Activo", s.Assets, s.TotalAssets);
+        Section("Pasivo", s.Liabilities, s.TotalLiabilities);
+        Section("Patrimonio y fondos", s.Equity, s.TotalEquity);
+        if (s.PendingResult != 0m)
+        {
+            ws.Cell(row, 2).Value = "Resultado del ejercicio (todavía sin cerrar)";
+            Amount(ws, row, 3, s.PendingResult);
+            row += 2;
+        }
+
+        ws.Cell(row, 2).Value = s.IsBalanced
+            ? "El balance cuadra: activo = pasivo + patrimonio y fondos + resultado."
+            : $"Atención: el balance NO cuadra (diferencia Gs. {s.Difference:N0}).";
+        if (!s.IsBalanced) ws.Cell(row, 2).Style.Font.SetFontColor(XLColor.Red);
+        Finish(ws, 4, Math.Max(row - 1, 4), 3, [12, 54, 20], filter: false);
+
+        var rs = Sheet(wb, "Estado de resultados", $"Estado de resultados — {s.BuildingName}",
+            $"Ejercicio {s.FiscalYear}, del {s.From:dd/MM/yyyy} al {s.AsOf:dd/MM/yyyy}. No cuenta los asientos de cierre. Importes en guaraníes.");
+        Header(rs, 4, "Código", "Cuenta", "Importe");
+        var r2 = 5;
+        void Results(string title, IReadOnlyList<StatementAccountDto> accounts, decimal total)
+        {
+            rs.Cell(r2, 2).Value = title;
+            rs.Range(r2, 1, r2, 3).Style.Font.SetBold().Fill.SetBackgroundColor(XLColor.FromHtml("#e8f4f8"));
+            r2++;
+            foreach (var a in accounts)
+            {
+                rs.Cell(r2, 1).Value = a.Code;
+                rs.Cell(r2, 2).Value = a.Name;
+                Amount(rs, r2, 3, a.Amount);
+                r2++;
+            }
+
+            rs.Cell(r2, 2).Value = $"Total {title.ToLowerInvariant()}";
+            Amount(rs, r2, 3, total);
+            rs.Range(r2, 1, r2, 3).Style.Font.SetBold();
+            rs.Range(r2, 1, r2, 3).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            r2 += 2;
+        }
+
+        Results("Ingresos", s.Income, s.TotalIncome);
+        Results("Gastos", s.Expenses, s.TotalExpenses);
+        rs.Cell(r2, 2).Value = s.Result >= 0m ? "Superávit del ejercicio" : "Déficit del ejercicio";
+        Amount(rs, r2, 3, s.Result);
+        rs.Range(r2, 1, r2, 3).Style.Font.SetBold();
+        Finish(rs, 4, Math.Max(r2 - 1, 4), 3, [12, 54, 20], filter: false);
+    }
+
     /// <summary>Balance de sumas y saldos: por cuenta, saldo inicial, sumas del periodo y saldo final (deudor y acreedor), y si cuadra.</summary>
     public static void AddJournalTrialBalance(XLWorkbook wb, JournalTrialBalanceDto balance)
     {

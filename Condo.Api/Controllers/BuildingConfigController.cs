@@ -352,6 +352,17 @@ public class BuildingConfigController(
         // Con el Libro Diario en uso no se cierra un mes mientras haya asientos asentados que cambiaron: primero se corrigen (contraasiento).
         if (settings.JournalPostedThrough.HasValue)
         {
+            // Con el Libro Diario en uso, el mes tiene que estar asentado por completo: se asienta, despues se cierra.
+            var monthEnd = FinancePeriods.EndOfMonth(year, month);
+            if (settings.JournalPostedThrough.Value < monthEnd)
+            {
+                return Conflict(new
+                {
+                    error = "journal_not_posted",
+                    message = $"Antes de cerrar {month:00}/{year} asentá el Libro diario hasta el {monthEnd:dd/MM/yyyy}: primero se asienta y después se cierra el mes."
+                });
+            }
+
             var ledger = new FinanceLedgerService(dbContext);
             var ledgerContext = await ledger.LoadContextAsync(buildingId, cancellationToken);
             if (ledgerContext is not null)

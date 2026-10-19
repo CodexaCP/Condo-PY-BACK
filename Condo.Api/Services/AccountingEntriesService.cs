@@ -32,7 +32,29 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             .ToList();
     }
 
-    private static AccountingPlanAccount ToPlan(LedgerCategory c) => new(c.Id, c.Code, c.ExternalCode, c.Name);
+    private static AccountingPlanAccount ToPlan(LedgerCategory c) => new(c.Id, c.Code, c.ExternalCode, c.Name, c.Type);
+
+    // Cuenta final de fondos que rige cuando la contrapartida no se asigno: por codigo del plan generico o por nombre.
+    private static LedgerCategory? DefaultFund(LedgerContext ctx, string code, string nameFragment)
+    {
+        var candidates = Candidates(ctx).Where(c => c.Type == LedgerCategoryType.Fund).ToList();
+        return candidates.FirstOrDefault(c => c.Code == code)
+               ?? candidates.FirstOrDefault(c => c.Name.Contains(nameFragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Cuenta del plan de una contrapartida de fondos: la asignada al edificio o, si no hay, la por defecto («Resultados acumulados» 3.2.01 para la apertura;
+    /// «Resultado del periodo» 3.2.02 para el cierre). Nula si el plan no tiene ninguna.
+    /// </summary>
+    public static LedgerCategory? EquityAccount(LedgerContext ctx, IEnumerable<LedgerAccountRole> roles, LedgerAccountRoleKind kind)
+    {
+        var assigned = roles.FirstOrDefault(r => r.Role == kind);
+        if (assigned is not null && ctx.ById.TryGetValue(assigned.LedgerCategoryId, out var chosen)) return chosen;
+
+        return kind == LedgerAccountRoleKind.OpeningEquity
+            ? DefaultFund(ctx, "3.2.01", "resultados acumulados")
+            : DefaultFund(ctx, "3.2.02", "resultado del per");
+    }
 
     // ─── Contrapartidas ───────────────────────────────────────────────────────
 
@@ -76,12 +98,23 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
                                                  && o.Name.Contains("cr", StringComparison.OrdinalIgnoreCase))
             : null;
 
+        var equityRole = roles.FirstOrDefault(r => r.Role == LedgerAccountRoleKind.OpeningEquity);
+        var resultRole = roles.FirstOrDefault(r => r.Role == LedgerAccountRoleKind.PeriodResult);
+        var equityDefault = DefaultFund(ctx, "3.2.01", "resultados acumulados");
+        var resultDefault = DefaultFund(ctx, "3.2.02", "resultado del per");
+        var equityAssigned = equityRole is not null && byId.TryGetValue(equityRole.LedgerCategoryId, out var eq) ? eq : null;
+        var resultAssigned = resultRole is not null && byId.TryGetValue(resultRole.LedgerCategoryId, out var rs) ? rs : null;
+
         var parentsById = byId;
         return new AccountingRolesDto
         {
             BuildingId = ctx.BuildingId,
             CanEdit = canEdit,
             Accounts = accounts,
+            OpeningEquityCategoryId = equityAssigned?.Id,
+            DefaultOpeningEquityCategoryId = equityDefault?.Id,
+            PeriodResultCategoryId = resultAssigned?.Id,
+            DefaultPeriodResultCategoryId = resultDefault?.Id,
             VatCreditCategoryId = vatCategory?.Id,
             VatCreditCode = vatCategory?.Code,
             VatCreditName = vatCategory?.Name,
@@ -136,6 +169,18 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             }
         }
 
+        foreach (var (set, id, label) in new[]
+                 {
+                     (request.SetOpeningEquity, request.OpeningEquityCategoryId, "La contrapartida de la apertura"),
+                     (request.SetPeriodResult, request.PeriodResultCategoryId, "La cuenta del resultado del ejercicio")
+                 })
+        {
+            if (set && id.HasValue && (!candidates.TryGetValue(id.Value, out var fund) || fund.Type != LedgerCategoryType.Fund))
+            {
+                return (null, $"{label} debe ser una cuenta final de fondos o patrimonio del plan.");
+            }
+        }
+
         var existing = await dbContext.LedgerAccountRoles
             .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
             .ToListAsync(ct);
@@ -179,6 +224,16 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
         if (request.SetVatCredit)
         {
             Apply(LedgerAccountRoleKind.VatCredit, null, request.VatCreditCategoryId, "vatCredit", "Cuenta del IVA crédito fiscal");
+        }
+
+        if (request.SetOpeningEquity)
+        {
+            Apply(LedgerAccountRoleKind.OpeningEquity, null, request.OpeningEquityCategoryId, "openingEquity", "Contrapartida de la apertura (saldos iniciales)");
+        }
+
+        if (request.SetPeriodResult)
+        {
+            Apply(LedgerAccountRoleKind.PeriodResult, null, request.PeriodResultCategoryId, "periodResult", "Cuenta del resultado del ejercicio");
         }
 
         if (changes.Count > 0)
@@ -244,10 +299,20 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
         var vatRole = roles.FirstOrDefault(r => r.Role == LedgerAccountRoleKind.VatCredit);
         if (vatRole is not null && ctx.ById.TryGetValue(vatRole.LedgerCategoryId, out var vatCategory)) vatCredit = ToPlan(vatCategory);
 
+        // El asiento de apertura entra solo si el rango incluye la fecha de arranque; su contrapartida es la asignada o «Resultados acumulados».
+        AccountingOpeningInput? opening = null;
+        if (start <= ctx.StartDate && ctx.StartDate <= end && ctx.Accounts.Any(a => a.OpeningBalance != 0m))
+        {
+            var equity = EquityAccount(ctx, roles, LedgerAccountRoleKind.OpeningEquity);
+            opening = new AccountingOpeningInput(
+                ctx.StartDate, ctx.BuildingId, ctx.Accounts.Select(a => (a.Id, a.OpeningBalance)).ToList(), equity is null ? null : ToPlan(equity));
+        }
+
         var input = new AccountingBuildInput
         {
             FinancialPlan = financialPlan,
             FinancialNames = ctx.Accounts.ToDictionary(a => a.Id, a => a.Name),
+            Opening = opening,
             VatCredit = vatCredit,
             RubroPlan = key => ctx.CategoryFor(key) is { } c ? ToPlan(c) : null,
             // Sin cuenta en el plan, el nombre que ya usa el libro («Aportes extraordinarios (sin rubro)») y no la clave interna.

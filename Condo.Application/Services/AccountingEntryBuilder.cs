@@ -1,9 +1,14 @@
 using Condo.Application.Models;
+using Condo.Domain.Enums;
 
 namespace Condo.Application.Services;
 
-/// <summary>Una cuenta del plan de cuentas del edificio, tal como la necesita un asiento.</summary>
-public sealed record AccountingPlanAccount(Guid Id, string Code, string? ExternalCode, string Name);
+/// <summary>Una cuenta del plan de cuentas del edificio, tal como la necesita un asiento. <c>Type</c> es la clase de la cuenta (activo, ingresos, gastos…).</summary>
+public sealed record AccountingPlanAccount(Guid Id, string Code, string? ExternalCode, string Name, LedgerCategoryType? Type = null);
+
+/// <summary>Saldos iniciales de las cuentas financieras a la fecha de arranque de Finanzas: lo que el edificio ya tenia antes de usar el sistema.</summary>
+public sealed record AccountingOpeningInput(
+    DateOnly Date, Guid BuildingId, IReadOnlyList<(Guid AccountId, decimal Balance)> Balances, AccountingPlanAccount? Equity);
 
 public sealed class AccountingBuildInput
 {
@@ -17,6 +22,8 @@ public sealed class AccountingBuildInput
     public Func<string, string>? RubroLabel { get; init; }
     // Tasa de IVA de los gastos (y de las notas de credito, la del gasto que corrigen) por origen del renglon.
     public required IReadOnlyDictionary<(LedgerSourceType Type, Guid Id), decimal> VatRates { get; init; }
+    // Asiento de apertura (saldos iniciales): solo cuando el rango pedido incluye la fecha de arranque.
+    public AccountingOpeningInput? Opening { get; init; }
 }
 
 public sealed record AccountingBuildResult(
@@ -24,9 +31,10 @@ public sealed record AccountingBuildResult(
 
 /// <summary>
 /// Asientos sugeridos de la partida doble a partir de los renglones del libro (criterio percibido: un asiento por movimiento de caja, sin
-/// cuentas por cobrar ni por pagar). Un cobro o gasto que el libro parte en varios renglones de la misma cuenta es un solo asiento. Son
-/// sugeridos, no asentados: no cambian ningun saldo. Cada asiento cuadra por construccion (la contrapartida de cada renglon es lo que lo
-/// cierra), y si falta la cuenta del plan de algun renglon el asiento se marca incompleto en vez de inventar una cuenta.
+/// cuentas por cobrar ni por pagar) y, cuando el rango incluye la fecha de arranque, el asiento de apertura con los saldos iniciales. Un cobro
+/// o gasto que el libro parte en varios renglones de la misma cuenta es un solo asiento. Son sugeridos, no asentados: no cambian ningun saldo.
+/// Cada asiento cuadra por construccion (la contrapartida de cada renglon es lo que lo cierra), y si falta la cuenta del plan de algun renglon
+/// el asiento se marca incompleto en vez de inventar una cuenta.
 /// </summary>
 public static class AccountingEntryBuilder
 {
@@ -54,14 +62,11 @@ public static class AccountingEntryBuilder
         var totals = new Dictionary<string, AccountingTotalDto>();
         var pending = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
 
-        foreach (var group in groups)
+        // Arma el asiento de un conjunto de renglones y lo suma a la lista, a las sumas por cuenta y a los pendientes.
+        void Emit(
+            Dictionary<string, LineAcc> lines, DateOnly date, string description, string thirdParty, string reference,
+            LedgerSourceType type, Guid sourceId, Guid? accountId)
         {
-            var lines = new Dictionary<string, LineAcc>();
-            foreach (var row in group)
-            {
-                AddRow(lines, row, input);
-            }
-
             var dtoLines = lines.Values
                 .Where(l => l.Net != 0m)
                 .Select(l => new AccountingLineDto
@@ -73,6 +78,7 @@ public static class AccountingEntryBuilder
                     Debit = l.Net > 0 ? l.Net : 0m,
                     Credit = l.Net < 0 ? -l.Net : 0m,
                     Kind = l.Kind,
+                    AccountType = l.Plan?.Type,
                     Missing = l.Plan is null
                 })
                 .OrderByDescending(l => l.Debit > 0)
@@ -81,25 +87,22 @@ public static class AccountingEntryBuilder
                 .ToList();
             if (dtoLines.Count == 0)
             {
-                continue;
+                return;
             }
 
             var issues = dtoLines.Where(l => l.Missing).Select(l => $"Falta la cuenta del plan: {l.Name}.").Distinct().ToList();
             foreach (var line in dtoLines.Where(l => l.Missing)) pending.Add(line.Name);
 
-            var first = group.First();
-            var descriptions = group.Select(r => r.Description).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToList();
-            var description = string.Join(" · ", descriptions);
             entries.Add(new AccountingEntryDto
             {
                 Number = entries.Count + 1,
-                Date = group.Key.Date,
+                Date = date,
                 Description = description.Length > MaxDescriptionLength ? description[..MaxDescriptionLength] : description,
-                ThirdParty = group.Select(r => r.ThirdParty).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
-                Reference = group.Select(r => r.Reference).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
-                SourceType = first.SourceType,
-                SourceId = first.SourceId,
-                SourceAccountId = group.Key.AccountId,
+                ThirdParty = thirdParty,
+                Reference = reference,
+                SourceType = type,
+                SourceId = sourceId,
+                SourceAccountId = accountId,
                 Lines = dtoLines,
                 Debit = dtoLines.Sum(l => l.Debit),
                 Credit = dtoLines.Sum(l => l.Credit),
@@ -121,6 +124,43 @@ public static class AccountingEntryBuilder
                 total.Debit += line.Debit;
                 total.Credit += line.Credit;
             }
+        }
+
+        // El asiento de apertura va primero: es la fecha de arranque, anterior a cualquier movimiento.
+        if (input.Opening is { } opening)
+        {
+            var lines = new Dictionary<string, LineAcc>();
+            decimal sum = 0m;
+            foreach (var (accountId, balance) in opening.Balances.Where(b => b.Balance != 0m))
+            {
+                input.FinancialPlan.TryGetValue(accountId, out var plan);
+                var name = input.FinancialNames.TryGetValue(accountId, out var n) ? n : "cuenta financiera";
+                Add(lines, "Financial", plan, $"Cuenta financiera: {name}", balance);
+                sum += balance;
+            }
+
+            if (sum != 0m || lines.Count > 0)
+            {
+                Add(lines, "Equity", opening.Equity, "Contrapartida de la apertura (saldos iniciales)", -sum);
+                Emit(lines, opening.Date, $"Asiento de apertura: saldos iniciales al {opening.Date:dd/MM/yyyy}", string.Empty, string.Empty,
+                    LedgerSourceType.OpeningBalance, opening.BuildingId, null);
+            }
+        }
+
+        foreach (var group in groups)
+        {
+            var lines = new Dictionary<string, LineAcc>();
+            foreach (var row in group)
+            {
+                AddRow(lines, row, input);
+            }
+
+            var descriptions = group.Select(r => r.Description).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToList();
+            Emit(
+                lines, group.Key.Date, string.Join(" · ", descriptions),
+                group.Select(r => r.ThirdParty).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
+                group.Select(r => r.Reference).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
+                group.First().SourceType, group.First().SourceId, group.Key.AccountId);
         }
 
         return new AccountingBuildResult(

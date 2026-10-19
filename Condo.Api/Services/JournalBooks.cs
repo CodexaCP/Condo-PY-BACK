@@ -1,12 +1,14 @@
 using Condo.Application.Models;
 using Condo.Domain.Entities;
+using Condo.Domain.Enums;
 
 namespace Condo.Api.Services;
 
 /// <summary>Un renglon de un asiento asentado, aplanado con los datos de su asiento (lo que necesitan el Mayor y el balance).</summary>
 public sealed record BookLine(
     Guid EntryId, int FiscalYear, int Number, DateOnly Date, string Description, int LineNo,
-    string Code, string? ExternalCode, string Name, decimal Debit, decimal Credit)
+    string Code, string? ExternalCode, string Name, decimal Debit, decimal Credit,
+    Guid? LedgerCategoryId = null, LedgerCategoryType? AccountType = null, bool IsClosing = false)
 {
     public string Label => JournalPostingService.LabelOf(FiscalYear, Number);
 }
@@ -19,10 +21,23 @@ public sealed record BookLine(
 /// </summary>
 public static class JournalBooksCalculator
 {
-    public static List<BookLine> Flatten(IEnumerable<JournalEntry> entries) =>
-        entries.SelectMany(e => e.Lines.Select(l => new BookLine(
-                e.Id, e.FiscalYear, e.Number, e.Date, e.Description, l.LineNo, l.Code, l.ExternalCode, l.Name, l.Debit, l.Credit)))
+    /// <summary>
+    /// Aplana los asientos en renglones. Los del cierre del ejercicio (y sus contraasientos, si se reabrio) se marcan: el estado de resultados
+    /// no los cuenta, porque justamente saldan los ingresos y gastos del ejercicio.
+    /// </summary>
+    public static List<BookLine> Flatten(IEnumerable<JournalEntry> entries)
+    {
+        var all = entries.ToList();
+        var closingIds = all.Where(e => e.Kind == JournalEntryKind.Closing).Select(e => e.Id).ToHashSet();
+        return all.SelectMany(e =>
+            {
+                var closing = e.Kind == JournalEntryKind.Closing || (e.ReversesEntryId.HasValue && closingIds.Contains(e.ReversesEntryId.Value));
+                return e.Lines.Select(l => new BookLine(
+                    e.Id, e.FiscalYear, e.Number, e.Date, e.Description, l.LineNo, l.Code, l.ExternalCode, l.Name, l.Debit, l.Credit,
+                    l.LedgerCategoryId, l.AccountType, closing));
+            })
             .ToList();
+    }
 
     /// <summary>Cuentas con movimiento en el periodo o con saldo inicial, ordenadas por codigo. <paramref name="withMovements"/> agrega el detalle.</summary>
     public static List<JournalLedgerAccountDto> Ledger(

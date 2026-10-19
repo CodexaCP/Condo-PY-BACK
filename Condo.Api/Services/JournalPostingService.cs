@@ -78,7 +78,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         IReadOnlyList<AccountingEntryDto> current, IReadOnlyList<JournalEntry> posted, IReadOnlySet<Guid> reversedIds)
     {
         var groups = posted
-            .Where(e => e.Kind == JournalEntryKind.Auto && e.SourceType.HasValue && e.SourceId.HasValue)
+            .Where(e => (e.Kind == JournalEntryKind.Auto || e.Kind == JournalEntryKind.Opening) && e.SourceType.HasValue && e.SourceId.HasValue)
             .GroupBy(e => (e.SourceType!.Value, e.SourceId!.Value, e.OperationDate, e.SourceAccountId))
             .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.Revision).ToList());
         var currentByKey = current.ToDictionary(e => ((int)e.SourceType, e.SourceId, e.Date, e.SourceAccountId));
@@ -118,7 +118,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
 
         var built = await accounting.BuildAsync(ctx, ctx.StartDate, postedThrough.Value, ct);
         var posted = await dbContext.JournalEntries.AsNoTracking()
-            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId && x.Kind == JournalEntryKind.Auto && x.SourceType != null)
+            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId && (x.Kind == JournalEntryKind.Auto || x.Kind == JournalEntryKind.Opening) && x.SourceType != null)
             .ToListAsync(ct);
         var reversed = (await dbContext.JournalEntries.AsNoTracking()
                 .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId && x.ReversesEntryId != null)
@@ -150,6 +150,9 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
     /// <summary>Que paso con el movimiento, en palabras, segun su tipo y el tipo de diferencia.</summary>
     public static string CauseOf(JournalDifferenceKind kind, LedgerSourceType type) => (kind, type) switch
     {
+        (JournalDifferenceKind.Changed, LedgerSourceType.OpeningBalance) => "Saldos iniciales modificados",
+        (JournalDifferenceKind.Removed, LedgerSourceType.OpeningBalance) => "Saldos iniciales eliminados",
+        (JournalDifferenceKind.Missing, LedgerSourceType.OpeningBalance) => "Asiento de apertura sin asentar",
         (JournalDifferenceKind.Changed, LedgerSourceType.OwnerPayment) => "Pago modificado",
         (JournalDifferenceKind.Changed, LedgerSourceType.BuildingExpense) => "Gasto modificado",
         (JournalDifferenceKind.Changed, LedgerSourceType.BuildingIncome) => "Ingreso modificado",
@@ -368,34 +371,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             }
         }
 
-        var sequences = await dbContext.JournalSequences
-            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
-            .ToListAsync(ct);
-        var numbers = AllocateDates(rows.Select(r => r.Date).ToList(), ctx.FiscalYearStartMonth, sequences.ToDictionary(x => x.FiscalYear, x => x.LastNumber));
-        for (var i = 0; i < rows.Count; i++)
-        {
-            rows[i].FiscalYear = numbers[i].FiscalYear;
-            rows[i].Number = numbers[i].Number;
-            dbContext.JournalEntries.Add(rows[i]);
-        }
-
-        foreach (var group in numbers.GroupBy(x => x.FiscalYear))
-        {
-            var last = group.Max(x => x.Number);
-            var sequence = sequences.FirstOrDefault(x => x.FiscalYear == group.Key);
-            if (sequence is null)
-            {
-                dbContext.JournalSequences.Add(new JournalSequence
-                {
-                    CompanyId = companyId, BuildingId = ctx.BuildingId, FiscalYear = group.Key, LastNumber = last
-                });
-            }
-            else
-            {
-                sequence.LastNumber = last;
-                sequence.UpdatedAtUtc = now;
-            }
-        }
+        await AssignNumbersAsync(ctx, rows, companyId, now, ct);
 
         var before = settings.JournalPostedThrough;
         settings.JournalPostedThrough = through;
@@ -427,6 +403,42 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         }, null, false);
     }
 
+    /// <summary>
+    /// Numera los asientos nuevos (en el orden dado, que ya es cronologico), los agrega al contexto y actualiza el ultimo numero de cada ejercicio.
+    /// No guarda: lo guarda el SaveChanges de quien llama, en la misma transaccion que el resto (todo o nada).
+    /// </summary>
+    public async Task AssignNumbersAsync(LedgerContext ctx, IReadOnlyList<JournalEntry> rows, Guid companyId, DateTime now, CancellationToken ct)
+    {
+        var sequences = await dbContext.JournalSequences
+            .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
+            .ToListAsync(ct);
+        var numbers = AllocateDates(rows.Select(r => r.Date).ToList(), ctx.FiscalYearStartMonth, sequences.ToDictionary(x => x.FiscalYear, x => x.LastNumber));
+        for (var i = 0; i < rows.Count; i++)
+        {
+            rows[i].FiscalYear = numbers[i].FiscalYear;
+            rows[i].Number = numbers[i].Number;
+            dbContext.JournalEntries.Add(rows[i]);
+        }
+
+        foreach (var group in numbers.GroupBy(x => x.FiscalYear))
+        {
+            var last = group.Max(x => x.Number);
+            var sequence = sequences.FirstOrDefault(x => x.FiscalYear == group.Key);
+            if (sequence is null)
+            {
+                dbContext.JournalSequences.Add(new JournalSequence
+                {
+                    CompanyId = companyId, BuildingId = ctx.BuildingId, FiscalYear = group.Key, LastNumber = last
+                });
+            }
+            else
+            {
+                sequence.LastNumber = last;
+                sequence.UpdatedAtUtc = now;
+            }
+        }
+    }
+
     // Asiento que sale de un movimiento del libro. La fecha contable es la del movimiento salvo en las correcciones.
     private JournalEntry NewRow(
         AccountingEntryDto entry, DateOnly date, int revision, string description, Guid companyId, Guid buildingId, DateTime now)
@@ -440,7 +452,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             Description = Truncate(description),
             ThirdParty = entry.ThirdParty,
             Reference = entry.Reference,
-            Kind = JournalEntryKind.Auto,
+            Kind = entry.SourceType == LedgerSourceType.OpeningBalance ? JournalEntryKind.Opening : JournalEntryKind.Auto,
             SourceType = (int)entry.SourceType,
             SourceId = entry.SourceId,
             SourceAccountId = entry.SourceAccountId,
@@ -463,7 +475,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
                 Name = line.Name,
                 Debit = line.Debit,
                 Credit = line.Credit,
-                Kind = line.Kind
+                Kind = line.Kind,
+                AccountType = line.AccountType
             });
         }
 
@@ -471,7 +484,7 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
     }
 
     // Contraasiento: los mismos renglones con el debe y el haber invertidos. No tiene origen propio (lo identifica ReversesEntryId).
-    private JournalEntry ReversalRow(JournalEntry original, DateOnly date, Guid companyId, Guid buildingId, DateTime now, string cause, string? reason)
+    public JournalEntry ReversalRow(JournalEntry original, DateOnly date, Guid companyId, Guid buildingId, DateTime now, string cause, string? reason)
     {
         var row = new JournalEntry
         {
@@ -502,7 +515,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
                 Name = line.Name,
                 Debit = line.Credit,
                 Credit = line.Debit,
-                Kind = line.Kind
+                Kind = line.Kind,
+                AccountType = line.AccountType
             });
         }
 
@@ -705,7 +719,8 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             .Append(entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append('|')
             .Append((int)entry.SourceType).Append('|').Append(entry.SourceId).Append('|').Append(entry.SourceAccountId);
         var lines = entry.Lines
-            .Select(l => (l.Kind, Category: l.Kind == "Rubro" ? l.CategoryId?.ToString() ?? string.Empty : string.Empty, l.Debit, l.Credit))
+            // En la apertura cada renglon es una cuenta distinta (un banco, la caja, el fondo, la contrapartida): cuenta la del plan de todos.
+            .Select(l => (l.Kind, Category: l.Kind == "Rubro" || entry.SourceType == LedgerSourceType.OpeningBalance ? l.CategoryId?.ToString() ?? string.Empty : string.Empty, l.Debit, l.Credit))
             .OrderBy(l => l.Kind, StringComparer.Ordinal).ThenBy(l => l.Category, StringComparer.Ordinal)
             .ThenBy(l => l.Debit).ThenBy(l => l.Credit);
         foreach (var line in lines)

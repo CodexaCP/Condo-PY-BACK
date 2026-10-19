@@ -7,5 +7,13 @@ public enum LedgerAccountRoleKind
     FinancialAccount = 1,
 
     // La cuenta del plan (activo) donde se asienta el IVA crédito fiscal de las compras.
-    VatCredit = 2
+    VatCredit = 2,
+
+    // La cuenta del plan (fondos o patrimonio) contra la que se asientan los saldos iniciales de la apertura: lo que el edificio ya habia acumulado.
+    // Sin asignar rige «Resultados acumulados» (3.2.01 del plan generico).
+    OpeningEquity = 3,
+
+    // La cuenta del plan (fondos o patrimonio) donde se saldan los ingresos y gastos al cerrar el ejercicio: el resultado del ejercicio.
+    // Sin asignar rige «Resultado del periodo» (3.2.02 del plan generico).
+    PeriodResult = 4
 }
