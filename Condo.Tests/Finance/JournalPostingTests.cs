@@ -413,7 +413,8 @@ public class JournalPostingTests
     // ═════════════════════════════════════════════════════════════════════════
 
     private static FinanceJournalController Api(FinanceEnv env) => new(
-        env.T.Db, env.Access, env.Tenant, new FinanceModuleGate(env.T.Db), new FinanceLedgerService(env.T.Db), Journal(env));
+        env.T.Db, env.Access, env.Tenant, new FinanceModuleGate(env.T.Db), new FinanceLedgerService(env.T.Db), Journal(env),
+        new JournalBooksService(env.T.Db, new AccountingBooksService(env.T.Db, env.Tenant)));
 
     private static void AssertStatus<T>(ActionResult<T> result, int status) =>
         Assert.Equal(status, Assert.IsAssignableFrom<IStatusCodeActionResult>(result.Result).StatusCode);

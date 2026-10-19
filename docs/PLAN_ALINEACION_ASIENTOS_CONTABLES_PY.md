@@ -167,6 +167,20 @@ Cada paso es independiente, compila y se prueba solo. Las fases 1 a 3 cubren H1,
 - **2.4 Bloqueo a nivel base.** Trigger o permiso que impida `UPDATE` y `DELETE` sobre `JournalEntries` y `JournalEntryLines`.
 - **Aceptación:** revertir un pago ya asentado produce contraasiento + asiento nuevo; el original no cambia; el saldo del banco vuelve a coincidir con el libro.
 
+### Fase 3 — HECHA 2026-10-19 (sin commit ni deploy; sin migración)
+
+**Qué quedó (difiere en detalles del diseño de abajo):**
+- **Libro Diario imprimible** (`JournalBookPdfDocument`, `GET api/finance/journal/book/pdf` y `book/export` en Excel): hojas A4 con folio correlativo (primer folio editable; por defecto el siguiente a los «folios usados» de Libros contables), encabezado con el titular (razón social, RUC, domicilio), ejercicio, libro y rúbrica, contador, asientos en orden de número y, al pie de cada hoja, **suma de la hoja, suma anterior y suma acumulada** (en la última, «Total del ejercicio»). Sin renglones en blanco; un asiento no se parte entre hojas salvo que sea mayor que una hoja (entonces sigue con «continuación»). La paginación (`JournalBookPaginator`) es pura y la comparten el PDF y el Excel. Ejemplo: `docs/ejemplos/libro-diario-ejemplo.pdf`.
+- **Libro Mayor** (`GET journal/ledger`, `ledger/export`): por cuenta, saldo inicial, sumas, saldo final y, al abrir una cuenta, sus movimientos con el N° de asiento y el saldo acumulado. El Excel trae todo el detalle.
+- **Balance de sumas y saldos** (`GET journal/trial-balance`, `trial-balance/export`): saldo inicial, sumas del período y saldo final, cada uno en deudor y acreedor, con totales y la marca de si **cuadra** (y la diferencia si no).
+- **Reglas:** todo sale de lo asentado (con sus contraasientos), por código de cuenta (el asiento guarda copia del código y nombre); el período es el ejercicio, acotable por fechas dentro de él; el saldo inicial es todo lo asentado antes del período, de cualquier ejercicio (**sin asiento de cierre —fase 4— las cuentas de resultado arrastran su saldo de un ejercicio al siguiente**; la pantalla lo avisa). Los ven los cuatro roles; solo lectura.
+- **Web:** en Asientos contables, pestañas «Libro mayor» y «Sumas y saldos», y en «Libro diario» el bloque «Imprimir el Libro Diario» (primer folio, PDF y Excel).
+- **Pruebas:** 22 nuevas (`JournalBooksTests`): paginación (folios, sumas por hoja, asiento grande, cabecera sola), cálculo de Mayor y balance, lectura de lo asentado, PDF y Excel, permisos. Suite completa con SQL Server: 1268 pasan, 0 omitidas.
+
+**Límites que quedan:** no hay PDF del Mayor ni del balance (solo pantalla y Excel); la paginación del PDF es de 40 renglones por hoja (no se verificó contra una impresión física); no hay asiento de apertura, de transferencias ni de cierre (fase 4), así que **el saldo del banco en el Mayor todavía no coincide con el real**.
+
+**Diseño original (referencia):**
+
 ### Fase 3 — Libros oficiales y pantalla (backend + web)
 - **3.1 UI.** Columna **N°** grande y primera en la tabla; filtro por número, por estado (Sugerido, Asentado, Contraasiento), por origen. Botón **Asentar hasta…** con vista previa («se asentarán 42 asientos, 3 incompletos»). Enlace de cada asiento a su gasto, pago o ingreso.
 - **3.2 Libro Diario.** PDF y Excel por ejercicio: encabezado (razón social, RUC, ejercicio), **folio** correlativo por página, fecha, N°, glosa, cuentas Debe/Haber, totales por página y acumulados, sin renglones en blanco. Respeta el formato de hojas sueltas de la Ley 4924/2013.

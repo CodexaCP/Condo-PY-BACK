@@ -16,7 +16,8 @@ public class FinanceJournalController(
     ITenantContext tenantContext,
     FinanceModuleGate gate,
     FinanceLedgerService ledgerService,
-    JournalPostingService journal) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
+    JournalPostingService journal,
+    JournalBooksService books) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
     private bool CanPost => Tenant.IsSuperAdmin || Tenant.IsCompanyAdmin;
 
@@ -29,7 +30,9 @@ public class FinanceJournalController(
         var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
         if (denied is not null) return denied;
 
-        return Ok(await journal.GetAsync(ctx!, fiscalYear, from, to, number, page, pageSize, CanPost, cancellationToken));
+        var result = await journal.GetAsync(ctx!, fiscalYear, from, to, number, page, pageSize, CanPost, cancellationToken);
+        result.SuggestedStartFolio = await books.SuggestedStartFolioAsync(buildingId, cancellationToken);
+        return Ok(result);
     }
 
     // Asientos ya asentados que cambiaron desde entonces (se corrigen con contraasiento al asentar).

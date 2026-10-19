@@ -341,6 +341,145 @@ public static class FinanceExcelExporter
         Finish(sums, 4, Math.Max(line2 - 1, 4), 6, [12, 20, 48, 18, 18, 22]);
     }
 
+    /// <summary>
+    /// Libro Diario asentado de un ejercicio, con las mismas hojas y folios que el PDF: un renglon por cuenta del asiento y, al pie de cada
+    /// folio, la suma de la hoja, la anterior y la acumulada.
+    /// </summary>
+    public static void AddJournalBook(XLWorkbook wb, Condo.Api.Services.JournalBookPrint print)
+    {
+        var b = print.Books;
+        var ws = Sheet(wb, "Libro Diario", $"Libro Diario {print.FiscalYear} — {b.Effective.LegalName ?? print.BuildingName}",
+            $"RUC {b.Effective.Ruc ?? "—"} · Ejercicio del {print.From:dd/MM/yyyy} al {print.To:dd/MM/yyyy} · Libro N° {b.BookNumber ?? "—"}" +
+            $" · Folios desde el {print.StartFolio}. Asientos asentados: no se modifican, se corrigen con contraasientos.");
+        string[] headers = ["Folio", "N° asiento", "Fecha", "Código", "Código del contador", "Cuenta", "Debe", "Haber", "Glosa"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var sheet in print.Pages)
+        {
+            string glosa = string.Empty;
+            foreach (var r in sheet.Rows)
+            {
+                if (r.Kind == Condo.Api.Services.BookRowKind.Entry)
+                {
+                    glosa = r.Description + (string.IsNullOrWhiteSpace(r.ThirdParty) ? string.Empty : $" · {r.ThirdParty}");
+                    continue;
+                }
+
+                ws.Cell(row, 1).Value = sheet.Folio;
+                ws.Cell(row, 2).Value = r.Label;
+                ws.Cell(row, 3).Value = r.Date.ToDateTime(TimeOnly.MinValue);
+                ws.Cell(row, 3).Style.DateFormat.Format = DateFormat;
+                ws.Cell(row, 4).Value = r.Code;
+                ws.Cell(row, 6).Value = r.Name;
+                if (r.Debit != 0m) Amount(ws, row, 7, r.Debit);
+                if (r.Credit != 0m) Amount(ws, row, 8, r.Credit);
+                ws.Cell(row, 9).Value = glosa;
+                row++;
+            }
+
+            AddSumRow(ws, ref row, sheet.Folio, "Suma de la hoja", sheet.PageDebit, sheet.PageCredit);
+            AddSumRow(ws, ref row, sheet.Folio, sheet.Folio == print.Pages[^1].Folio ? "Total del ejercicio" : "Suma y sigue", sheet.CumulativeDebit, sheet.CumulativeCredit, bold: true);
+        }
+
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [8, 14, 12, 12, 20, 40, 16, 16, 60], filter: false);
+    }
+
+    private static void AddSumRow(IXLWorksheet ws, ref int row, int folio, string label, decimal debit, decimal credit, bool bold = false)
+    {
+        ws.Cell(row, 1).Value = folio;
+        ws.Cell(row, 6).Value = label;
+        Amount(ws, row, 7, debit);
+        Amount(ws, row, 8, credit);
+        var range = ws.Range(row, 1, row, 9);
+        range.Style.Font.SetItalic();
+        if (bold) range.Style.Font.SetBold();
+        range.Style.Fill.SetBackgroundColor(XLColor.FromHtml("#f3f3f3"));
+        row++;
+    }
+
+    /// <summary>Libro Mayor del periodo: por cuenta, saldo inicial, cada movimiento con el N° de asiento y su saldo acumulado, y los totales.</summary>
+    public static void AddJournalLedger(XLWorkbook wb, JournalLedgerDto ledger)
+    {
+        var ws = Sheet(wb, "Libro Mayor", $"Libro Mayor — {ledger.BuildingName}",
+            $"Ejercicio {ledger.FiscalYear}, del {ledger.From:dd/MM/yyyy} al {ledger.To:dd/MM/yyyy}. Saldo positivo = deudor, negativo = acreedor. Sale de lo asentado en el Libro Diario.");
+        string[] headers = ["Código", "Cuenta", "Fecha", "N° asiento", "Glosa", "Debe", "Haber", "Saldo"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var a in ledger.Accounts)
+        {
+            ws.Cell(row, 1).Value = a.Code;
+            ws.Cell(row, 2).Value = a.Name;
+            ws.Cell(row, 5).Value = "Saldo inicial";
+            Amount(ws, row, 8, a.OpeningBalance);
+            ws.Range(row, 1, row, headers.Length).Style.Font.SetBold().Fill.SetBackgroundColor(XLColor.FromHtml("#e8f4f8"));
+            row++;
+            foreach (var m in a.Movements)
+            {
+                ws.Cell(row, 1).Value = a.Code;
+                ws.Cell(row, 3).Value = m.Date.ToDateTime(TimeOnly.MinValue);
+                ws.Cell(row, 3).Style.DateFormat.Format = DateFormat;
+                ws.Cell(row, 4).Value = m.EntryLabel;
+                ws.Cell(row, 5).Value = m.Description;
+                if (m.Debit != 0m) Amount(ws, row, 6, m.Debit);
+                if (m.Credit != 0m) Amount(ws, row, 7, m.Credit);
+                Amount(ws, row, 8, m.Balance);
+                row++;
+            }
+
+            ws.Cell(row, 1).Value = a.Code;
+            ws.Cell(row, 5).Value = "Totales y saldo final";
+            Amount(ws, row, 6, a.Debit);
+            Amount(ws, row, 7, a.Credit);
+            Amount(ws, row, 8, a.ClosingBalance);
+            ws.Range(row, 1, row, headers.Length).Style.Font.SetBold();
+            ws.Range(row, 1, row, headers.Length).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            row += 2;
+        }
+
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [12, 36, 12, 14, 60, 16, 16, 18], filter: false);
+    }
+
+    /// <summary>Balance de sumas y saldos: por cuenta, saldo inicial, sumas del periodo y saldo final (deudor y acreedor), y si cuadra.</summary>
+    public static void AddJournalTrialBalance(XLWorkbook wb, JournalTrialBalanceDto balance)
+    {
+        var ws = Sheet(wb, "Sumas y saldos", $"Balance de sumas y saldos — {balance.BuildingName}",
+            $"Ejercicio {balance.FiscalYear}, del {balance.From:dd/MM/yyyy} al {balance.To:dd/MM/yyyy}. Sale de lo asentado en el Libro Diario.");
+        string[] headers = ["Código", "Código del contador", "Cuenta", "Saldo inicial deudor", "Saldo inicial acreedor", "Debe", "Haber", "Saldo final deudor", "Saldo final acreedor"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var r in balance.Rows)
+        {
+            ws.Cell(row, 1).Value = r.Code;
+            ws.Cell(row, 2).Value = r.ExternalCode ?? string.Empty;
+            ws.Cell(row, 3).Value = r.Name;
+            Amount(ws, row, 4, r.OpeningDebit);
+            Amount(ws, row, 5, r.OpeningCredit);
+            Amount(ws, row, 6, r.Debit);
+            Amount(ws, row, 7, r.Credit);
+            Amount(ws, row, 8, r.ClosingDebit);
+            Amount(ws, row, 9, r.ClosingCredit);
+            row++;
+        }
+
+        ws.Cell(row, 3).Value = "Totales";
+        Amount(ws, row, 4, balance.Totals.OpeningDebit);
+        Amount(ws, row, 5, balance.Totals.OpeningCredit);
+        Amount(ws, row, 6, balance.Totals.Debit);
+        Amount(ws, row, 7, balance.Totals.Credit);
+        Amount(ws, row, 8, balance.Totals.ClosingDebit);
+        Amount(ws, row, 9, balance.Totals.ClosingCredit);
+        ws.Range(row, 1, row, headers.Length).Style.Font.SetBold();
+        ws.Range(row, 1, row, headers.Length).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+        ws.Cell(row + 2, 1).Value = balance.IsBalanced
+            ? "El balance cuadra: las sumas del debe y del haber coinciden y los saldos deudores igualan a los acreedores."
+            : $"Atención: el balance NO cuadra (diferencia de saldos Gs. {balance.Difference:N0}).";
+        if (!balance.IsBalanced) ws.Cell(row + 2, 1).Style.Font.SetFontColor(XLColor.Red);
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, [12, 20, 40, 18, 18, 16, 16, 18, 18]);
+    }
+
     /// <summary>Flujo de caja del ejercicio: un renglon por rubro con un importe por mes.</summary>
     public static void AddCashFlow(XLWorkbook wb, LedgerContext ctx, FinanceCashFlowDto flow)
     {

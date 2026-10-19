@@ -3,7 +3,7 @@
 Para probar a mano lo hecho el 2026-10-19: **Libros contables** (Centro de configuración), **Libro diario** con número de asiento real (Fase 1) y
 **correcciones con contraasiento** (Fase 2). Plan y decisiones en `PLAN_ALINEACION_ASIENTOS_CONTABLES_PY.md`. Marcá cada casilla `[ ]` a medida que lo verificás.
 
-Lo que ya comprueban las pruebas automáticas (1246 en total, 0 errores, incluidas las de SQL Server real): numeración sin huecos, todo o nada, detección
+Lo que ya comprueban las pruebas automáticas (1268 en total, 0 errores, incluidas las de SQL Server real): numeración sin huecos, todo o nada, detección
 de diferencias, contraasientos, bloqueo del cierre de mes y triggers de la base. Esta guía es para que veas **la pantalla** y confirmes que se entiende.
 
 ---
@@ -109,6 +109,24 @@ En tu sistema los gastos e ingresos solo se editan con el período en **borrador
 - [ ] **Aviso antes de deshacer el pago de un gasto a pagar:** la confirmación agrega «Este gasto ya está asentado en el Libro diario (…): el asiento no se modifica…».
 - [ ] **Causa y motivo:** después de revertir el pago, en el Libro diario la tabla de diferencias dice **«Pago revertido»** con **«Motivo: …»** (el que escribiste). Al asentar, la glosa del contraasiento dice «(pago revertido. Motivo: …)».
 - [ ] Un gasto editado dice **«Gasto modificado»**; un ingreso borrado, **«Ingreso eliminado»**; una NC anulada, **«Nota de crédito anulada»**.
+
+## 7c. Libros oficiales (Fase 3): Libro Diario imprimible, Libro Mayor y sumas y saldos
+
+Con el Libro diario ya asentado (al menos algunos asientos):
+
+- [ ] **Imprimir:** en «Libro diario» aparece el bloque **«Imprimir el Libro Diario del ejercicio …»** con **Primer folio** (sugerido: el siguiente a los «folios usados» de Libros contables; 1 si no cargaste nada). Tocá **Libro Diario (PDF)** → baja `finanzas-libro-diario-<edificio>-2026.pdf`.
+- [ ] En el PDF: cada hoja trae arriba **LIBRO DIARIO**, la razón social, RUC y domicilio del titular, el ejercicio, «Libro N° …» y la rúbrica, el contador, y un **FOLIO** grande que **empieza en el primer folio que pusiste y sube de a uno**.
+- [ ] Los asientos van en orden de número, con la glosa en dos líneas como máximo y las cuentas con Debe y Haber; los renglones de Haber van sangrados. **No hay renglones en blanco**.
+- [ ] Al pie de cada hoja: **«Suma de esta hoja»**, **«Suma anterior»** (desde la segunda) y **«Suma y sigue»**; la última dice **«Total del ejercicio»** y coincide con el total de las tarjetas del Libro diario.
+- [ ] Un asiento **no se corta** entre dos hojas (todos sus renglones quedan juntos).
+- [ ] Cambiá el **Primer folio** a otro número y volvé a descargar: los folios cambian.
+- [ ] **Excel** del Libro Diario: mismas hojas y folios, con las filas de suma por folio.
+- [ ] Imprimilo de verdad una vez y mirá que entre bien en la hoja (A4 vertical) y que se lea.
+- [ ] **Libro mayor:** lista por cuenta con **Saldo inicial, Debe, Haber y Saldo final**. «Ver N movimientos» abre el detalle con **fecha, N° de asiento, glosa y saldo acumulado**. El Excel trae todas las cuentas con su detalle.
+- [ ] Un asiento corregido con contraasiento: en el Mayor los dos movimientos aparecen y el saldo de la cuenta queda **como si el original no existiera**.
+- [ ] **Sumas y saldos:** columnas Saldo inicial, Sumas del período y Saldo final, cada una en **Deudor / Acreedor**, con totales. Arriba dice **«El balance cuadra…»**. Si alguna vez dijera «NO cuadra», avisá: indica un asiento descuadrado.
+- [ ] Cambiá de **ejercicio** en el selector (si hay más de uno asentado): las tres pestañas siguen al ejercicio elegido.
+- [ ] Recordá lo que **todavía no está**: sin asiento de apertura, el saldo del banco acá **no coincide con el saldo real**; sin asiento de cierre, las cuentas de resultado arrastran su saldo al ejercicio siguiente (la pantalla lo dice).
 
 ## 8. Cierre de mes
 

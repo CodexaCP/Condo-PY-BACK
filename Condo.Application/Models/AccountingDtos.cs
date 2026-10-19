@@ -228,6 +228,8 @@ public class JournalDto
     public decimal TotalDebit { get; set; }
     public decimal TotalCredit { get; set; }
     public bool CanPost { get; set; }
+    // Primer folio sugerido para imprimir el Libro Diario: el siguiente a los folios usados de la rubrica (1 si no se cargo).
+    public int SuggestedStartFolio { get; set; } = 1;
 }
 
 /// <summary>Lo que se asentaria hasta una fecha, sin asentar nada.</summary>
