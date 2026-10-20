@@ -64,6 +64,10 @@ public interface ICondoDbContext
     DbSet<PaymentConnection> PaymentConnections { get; }
     DbSet<BuildingPaymentConfig> BuildingPaymentConfigs { get; }
     DbSet<PaymentConnectionAudit> PaymentConnectionAudits { get; }
+    DbSet<PaymentIntent> PaymentIntents { get; }
+    DbSet<PaymentIntentItem> PaymentIntentItems { get; }
+    DbSet<PaymentAttempt> PaymentAttempts { get; }
+    DbSet<PaymentEvent> PaymentEvents { get; }
     DbSet<BankReconciliation> BankReconciliations { get; }
     DbSet<BankReconciledMovement> BankReconciledMovements { get; }
     DbSet<LedgerAccountRole> LedgerAccountRoles { get; }

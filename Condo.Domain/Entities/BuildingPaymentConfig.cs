@@ -11,6 +11,9 @@ public class BuildingPaymentConfig : CompanyScopedEntity
     public bool IsEnabled { get; set; } = true;
     public int SortOrder { get; set; }
 
+    // Edificio de prueba: solo aqui un cobro de sandbox o del proveedor falso se aplica a la deuda; en cualquier otro queda "simulado".
+    public bool IsTest { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public PaymentConnection? Connection { get; set; }

@@ -63,6 +63,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<PaymentConnection> PaymentConnections => Set<PaymentConnection>();
     public DbSet<BuildingPaymentConfig> BuildingPaymentConfigs => Set<BuildingPaymentConfig>();
     public DbSet<PaymentConnectionAudit> PaymentConnectionAudits => Set<PaymentConnectionAudit>();
+    public DbSet<PaymentIntent> PaymentIntents => Set<PaymentIntent>();
+    public DbSet<PaymentIntentItem> PaymentIntentItems => Set<PaymentIntentItem>();
+    public DbSet<PaymentAttempt> PaymentAttempts => Set<PaymentAttempt>();
+    public DbSet<PaymentEvent> PaymentEvents => Set<PaymentEvent>();
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
@@ -1319,6 +1323,110 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasOne(x => x.Connection).WithMany()
             .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
 
+        // ── Pagos online: cobros, intentos y registro de eventos ──────────────
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.HolderName).HasMaxLength(200);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.HolderTaxId).HasMaxLength(30);
+        modelBuilder.Entity<PaymentConnection>().Property(x => x.HolderBankNote).HasMaxLength(500);
+
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.Currency).HasMaxLength(3);
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.CloseReason).HasMaxLength(40);
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.ReviewReason).HasMaxLength(500);
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.HolderName).HasMaxLength(200);
+        modelBuilder.Entity<PaymentIntent>().Property(x => x.HolderTaxId).HasMaxLength(30);
+        // El numero legible es unico en toda la plataforma (se asigna "maximo + 1" y se reintenta ante una colision).
+        modelBuilder.Entity<PaymentIntent>().HasIndex(x => x.Number).IsUnique();
+        modelBuilder.Entity<PaymentIntent>().HasIndex(x => new { x.OwnerId, x.Status });
+        modelBuilder.Entity<PaymentIntent>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });
+        modelBuilder.Entity<PaymentIntent>().HasIndex(x => x.ConnectionId);
+        modelBuilder.Entity<PaymentIntent>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntent>()
+            .HasOne(x => x.Building).WithMany()
+            .HasForeignKey(x => x.BuildingId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntent>()
+            .HasOne(x => x.Owner).WithMany()
+            .HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntent>()
+            .HasOne(x => x.Connection).WithMany()
+            .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PaymentIntentItem>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        // Un comprobante (unidad + periodo) no puede estar en dos cobros abiertos a la vez.
+        modelBuilder.Entity<PaymentIntentItem>().HasIndex(x => new { x.UnitId, x.ExpensePeriodId })
+            .IsUnique().HasFilter("[IsOpen] = 1 AND [IsDeleted] = 0");
+        modelBuilder.Entity<PaymentIntentItem>().HasIndex(x => x.IntentId);
+        modelBuilder.Entity<PaymentIntentItem>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntentItem>()
+            .HasOne(x => x.Intent).WithMany(x => x.Items)
+            .HasForeignKey(x => x.IntentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntentItem>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentIntentItem>()
+            .HasOne(x => x.ExpensePeriod).WithMany()
+            .HasForeignKey(x => x.ExpensePeriodId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.ProviderReference).HasMaxLength(100);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.ProviderSessionId).HasMaxLength(100);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.CheckoutUrl).HasMaxLength(1000);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.ProviderTransactionId).HasMaxLength(100);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.AuthorizationCode).HasMaxLength(50);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.ProviderStatusRaw).HasMaxLength(50);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.CardBrand).HasMaxLength(30);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.CardLast4).HasMaxLength(4);
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.CommissionAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.NetAmount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<PaymentAttempt>().Property(x => x.SettlementReference).HasMaxLength(100);
+        modelBuilder.Entity<PaymentAttempt>().HasIndex(x => x.AttemptNumber).IsUnique();
+        modelBuilder.Entity<PaymentAttempt>().HasIndex(x => new { x.ConnectionId, x.ProviderReference }).IsUnique();
+        // Con la sesion del proveedor (link_alias, process_id) se encuentra el intento cuando llega el aviso.
+        modelBuilder.Entity<PaymentAttempt>().HasIndex(x => new { x.ConnectionId, x.ProviderSessionId })
+            .IsUnique().HasFilter("[ProviderSessionId] IS NOT NULL");
+        modelBuilder.Entity<PaymentAttempt>().HasIndex(x => new { x.Status, x.ExpiresAtUtc });
+        modelBuilder.Entity<PaymentAttempt>().HasIndex(x => x.IntentId);
+        modelBuilder.Entity<PaymentAttempt>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentAttempt>()
+            .HasOne(x => x.Intent).WithMany(x => x.Attempts)
+            .HasForeignKey(x => x.IntentId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentAttempt>()
+            .HasOne(x => x.Connection).WithMany()
+            .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.Direction).HasConversion<string>().HasMaxLength(10);
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.Kind).HasMaxLength(40);
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.DedupeKey).HasMaxLength(200);
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.Ip).HasMaxLength(64);
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.Outcome).HasMaxLength(40);
+        modelBuilder.Entity<PaymentEvent>().Property(x => x.Error).HasMaxLength(1000);
+        // Un mismo aviso (proveedor + transaccion + estado) se registra una sola vez: la base misma impide procesarlo dos veces.
+        modelBuilder.Entity<PaymentEvent>().HasIndex(x => x.DedupeKey).IsUnique().HasFilter("[DedupeKey] IS NOT NULL");
+        modelBuilder.Entity<PaymentEvent>().HasIndex(x => new { x.ConnectionId, x.ReceivedAtUtc });
+        modelBuilder.Entity<PaymentEvent>().HasIndex(x => x.AttemptId);
+        modelBuilder.Entity<PaymentEvent>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentEvent>()
+            .HasOne(x => x.Connection).WithMany()
+            .HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<PaymentEvent>()
+            .HasOne(x => x.Attempt).WithMany()
+            .HasForeignKey(x => x.AttemptId).OnDelete(DeleteBehavior.Restrict);
+
+        // Un cobro produce como maximo un pago de propietario.
+        modelBuilder.Entity<OwnerPayment>().HasIndex(x => x.PaymentIntentId).IsUnique().HasFilter("[PaymentIntentId] IS NOT NULL");
+        modelBuilder.Entity<OwnerPayment>()
+            .HasOne<PaymentIntent>().WithMany()
+            .HasForeignKey(x => x.PaymentIntentId).OnDelete(DeleteBehavior.Restrict);
+
         // ── Centro de configuracion: proveedores, cuentas por pagar e IVA ──────
         modelBuilder.Entity<Supplier>().Property(x => x.Name).HasMaxLength(200);
         modelBuilder.Entity<Supplier>().Property(x => x.Ruc).HasMaxLength(20);
@@ -1424,6 +1532,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         if (ChangeTracker.Entries<MarketplaceEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Los eventos de auditoría del marketplace no se pueden modificar ni eliminar.");
+        }
+
+        // El registro de eventos de cobros online tambien es de solo insercion.
+        if (ChangeTracker.Entries<PaymentEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Los eventos de cobros online no se pueden modificar ni eliminar.");
         }
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())

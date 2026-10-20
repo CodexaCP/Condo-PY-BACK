@@ -23,6 +23,8 @@ public class OwnerPayment : CompanyScopedEntity
     // Numero de transferencia / cheque que escribe el personal; la Reference del pago sigue siendo PAY-aaaa-n.
     public string ExternalReference { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
+    // Cobro online del que resulto este pago (canal Online). Unico: un cobro produce como maximo un pago.
+    public Guid? PaymentIntentId { get; set; }
     // Solo pagos de canal Web revertidos (quedan en estado Rejected con el motivo en RejectionReason).
     public DateTime? ReversedAt { get; set; }
 

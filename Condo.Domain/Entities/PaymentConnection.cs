@@ -33,6 +33,12 @@ public class PaymentConnection : CompanyScopedEntity
     public string? SecretsFingerprint { get; set; }
     public DateTime? SecretsUpdatedAtUtc { get; set; }
 
+    // Titular del comercio: a nombre de quien se cobra (nombre y RUC o cedula) y una nota opcional de la cuenta receptora. Obligatorios para activar
+    // la conexion; cada cobro online guarda una copia al crearse.
+    public string? HolderName { get; set; }
+    public string? HolderTaxId { get; set; }
+    public string? HolderBankNote { get; set; }
+
     // Ultimo cambio de estado (quien y cuando).
     public DateTime? StatusChangedAtUtc { get; set; }
     public Guid? StatusChangedByUserId { get; set; }
