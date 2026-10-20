@@ -24,10 +24,13 @@ public class PaymentConnectionsController(
     ICondoDbContext dbContext, ITenantContext tenantContext, IAccessScopeService accessScope,
     ISecretProtector protector, IConfiguration configuration, ILogger<PaymentConnectionsController> logger) : ControllerBase
 {
-    /// <summary>El cobro online todavia no existe en la plataforma: se actualiza cuando se habilite.</summary>
-    public const bool CollectionEnabled = false;
+    // Interruptores del servidor: el cobro online y el proveedor falso arrancan apagados (ver OnlinePaymentSettings).
+    private OnlinePaymentSettings Settings => new(configuration);
 
     private const int NameMaxLength = 120;
+    private const int HolderNameMaxLength = 200;
+    private const int HolderTaxIdMaxLength = 30;
+    private const int HolderNoteMaxLength = 500;
     private const int HistoryLimit = 200;
 
     private static readonly string[] ViewRoles = ["SuperAdmin", "CompanyAdmin", "CompanyOperator", "BuildingManager"];
@@ -56,7 +59,7 @@ public class PaymentConnectionsController(
         return Ok(new PaymentCatalogDto
         {
             MasterKeyConfigured = protector.IsConfigured,
-            Providers = PaymentProviderCatalog.All.Select(p => new PaymentProviderDto
+            Providers = PaymentProviderCatalog.Visible(Settings.FakeProviderEnabled).Select(p => new PaymentProviderDto
             {
                 Code = p.Code,
                 Name = p.Name,
@@ -110,7 +113,7 @@ public class PaymentConnectionsController(
             Items = items,
             CanEdit = canEdit,
             MasterKeyConfigured = protector.IsConfigured,
-            CollectionEnabled = CollectionEnabled
+            CollectionEnabled = Settings.CollectionEnabled
         });
     }
 
@@ -151,8 +154,11 @@ public class PaymentConnectionsController(
         var product = PaymentProviderCatalog.FindProduct(request.ProviderCode, request.ProductCode);
         if (product is null) return BadRequest("Elegí un proveedor y una modalidad de la lista.");
 
-        var validation = Validate(request, product, out var environment);
+        var validation = Validate(request, product, out var environment) ?? ValidateHolder(request);
         if (validation is not null) return BadRequest(validation);
+
+        var fakeError = FakeProviderError(request.ProviderCode, environment, requireEnabled: true);
+        if (fakeError is not null) return BadRequest(fakeError);
 
         var name = request.Name.Trim();
         if (await NameTakenAsync(company.Value, name, null, cancellationToken))
@@ -180,6 +186,7 @@ public class PaymentConnectionsController(
             new("environment", "Ambiente", null, EnvironmentLabel(environment))
         };
         foreach (var (key, value) in settings) changes.Add(new ConfigChange(key, FieldLabel(product, key), null, value));
+        ApplyHolder(entity, request, changes);
 
         if (secrets.Count > 0)
         {
@@ -215,8 +222,17 @@ public class PaymentConnectionsController(
              || !string.Equals(request.ProductCode, entity.ProductCode, StringComparison.OrdinalIgnoreCase)))
             return BadRequest("El proveedor y la modalidad no se cambian: creá otra conexión.");
 
-        var validation = Validate(request, product, out var environment);
+        var validation = Validate(request, product, out var environment) ?? ValidateHolder(request);
         if (validation is not null) return BadRequest(validation);
+
+        var fakeError = FakeProviderError(entity.ProviderCode, environment);
+        if (fakeError is not null) return BadRequest(fakeError);
+
+        // Una conexion activa no puede quedarse sin titular: es a nombre de quien se cobra.
+        if (entity.Status == PaymentConnectionStatus.Active
+            && ((request.HolderName is not null && request.HolderName.Trim().Length == 0)
+                || (request.HolderTaxId is not null && request.HolderTaxId.Trim().Length == 0)))
+            return BadRequest("El titular del comercio es obligatorio en una conexión activa: no se puede dejar vacío.");
 
         var name = request.Name.Trim();
         if (await NameTakenAsync(entity.CompanyId, name, entity.Id, cancellationToken))
@@ -253,6 +269,7 @@ public class PaymentConnectionsController(
             }
         }
         entity.SettingsJson = current.Count > 0 ? JsonSerializer.Serialize(current) : null;
+        ApplyHolder(entity, request, changes);
 
         var secrets = CleanValues(request.Secrets, product, secret: true);
         if (secrets.Count > 0)
@@ -328,18 +345,40 @@ public class PaymentConnectionsController(
         if (wanted.Any(b => !names.ContainsKey(b)))
             return BadRequest("Algún edificio no existe o no es de la empresa de la conexión.");
 
+        var tests = request.TestBuildingIds?.ToHashSet();
         var active = entity.BuildingConfigs.Where(x => !x.IsDeleted).ToList();
         var toAdd = wanted.Where(b => active.All(x => x.BuildingId != b)).ToList();
         var toRemove = active.Where(x => !wanted.Contains(x.BuildingId)).ToList();
-        if (toAdd.Count == 0 && toRemove.Count == 0) return Ok(ToDto(await ReloadAsync(entity.Id, cancellationToken), canEdit: true, scope: null));
+        // Edificios que siguen asignados y cambian de "prueba" a "real" o al reves.
+        var testChanged = tests is null
+            ? []
+            : active.Where(x => wanted.Contains(x.BuildingId) && x.IsTest != tests.Contains(x.BuildingId)).ToList();
+        if (toAdd.Count == 0 && toRemove.Count == 0 && testChanged.Count == 0)
+            return Ok(ToDto(await ReloadAsync(entity.Id, cancellationToken), canEdit: true, scope: null));
 
         var nextOrder = active.Count == 0 ? 1 : active.Max(x => x.SortOrder) + 1;
         foreach (var buildingId in toAdd)
         {
             dbContext.BuildingPaymentConfigs.Add(new BuildingPaymentConfig
             {
-                CompanyId = entity.CompanyId, BuildingId = buildingId, ConnectionId = entity.Id, SortOrder = nextOrder++
+                CompanyId = entity.CompanyId, BuildingId = buildingId, ConnectionId = entity.Id, SortOrder = nextOrder++,
+                IsTest = tests?.Contains(buildingId) ?? false
             });
+        }
+
+        foreach (var link in testChanged)
+        {
+            link.IsTest = tests!.Contains(link.BuildingId);
+            link.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        // Los cobros online de un edificio entran a su cuenta de "cobros online por liquidar" (una por edificio, la crea el sistema) cuando el
+        // edificio tiene Finanzas. Sin Finanzas el pago se aplica igual, solo que no hay libro donde verlo.
+        var financeGate = new FinanceModuleGate(dbContext);
+        foreach (var buildingId in toAdd)
+        {
+            if ((await financeGate.GetStateAsync(buildingId, cancellationToken)).IsAvailable)
+                await ClearingAccounts.EnsureAsync(dbContext, entity.CompanyId, buildingId, cancellationToken);
         }
 
         foreach (var link in toRemove)
@@ -351,6 +390,9 @@ public class PaymentConnectionsController(
         var changes = new List<ConfigChange>();
         foreach (var b in toAdd) changes.Add(new ConfigChange("building", "Edificio", null, names[b]));
         foreach (var l in toRemove) changes.Add(new ConfigChange("building", "Edificio", names.GetValueOrDefault(l.BuildingId, l.BuildingId.ToString()), null));
+        foreach (var l in testChanged)
+            changes.Add(new ConfigChange("buildingTest", $"Edificio de prueba ({names.GetValueOrDefault(l.BuildingId, l.BuildingId.ToString())})",
+                l.IsTest ? "No" : "Sí", l.IsTest ? "Sí" : "No"));
 
         // Una conexion activa que se queda sin edificios ya no sirve a nadie: vuelve a validacion.
         var statusNote = string.Empty;
@@ -386,6 +428,14 @@ public class PaymentConnectionsController(
         var missing = MissingFields(entity, product);
         if (missing.Count > 0)
             return Problem409("payments_incomplete", $"Faltan datos para activar la conexión: {string.Join(", ", missing)}.");
+
+        // A nombre de quien se cobra: el propietario lo ve antes de pagar y cada cobro guarda una copia.
+        if (string.IsNullOrWhiteSpace(entity.HolderName) || string.IsNullOrWhiteSpace(entity.HolderTaxId))
+            return Problem409("payments_holder_missing",
+                "Cargá el titular del comercio (nombre y RUC o cédula) antes de activar la conexión: es a nombre de quien se cobra.");
+
+        var fakeError = FakeProviderError(entity.ProviderCode, entity.Environment, requireEnabled: true);
+        if (fakeError is not null) return Problem409("payments_fake_not_allowed", fakeError);
 
         if (!entity.BuildingConfigs.Any(x => !x.IsDeleted && x.IsEnabled))
             return Problem409("payments_no_buildings", "Asigná al menos un edificio antes de activar la conexión.");
@@ -507,6 +557,50 @@ public class PaymentConnectionsController(
         }
 
         return null;
+    }
+
+    // El simulador solo existe si el servidor lo habilito (al crearlo o activarlo) y nunca en produccion: no puede quedar cobrando de verdad.
+    private string? FakeProviderError(string providerCode, PaymentEnvironment environment, bool requireEnabled = false)
+    {
+        if (!string.Equals(providerCode, PaymentProviderCatalog.FakeProvider, StringComparison.OrdinalIgnoreCase)) return null;
+        if (environment == PaymentEnvironment.Production) return "El simulador de cobros no puede usarse en producción.";
+        if (requireEnabled && !Settings.FakeProviderEnabled) return "El simulador de cobros no está habilitado en este servidor.";
+        return null;
+    }
+
+    private static string? ValidateHolder(PaymentConnectionRequest request)
+    {
+        static string? Check(string? value, int max, string label)
+        {
+            var text = value?.Trim();
+            if (text is null) return null;
+            if (text.Length > max) return $"{label} no puede superar los {max} caracteres.";
+            if (text.Any(char.IsControl)) return $"{label} no puede tener saltos de línea ni caracteres de control.";
+            return null;
+        }
+
+        return Check(request.HolderName, HolderNameMaxLength, "El titular del comercio")
+               ?? Check(request.HolderTaxId, HolderTaxIdMaxLength, "El RUC o cédula del titular")
+               ?? Check(request.HolderBankNote, HolderNoteMaxLength, "La nota de la cuenta receptora");
+    }
+
+    // Titular del comercio: un valor nulo no se toca; uno vacio borra el dato.
+    private static void ApplyHolder(PaymentConnection entity, PaymentConnectionRequest request, List<ConfigChange> changes)
+    {
+        static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        void Apply(string? incoming, string? current, Action<string?> set, string key, string label)
+        {
+            if (incoming is null) return;
+            var value = Normalize(incoming);
+            if (value == current) return;
+            set(value);
+            changes.Add(new ConfigChange(key, label, current, value));
+        }
+
+        Apply(request.HolderName, entity.HolderName, v => entity.HolderName = v, "holderName", "Titular del comercio");
+        Apply(request.HolderTaxId, entity.HolderTaxId, v => entity.HolderTaxId = v, "holderTaxId", "RUC o cédula del titular");
+        Apply(request.HolderBankNote, entity.HolderBankNote, v => entity.HolderBankNote = v, "holderBankNote", "Cuenta receptora");
     }
 
     private static string? ValidateValue(PaymentField field, string? raw)
@@ -643,7 +737,7 @@ public class PaymentConnectionsController(
             .OrderBy(x => x.SortOrder)
             .Select(x => new PaymentConnectionBuildingDto
             {
-                BuildingId = x.BuildingId, BuildingName = x.Building?.Name ?? string.Empty, IsEnabled = x.IsEnabled
+                BuildingId = x.BuildingId, BuildingName = x.Building?.Name ?? string.Empty, IsEnabled = x.IsEnabled, IsTest = x.IsTest
             })
             .ToList();
 
@@ -668,6 +762,9 @@ public class PaymentConnectionsController(
         dto.Settings = ReadValues(entity.SettingsJson);
         dto.SecretsMasked = ReadValues(entity.SecretsFingerprint);
         dto.SecretsUpdatedAtUtc = entity.SecretsUpdatedAtUtc;
+        dto.HolderName = entity.HolderName;
+        dto.HolderTaxId = entity.HolderTaxId;
+        dto.HolderBankNote = entity.HolderBankNote;
         dto.CallbackUrl = CallbackUrlFor(entity);
         dto.MissingFields = product is null ? [] : MissingFields(entity, product);
         return dto;

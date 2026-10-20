@@ -45,6 +45,11 @@ builder.Services.AddSingleton<Condo.Api.Services.ISecretProtector>(_ =>
 builder.Services.AddScoped<Condo.Api.Services.ComprobanteService>();
 builder.Services.AddScoped<Condo.Api.Services.InvoiceDraftService>();
 builder.Services.AddScoped<Condo.Api.Services.OwnerPaymentSettlementService>();
+// Pagos online: interruptores del servidor, adaptadores de proveedores (por ahora solo el simulador) y el orquestador de cobros.
+builder.Services.AddSingleton<Condo.Api.Services.OnlinePaymentSettings>();
+builder.Services.AddSingleton<Condo.Application.Services.IPaymentProvider, Condo.Api.Services.FakePaymentProvider>();
+builder.Services.AddSingleton<Condo.Application.Services.PaymentProviderRegistry>();
+builder.Services.AddScoped<Condo.Api.Services.OnlinePaymentService>();
 builder.Services.AddScoped<Condo.Api.Services.PushDispatcher>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.BuildingConfigOverviewService>();

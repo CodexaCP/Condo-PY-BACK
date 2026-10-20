@@ -67,8 +67,33 @@ public static class PaymentProviderCatalog
                         "Bancard puede exigir que cada comercio pase su propia certificación antes de pasar a producción: consultalo con ellos.",
                         "Usá conexiones distintas para el ambiente de pruebas (sandbox) y para producción: tienen claves distintas."
                     ]))
+        ]),
+        new(FakeProvider, "Simulador (solo pruebas)",
+        [
+            new(FakeProduct, "Simulador de cobros",
+                "Proveedor de mentira para probar el cobro completo sin dinero ni Bancard. Solo existe en entornos de prueba y nunca en producción.",
+                [
+                    new("privateKey", "Clave de firma", true, true, 200,
+                        "Cualquier texto largo: con ella se firma el aviso del simulador. Es secreta y se guarda cifrada.")
+                ],
+                new PaymentCapabilities(
+                    SignedCallback: true,
+                    SupportsReversal: false,
+                    ReversalNote: "El simulador no revierte cobros.",
+                    EmbeddedCheckout: false,
+                    Notes:
+                    [
+                        "Un cobro del simulador solo se aplica a la deuda en edificios marcados como de prueba; en cualquier otro queda registrado como simulado y no crea ningún pago."
+                    ]))
         ])
     ];
+
+    public const string FakeProvider = "Fake";
+    public const string FakeProduct = "Simulator";
+
+    /// <summary>Proveedores que se ofrecen para crear conexiones: el simulador solo si el servidor lo habilitó (Payments:EnableFakeProvider).</summary>
+    public static IEnumerable<PaymentProviderDefinition> Visible(bool fakeEnabled) =>
+        All.Where(p => fakeEnabled || !string.Equals(p.Code, FakeProvider, StringComparison.OrdinalIgnoreCase));
 
     public static PaymentProviderDefinition? FindProvider(string? providerCode) =>
         All.FirstOrDefault(x => string.Equals(x.Code, providerCode, StringComparison.OrdinalIgnoreCase));

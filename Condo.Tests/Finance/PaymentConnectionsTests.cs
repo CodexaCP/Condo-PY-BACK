@@ -136,7 +136,9 @@ public class PaymentConnectionsTests
         ProductCode = "Tpago",
         Environment = environment,
         Settings = new() { ["commerceCode"] = commerce, ["branchCode"] = "1", ["publicKey"] = "pk_public_ABCDEF" },
-        Secrets = privateKey is null ? [] : new() { ["privateKey"] = privateKey }
+        Secrets = privateKey is null ? [] : new() { ["privateKey"] = privateKey },
+        HolderName = "Administradora Sol S.A.",
+        HolderTaxId = "80012345-6"
     };
 
     private static T Ok<T>(ActionResult<T> result) => Assert.IsType<OkObjectResult>(result.Result).Value is T v ? v : throw new InvalidCastException();

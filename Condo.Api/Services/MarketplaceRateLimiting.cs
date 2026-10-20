@@ -28,6 +28,8 @@ public static class MarketplaceRateLimiting
     public const int WritesPerMinute = 60;
     public const int SensitivePerMinute = 12;
     public const int HeavyReadsPerMinute = 20;
+    public const string WebhookPathPrefix = "/api/payment-webhooks";
+    public const int WebhooksPerMinute = 300;
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
     private const int SegmentsPerWindow = 6;
 
@@ -67,6 +69,20 @@ public static class MarketplaceRateLimiting
     /// <summary>Particion del pedido: una por usuario y tipo de accion (sin sesion, por IP).</summary>
     public static RateLimitPartition<string> GetPartition(HttpContext context)
     {
+        // Avisos del proveedor de pagos (anonimos y server-to-server): un tope generoso por conexion, solo para frenar una rafaga de basura. Un
+        // uso normal (un aviso por pago) no se acerca.
+        if (context.Request.Path.StartsWithSegments(WebhookPathPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return RateLimitPartition.GetSlidingWindowLimiter($"webhook:{context.Request.Path.Value?.ToLowerInvariant()}", _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = WebhooksPerMinute,
+                Window = Window,
+                SegmentsPerWindow = SegmentsPerWindow,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+        }
+
         var tier = Classify(context.Request.Method, context.Request.Path);
         if (tier == MarketplaceRateTier.None)
         {

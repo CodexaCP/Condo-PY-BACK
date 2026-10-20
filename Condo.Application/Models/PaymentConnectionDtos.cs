@@ -43,6 +43,8 @@ public class PaymentConnectionBuildingDto
     public Guid BuildingId { get; set; }
     public string BuildingName { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
+    // Edificio de prueba: un cobro de sandbox o del simulador se aplica a la deuda solo aqui.
+    public bool IsTest { get; set; }
 }
 
 public class PaymentConnectionDto
@@ -67,6 +69,12 @@ public class PaymentConnectionDto
     public DateTime? SecretsUpdatedAtUtc { get; set; }
     // Campos obligatorios que todavia no se cargaron: sin ellos no se puede activar.
     public List<string> MissingFields { get; set; } = [];
+
+    // Titular del comercio: a nombre de quien se cobra (nombre y RUC o cedula) y una nota opcional de la cuenta receptora.
+    // Obligatorios para activar. Solo para quienes pueden editar.
+    public string? HolderName { get; set; }
+    public string? HolderTaxId { get; set; }
+    public string? HolderBankNote { get; set; }
 }
 
 public class PaymentConnectionListDto
@@ -91,11 +99,17 @@ public class PaymentConnectionRequest
     public Dictionary<string, string> Settings { get; set; } = [];
     // Campos secretos del catalogo. Vacio o ausente = se conserva el actual; con valor = se reemplaza.
     public Dictionary<string, string> Secrets { get; set; } = [];
+    // Titular del comercio. Nulo = no se toca; vacio borra el dato.
+    public string? HolderName { get; set; }
+    public string? HolderTaxId { get; set; }
+    public string? HolderBankNote { get; set; }
 }
 
 public class PaymentConnectionBuildingsRequest
 {
     public List<Guid> BuildingIds { get; set; } = [];
+    // De los edificios indicados, cuales son de prueba (donde un cobro de sandbox o del simulador SI se aplica a la deuda). Nulo = no se cambia.
+    public List<Guid>? TestBuildingIds { get; set; }
 }
 
 public class PaymentConnectionAuditDto

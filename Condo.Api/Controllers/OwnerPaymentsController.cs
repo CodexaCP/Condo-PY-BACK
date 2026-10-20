@@ -422,6 +422,10 @@ public class OwnerPaymentsController(
         if (request.UnitIds.Except(ownerUnitIds).Any())
             return BadRequest("Una o más unidades no pertenecen a este propietario.");
 
+        // Con un pago online en curso el dinero ya puede estar moviendose: declarar otro pago pagaria los mismos comprobantes.
+        if (await HasOpenOnlinePaymentAsync(ownerId, companyId.Value, ct))
+            return Conflict("Tenés un pago online en curso. Terminalo o esperá a que venza antes de declarar otro pago.");
+
         // El pago solo se acepta si cubre exactamente comprobantes completos (del más antiguo al más
         // reciente); si el monto solo no alcanza, se prueba sumando el saldo a favor disponible
         // (se descuenta solo, nunca lo elige el propietario).
@@ -813,6 +817,8 @@ public class OwnerPaymentsController(
         if (unresolved is not null)
             return Conflict($"El propietario tiene el pago {unresolved} pendiente de revisión desde la app. " +
                             "Apruébelo o rechácelo antes de registrar otro pago.");
+        if (await HasOpenOnlinePaymentAsync(owner.Id, companyId.Value, ct))
+            return Conflict("El propietario tiene un pago online en curso. Esperá a que se confirme o venza antes de registrar otro pago.");
 
         var scope = await accessScope.GetAccessibleBuildingIdsAsync(ct);
         var unitIds = await credits.LoadLinkedUnitIdsAsync(owner.Id, companyId.Value, ct);
@@ -1191,6 +1197,10 @@ public class OwnerPaymentsController(
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
+
+    private Task<bool> HasOpenOnlinePaymentAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
+        dbContext.PaymentIntents.AsNoTracking().AnyAsync(
+            x => !x.IsDeleted && x.CompanyId == companyId && x.OwnerId == ownerId && x.Status == PaymentIntentStatus.Open, ct);
 
     private bool IsOwner() =>
         string.Equals(tenantContext.Role, "Owner", StringComparison.OrdinalIgnoreCase);

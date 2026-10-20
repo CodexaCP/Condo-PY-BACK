@@ -44,5 +44,7 @@ public enum NotificationType
     AdCampaignPaused = 40,
     PaymentDueSoon = 41,
     PaymentDueToday = 42,
-    LateFeeApplied = 43
+    LateFeeApplied = 43,
+    // Un cobro online que el proveedor confirmo pero no se pudo aplicar (el importe cambio, el comprobante ya estaba pagado...): lo resuelve la administracion.
+    OnlinePaymentReviewRequired = 44
 }
