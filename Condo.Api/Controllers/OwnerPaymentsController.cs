@@ -793,6 +793,8 @@ public class OwnerPaymentsController(
         if (request.PaymentDate > DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
             return BadRequest("La fecha de pago no puede ser futura.");
         if (!Enum.IsDefined(request.Method)) return BadRequest("El método de pago no es válido.");
+        if (request.Method == PaymentMethod.Online)
+            return BadRequest("El método «Pago online» lo asigna el sistema al confirmar un cobro del proveedor: elegí otro método para registrar un pago a mano.");
         if (externalReference.Length > 100) return BadRequest("El número de transferencia/documento no puede superar los 100 caracteres.");
         if (notes.Length > 500) return BadRequest("Las notas no pueden superar los 500 caracteres.");
 
@@ -928,6 +930,8 @@ public class OwnerPaymentsController(
         if (!TouchesScope(payment, scope)) return NotFound();
         if (!FullyInScope(payment, scope)) return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
 
+        if (payment.Channel == OwnerPaymentChannel.Online)
+            return BadRequest("Un cobro online no se revierte desde acá: la devolución se gestiona con el proveedor de pagos.");
         if (payment.Channel != OwnerPaymentChannel.Web)
             return BadRequest("Solo se pueden revertir pagos registrados por el sistema. Un pago declarado desde la app se corrige con una nota de crédito.");
         if (payment.Status != OwnerPaymentStatus.Approved)

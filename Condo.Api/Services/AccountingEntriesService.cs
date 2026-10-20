@@ -141,6 +141,12 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
         FinancialAccountType.Cash => pool.FirstOrDefault(o => o.Type == LedgerCategoryType.Asset && o.Name.StartsWith("Caja", StringComparison.OrdinalIgnoreCase)),
         FinancialAccountType.ReserveFund => pool.FirstOrDefault(o => o.Type == LedgerCategoryType.Fund && o.Name.Contains("reserva", StringComparison.OrdinalIgnoreCase))
                                             ?? pool.FirstOrDefault(o => o.Type == LedgerCategoryType.Fund),
+        // Un derecho de cobro frente al proveedor de pagos: se sugiere un activo cuyo nombre lo diga; si el plan no lo tiene, sin sugerencia.
+        FinancialAccountType.Clearing => pool.FirstOrDefault(o => o.Type == LedgerCategoryType.Asset
+            && (o.Name.Contains("online", StringComparison.OrdinalIgnoreCase)
+                || o.Name.Contains("por liquidar", StringComparison.OrdinalIgnoreCase)
+                || o.Name.Contains("tránsito", StringComparison.OrdinalIgnoreCase)
+                || o.Name.Contains("transito", StringComparison.OrdinalIgnoreCase))),
         _ => null
     };
 

@@ -960,6 +960,7 @@ public static class FinanceExcelExporter
     {
         FinancialAccountType.Cash => "Caja",
         FinancialAccountType.Bank => "Banco",
+        FinancialAccountType.Clearing => "Cobros online por liquidar",
         _ => "Fondo de reserva"
     };
 

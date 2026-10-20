@@ -212,6 +212,7 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
         PaymentMethod.BankTransfer => "Transferencia bancaria",
         PaymentMethod.Card => "Tarjeta",
         PaymentMethod.Check => "Cheque",
+        PaymentMethod.Online => "Pago online",
         _ => "Otro"
     };
 

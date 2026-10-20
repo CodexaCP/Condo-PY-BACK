@@ -32,7 +32,7 @@ public class FinanceAccountsController(
             .Where(x => !x.IsDeleted && x.BuildingId == buildingId)
             .ToListAsync(cancellationToken);
 
-        // Caja, bancos y fondo de reserva, y dentro de cada tipo por nombre (el orden de la enumeracion, no el del texto).
+        // Caja, bancos, fondo de reserva y cobros online por liquidar, y dentro de cada tipo por nombre (el orden de la enumeracion, no el del texto).
         return Ok(accounts.OrderBy(x => x.Type).ThenBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).Select(ToDto).ToList());
     }
 
@@ -43,6 +43,11 @@ public class FinanceAccountsController(
         if (denied is not null)
         {
             return denied;
+        }
+
+        if (request.Type == FinancialAccountType.Clearing)
+        {
+            return BadRequest(ClearingIsSystemMessage);
         }
 
         var companyId = await ResolveCompanyIdAsync(request.BuildingId, cancellationToken);
@@ -81,8 +86,14 @@ public class FinanceAccountsController(
         FinancialAccountType.Cash => "caja",
         FinancialAccountType.Bank => "banco",
         FinancialAccountType.ReserveFund => "fondo de reserva",
+        FinancialAccountType.Clearing => "cobros online por liquidar",
         _ => type.ToString()
     };
+
+    // La cuenta de cobros online por liquidar la crea y la mantiene el sistema (una por edificio): a mano no se crea, no se edita ni se elimina.
+    private const string ClearingIsSystemMessage =
+        "La cuenta de cobros online por liquidar la administra el sistema: no se crea, no se edita ni se elimina a mano. " +
+        "Su saldo pasa al banco con una transferencia cuando el proveedor liquida.";
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<FinancialAccountDto>> Update(Guid id, [FromBody] FinancialAccountUpsertRequest request, CancellationToken cancellationToken)
@@ -97,6 +108,11 @@ public class FinanceAccountsController(
         if (denied is not null)
         {
             return denied;
+        }
+
+        if (entity.Type == FinancialAccountType.Clearing || request.Type == FinancialAccountType.Clearing)
+        {
+            return BadRequest(ClearingIsSystemMessage);
         }
 
         var error = await ValidateAsync(request, entity.BuildingId, entity.Id, cancellationToken);
@@ -159,6 +175,11 @@ public class FinanceAccountsController(
         if (denied is not null)
         {
             return denied;
+        }
+
+        if (entity.Type == FinancialAccountType.Clearing)
+        {
+            return BadRequest(ClearingIsSystemMessage);
         }
 
         // Con meses cerrados no se elimina una cuenta: sus saldos y movimientos ya estan cerrados.

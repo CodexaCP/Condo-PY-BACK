@@ -265,7 +265,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
 
         var reasons = new List<string>();
         if (settings?.FinanceStartDate is null) reasons.Add("Falta la fecha de arranque.");
-        if (!accounts.Any(x => x.IsActive && x.Type != FinancialAccountType.ReserveFund)) reasons.Add("Falta al menos una cuenta de caja o banco.");
+        if (!accounts.Any(x => x.IsActive && x.Type != FinancialAccountType.ReserveFund && x.Type != FinancialAccountType.Clearing)) reasons.Add("Falta al menos una cuenta de caja o banco.");
         if (activeCategories == 0) reasons.Add("El plan de cuentas no tiene cuentas activas.");
 
         var complete = settings?.SetupCompleted == true;

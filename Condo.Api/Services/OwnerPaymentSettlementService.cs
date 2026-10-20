@@ -185,10 +185,16 @@ public class OwnerPaymentSettlementService(ICondoDbContext dbContext, OwnerCredi
                 Amount = comprobante.Total,
                 Method = ownerPayment.Method,
                 Reference = ownerPayment.Reference,
-                Notes = ownerPayment.Channel == OwnerPaymentChannel.Web
-                    ? $"Pago registrado por el sistema. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}" +
-                      (string.IsNullOrWhiteSpace(ownerPayment.ExternalReference) ? "" : $". Doc.: {ownerPayment.ExternalReference}")
-                    : $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
+                Notes = ownerPayment.Channel switch
+                {
+                    OwnerPaymentChannel.Web =>
+                        $"Pago registrado por el sistema. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}" +
+                        (string.IsNullOrWhiteSpace(ownerPayment.ExternalReference) ? "" : $". Doc.: {ownerPayment.ExternalReference}"),
+                    OwnerPaymentChannel.Online =>
+                        $"Pago online confirmado por el proveedor. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}" +
+                        (string.IsNullOrWhiteSpace(ownerPayment.ExternalReference) ? "" : $". Transacción: {ownerPayment.ExternalReference}"),
+                    _ => $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
+                }
             };
             dbContext.Payments.Add(paymentRecord);
             createdPayments.Add((comprobante, paymentRecord));

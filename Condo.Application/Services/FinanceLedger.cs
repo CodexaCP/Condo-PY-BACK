@@ -38,20 +38,22 @@ public enum CollectionClass
 }
 
 /// <summary>Cuentas del edificio que usa el libro para asignar cada movimiento (las que no tienen cuenta propia en el sistema).</summary>
-public sealed record LedgerAccounts(Guid? CashId, Guid? FundId, Guid? DefaultId)
+public sealed record LedgerAccounts(Guid? CashId, Guid? FundId, Guid? DefaultId, Guid? ClearingId = null)
 {
     /// <summary>
-    /// Caja y fondo de reserva: la unica activa de cada tipo. Cuenta por defecto: la configurada si sigue activa y no es el
-    /// fondo; si no, el unico banco activo; si no, la unica cuenta activa que no sea el fondo.
+    /// Caja, fondo de reserva y cobros online por liquidar: la unica activa de cada tipo. Cuenta por defecto: la configurada si sigue
+    /// activa y no es el fondo ni la de cobros online; si no, el unico banco activo; si no, la unica cuenta activa que no sea el fondo ni
+    /// la de cobros online (ni el fondo ni los cobros por liquidar son una caja o un banco donde caiga "el resto").
     /// </summary>
     public static LedgerAccounts Resolve(IReadOnlyCollection<FinancialAccount> accounts, Guid? configuredDefaultId)
     {
         var active = accounts.Where(x => !x.IsDeleted && x.IsActive).ToList();
         var cash = active.Where(x => x.Type == FinancialAccountType.Cash).Select(x => (Guid?)x.Id).FirstOrDefault();
         var fund = active.Where(x => x.Type == FinancialAccountType.ReserveFund).Select(x => (Guid?)x.Id).FirstOrDefault();
+        var clearing = active.Where(x => x.Type == FinancialAccountType.Clearing).Select(x => (Guid?)x.Id).FirstOrDefault();
 
         Guid? defaultId = null;
-        if (configuredDefaultId.HasValue && active.Any(x => x.Id == configuredDefaultId.Value && x.Type != FinancialAccountType.ReserveFund))
+        if (configuredDefaultId.HasValue && active.Any(x => x.Id == configuredDefaultId.Value && IsOperating(x)))
         {
             defaultId = configuredDefaultId;
         }
@@ -64,7 +66,7 @@ public sealed record LedgerAccounts(Guid? CashId, Guid? FundId, Guid? DefaultId)
             }
             else
             {
-                var operating = active.Where(x => x.Type != FinancialAccountType.ReserveFund).ToList();
+                var operating = active.Where(IsOperating).ToList();
                 if (operating.Count == 1)
                 {
                     defaultId = operating[0].Id;
@@ -72,8 +74,12 @@ public sealed record LedgerAccounts(Guid? CashId, Guid? FundId, Guid? DefaultId)
             }
         }
 
-        return new LedgerAccounts(cash, fund, defaultId);
+        return new LedgerAccounts(cash, fund, defaultId, clearing);
     }
+
+    // Caja o banco: donde cae "el resto". El fondo de reserva y los cobros online por liquidar tienen su propia cuenta.
+    public static bool IsOperating(FinancialAccount account) =>
+        account.Type is not (FinancialAccountType.ReserveFund or FinancialAccountType.Clearing);
 }
 
 /// <summary>Cuenta y rubro (clave de la plantilla) en que cae un hecho, y su sentido.</summary>
@@ -113,7 +119,13 @@ public static class FinanceLedgerRules
     public static LedgerClassification ForPayment(PaymentMethod method, CollectionClass cls, LedgerAccounts accounts)
     {
         Guid? account;
-        if (cls == CollectionClass.ReserveFund)
+        if (method == PaymentMethod.Online)
+        {
+            // Un cobro online todavia no llego al banco: es un derecho de cobro frente al proveedor, sea cual sea el cargo que cubrio.
+            // Sin cuenta de cobros por liquidar, a la cuenta por defecto para no perder el cobro del libro.
+            account = accounts.ClearingId ?? accounts.DefaultId;
+        }
+        else if (cls == CollectionClass.ReserveFund)
         {
             account = accounts.FundId ?? accounts.DefaultId;
         }

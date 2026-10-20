@@ -56,6 +56,7 @@ public static class FinanceReportBuilder
             CashBalance = accounts.Where(a => a.Type == FinancialAccountType.Cash).Sum(a => a.Balance),
             BankBalance = accounts.Where(a => a.Type == FinancialAccountType.Bank).Sum(a => a.Balance),
             ReserveFundBalance = accounts.Where(a => a.Type == FinancialAccountType.ReserveFund).Sum(a => a.Balance),
+            ClearingBalance = accounts.Where(a => a.Type == FinancialAccountType.Clearing).Sum(a => a.Balance),
             DefaultAccountId = defaultAccountId,
             Warnings = warnings
         };

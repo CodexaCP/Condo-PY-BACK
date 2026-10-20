@@ -28,6 +28,8 @@ public class BuildingExpensesController(
 
     private static readonly string[] AllowedReceiptExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
     private const long MaxReceiptSizeBytes = 10 * 1024 * 1024; // 10 MB
+    private const string ClearingNotForExpenses =
+        "La cuenta de cobros online por liquidar no es una caja ni un banco: elegí la cuenta desde la que se pagó el gasto.";
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<BuildingExpenseDto>>> GetAll(
@@ -404,6 +406,7 @@ public class BuildingExpensesController(
                 x => !x.IsDeleted && x.Id == request.AccountId.Value && x.BuildingId == entity.BuildingId, cancellationToken);
             if (account is null) return BadRequest("La cuenta de pago no existe en este edificio.");
             if (!account.IsActive) return BadRequest("La cuenta de pago está desactivada.");
+            if (account.Type == FinancialAccountType.Clearing) return BadRequest(ClearingNotForExpenses);
         }
 
         // Cierre de periodo: la plata se mueve en la fecha del pago (y, si ya estaba pagado, deja de moverse en la anterior).
@@ -498,6 +501,7 @@ public class BuildingExpensesController(
                 x => !x.IsDeleted && x.Id == request.PaidFromAccountId.Value && x.BuildingId == request.BuildingId, cancellationToken);
             if (account is null) return ("La cuenta de pago no existe en este edificio.", null);
             if (!account.IsActive) return ("La cuenta de pago está desactivada.", null);
+            if (account.Type == FinancialAccountType.Clearing) return (ClearingNotForExpenses, null);
         }
 
         // IVA: la tasa pedida; sin tasa, la del rubro elegido (si tiene tratamiento definido).

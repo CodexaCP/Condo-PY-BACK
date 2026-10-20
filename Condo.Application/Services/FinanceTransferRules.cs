@@ -20,6 +20,7 @@ public static class FinanceTransferRules
     {
         if (to == FinancialAccountType.ReserveFund && from != FinancialAccountType.ReserveFund) return "Aporte al fondo de reserva";
         if (from == FinancialAccountType.ReserveFund && to != FinancialAccountType.ReserveFund) return "Retiro del fondo de reserva";
+        if (from == FinancialAccountType.Clearing) return "Liquidación de cobros online";
         if (from == FinancialAccountType.Cash && to == FinancialAccountType.Bank) return "Depósito de efectivo";
         if (from == FinancialAccountType.Bank && to == FinancialAccountType.Cash) return "Retiro de efectivo";
         return "Transferencia entre cuentas";
@@ -48,6 +49,11 @@ public static class FinanceTransferRules
         if (from.Id == to.Id) return "La cuenta de origen y la de destino tienen que ser distintas.";
         if (from.BuildingId != to.BuildingId) return "Las dos cuentas tienen que ser del mismo edificio.";
         if (!from.IsActive || !to.IsActive) return "Las dos cuentas tienen que estar activas.";
+        if (to.Type == FinancialAccountType.Clearing)
+        {
+            return "La cuenta de cobros online por liquidar solo puede ser el origen: los cobros entran por el proveedor de pagos.";
+        }
+
         if (amount <= 0m) return "El importe tiene que ser mayor que cero.";
         if (decimal.Round(amount, 2) != amount) return "El importe no puede tener más de dos decimales.";
         if (date > today) return "La fecha no puede ser futura.";

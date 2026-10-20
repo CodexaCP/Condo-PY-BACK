@@ -267,6 +267,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                         PaymentMethod.BankTransfer => "Transferencia",
                         PaymentMethod.Card => "Tarjeta",
                         PaymentMethod.Check => "Cheque",
+                        PaymentMethod.Online => "Pago online",
                         _ => "Otro"
                     };
                     var refText = string.IsNullOrEmpty(payment.Reference) ? methodLabel : $"{methodLabel} — {payment.Reference}";

@@ -276,6 +276,11 @@ public class FinanceController(
             {
                 return BadRequest("La cuenta por defecto es una caja o un banco; el fondo de reserva tiene su propia cuenta.");
             }
+
+            if (account.Type == FinancialAccountType.Clearing)
+            {
+                return BadRequest("La cuenta por defecto es una caja o un banco; los cobros online por liquidar tienen su propia cuenta.");
+            }
         }
 
         var settings = await GetOrCreateSettingsAsync(buildingId, cancellationToken);
@@ -379,7 +384,8 @@ public class FinanceController(
         }
 
         var hasCashOrBank = await Db.FinancialAccounts.AnyAsync(
-            x => !x.IsDeleted && x.IsActive && x.BuildingId == buildingId && x.Type != FinancialAccountType.ReserveFund,
+            x => !x.IsDeleted && x.IsActive && x.BuildingId == buildingId
+                 && x.Type != FinancialAccountType.ReserveFund && x.Type != FinancialAccountType.Clearing,
             cancellationToken);
         if (!hasCashOrBank)
         {

@@ -31,6 +31,9 @@ public class FinanceBalancesDto
     public decimal CashBalance { get; set; }
     public decimal BankBalance { get; set; }
     public decimal ReserveFundBalance { get; set; }
+    // Cobros online que el proveedor todavia no liquido (un derecho de cobro, no dinero disponible). No se suma a caja, banco ni fondo,
+    // aunque si figura en TotalBalance porque es parte de lo que tiene el edificio.
+    public decimal ClearingBalance { get; set; }
     public Guid? DefaultAccountId { get; set; }
     public IReadOnlyList<string> Warnings { get; set; } = [];
 }
