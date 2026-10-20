@@ -294,6 +294,20 @@ public class OnlinePaymentFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task LasOpcionesIndicanElCobroEnCursoParaQueLaAppLoRetome()
+    {
+        Assert.Null((await Service().GetOptionsAsync(_owner.Id, _env.Company.Id, default)).Buildings[0].OpenPaymentId);
+        var dto = await CreateOk();
+
+        var building = (await Service().GetOptionsAsync(_owner.Id, _env.Company.Id, default)).Buildings[0];
+
+        Assert.Equal(dto.Id, building.OpenPaymentId);
+        Assert.Contains("en curso", building.BlockedReason);
+        await Send(Attempt(1));   // al pagarse deja de estar en curso
+        Assert.Null((await Service().GetOptionsAsync(_owner.Id, _env.Company.Id, default)).Buildings.SingleOrDefault()?.OpenPaymentId);
+    }
+
+    [Fact]
     public async Task UnPagoDeclaradoPendienteBloqueaElCobroOnline()
     {
         _env.T.Db.OwnerPayments.Add(new OwnerPayment

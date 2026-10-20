@@ -36,6 +36,8 @@ public class OnlinePaymentBuildingOptionDto
     public List<OnlinePaymentComprobanteDto> Comprobantes { get; set; } = [];
     // Si no puede pagar ahora (un pago declarado pendiente, un cobro en curso), por que.
     public string? BlockedReason { get; set; }
+    // Cobro online en curso del propietario en este edificio: la app lo retoma (por ejemplo si se cerró mientras pagaba en la pagina del proveedor).
+    public Guid? OpenPaymentId { get; set; }
 }
 
 public class OnlinePaymentOptionsDto

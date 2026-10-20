@@ -9,7 +9,8 @@ Fecha: 2026-10-20. Rama `feature/pagos-online` (BACK y WEB; el APP no tiene camb
 **No es todavía:**
 
 - **No hay adaptador de Bancard.** No se cobra plata real. Falta programar Tpago y eso espera las respuestas de la sección 5.5 de la propuesta.
-- **No hay pantalla del propietario en el APP.** El propietario todavía no puede tocar «Pagar ahora». Para probar, el recorrido del propietario se hace llamando a la API (sección 5).
+- **La pantalla del propietario en el APP** (Mis Pagos → «Pagá tus expensas con tarjeta» → `Pagar online`) existe en la rama `feature/pagos-online` del APP, pero hay que **reconstruir y reinstalar el APK**. La tarjeta solo aparece si el servidor tiene el cobro encendido y el edificio tiene un medio de pago activo. Para probar sin APP, el recorrido del propietario también se puede hacer llamando a la API (sección 3).
+- **Con el proveedor falso la «página de pago» no existe:** el botón «Abrir la página de pago» abre una dirección del servidor que no tiene página. El pago se confirma desde la web (Cobros online → Simular pago aprobado) y la pantalla del APP se actualiza sola en unos segundos.
 - **No se registran liquidaciones del proveedor ni comisiones** (decisiones D-1 y D-2). La plata que queda «por liquidar» se pasa al banco con una **transferencia entre cuentas** de Finanzas.
 - **No hay reversas** desde Condo-PY ni conciliación contra el portal del proveedor.
 
@@ -146,7 +147,7 @@ SELECT UnitId, ExpensePeriodId FROM PaymentIntentItems WHERE IsOpen = 1 AND IsDe
 
 | Ruta | Quién | Para qué |
 |---|---|---|
-| `GET api/online-payments/options` | Propietario | Por edificio: medios de pago activos (con titular y si es de prueba), comprobantes con su **acumulado** y, si no puede pagar ahora, el motivo (`blockedReason`). |
+| `GET api/online-payments/options` | Propietario | Por edificio: medios de pago activos (con titular y si es de prueba), comprobantes con su **acumulado**, el motivo si no puede pagar ahora (`blockedReason`) y el cobro en curso (`openPaymentId`) para retomarlo si la app se cerró. |
 | `POST api/online-payments` | Propietario | Abre el cobro: `{ buildingId, connectionId?, throughUnitId, throughExpensePeriodId }`. Devuelve número, importe, titular, vencimiento y `checkoutUrl`. `connectionId` solo si el edificio tiene más de un medio. |
 | `GET api/online-payments/{id}` | Propietario | Estado (`Open`, `Paid`, `Closed`, `ReviewRequired`) para la consulta periódica. |
 | `POST api/payment-webhooks/{publicId}` | Proveedor | Aviso anónimo, sin CORS. Responde `{"status":"success"}` solo si el pago quedó registrado. |
@@ -173,5 +174,5 @@ Sin tocar la base ni el código: quitá `Payments__CollectionEnabled` (o ponelo 
 1. Respuestas de Bancard a las preguntas de la sección 5.5 de la propuesta (en especial: si una plataforma puede integrar en nombre de muchos comercios, si el aviso de Tpago va firmado o cifrado, si el aviso trae `reference_id` y la política de reintentos). Hasta tenerlas, el cruce del aviso con el cobro se hace por `link_alias`.
 2. Adaptador de Tpago (`IPaymentProvider`): crear el link, verificar el aviso por IP y TLS, y **consultar el estado del pago** antes de aplicarlo. El contrato todavía no tiene esa consulta; se agrega junto con el adaptador, y con ella el proceso de vencimiento podrá resolver los intentos sin aviso.
 3. `ForwardedHeaders` en el proxy para filtrar por las cuatro IP de Bancard.
-4. Pantalla de pago en el APP y piloto con **un** cliente.
+4. Probar la pantalla de pago del APP con un proveedor real (abre la página del proveedor en el navegador del teléfono y no vuelve sola a la app: consulta el estado cada 5 segundos y al volver a primer plano) y piloto con **un** cliente.
 5. Decisiones fiscales y de comisión con el contador de cada cliente (D-1 y D-2) antes de registrar liquidaciones.

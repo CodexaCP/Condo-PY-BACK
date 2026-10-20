@@ -81,6 +81,12 @@ public class OnlinePaymentService(
                 .Select(x => new { x.UnitId, x.ExpensePeriodId })
                 .ToListAsync(ct))
             .Select(x => (x.UnitId, x.ExpensePeriodId)).ToHashSet();
+        var openByBuilding = (await db.PaymentIntents.AsNoTracking()
+                .Where(x => !x.IsDeleted && x.CompanyId == companyId && x.OwnerId == ownerId && x.Status == PaymentIntentStatus.Open)
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => new { x.BuildingId, x.Id })
+                .ToListAsync(ct))
+            .GroupBy(x => x.BuildingId).ToDictionary(g => g.Key, g => g.Last().Id);
 
         foreach (var buildingId in buildingIds)
         {
@@ -119,6 +125,7 @@ public class OnlinePaymentService(
                 option.BlockedReason = "Tenés un pago declarado pendiente de revisión. Esperá a que se resuelva antes de pagar online.";
             else if (inBuilding.Any(c => openItems.Contains((c.UnitId, c.ExpensePeriodId))))
                 option.BlockedReason = "Ya tenés un pago online en curso en este edificio. Terminalo o esperá a que venza.";
+            if (openByBuilding.TryGetValue(buildingId, out var openId)) option.OpenPaymentId = openId;
 
             options.Buildings.Add(option);
         }
