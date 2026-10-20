@@ -79,6 +79,8 @@ public class FinancialAccountDto
     public FinancialAccountType Type { get; set; }
     public decimal OpeningBalance { get; set; }
     public bool IsActive { get; set; }
+    // Se concilia con el extracto (valor efectivo).
+    public bool Reconciles { get; set; }
 }
 
 public class FinancialAccountUpsertRequest
@@ -89,6 +91,8 @@ public class FinancialAccountUpsertRequest
     public FinancialAccountType Type { get; set; } = FinancialAccountType.Cash;
     public decimal OpeningBalance { get; set; }
     public bool IsActive { get; set; } = true;
+    // Nulo = al crear, lo que corresponde al tipo (los bancos se concilian); al editar, no cambia.
+    public bool? Reconciles { get; set; }
 }
 
 // ── Plan de cuentas ───────────────────────────────────────────────────────────

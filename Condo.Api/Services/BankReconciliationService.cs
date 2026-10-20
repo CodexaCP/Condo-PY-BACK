@@ -48,7 +48,7 @@ public sealed class BankReconciliationService(
             .Where(x => !x.IsDeleted && x.BuildingId == ctx.BuildingId)
             .ToListAsync(ct);
 
-        var accounts = ctx.Accounts.Where(a => a.Type == FinancialAccountType.Bank).OrderBy(a => a.Name).Select(a =>
+        var accounts = ctx.Accounts.Where(a => a.Reconciles).OrderBy(a => a.Name).Select(a =>
         {
             var own = reconciliations.Where(r => r.AccountId == a.Id).ToList();
             var lastCompleted = own.Where(r => r.Status == BankReconciliationStatus.Completed).OrderByDescending(r => r.StatementDate).FirstOrDefault();
@@ -57,6 +57,7 @@ public sealed class BankReconciliationService(
             {
                 AccountId = a.Id,
                 AccountName = a.Name,
+                AccountType = a.Type,
                 IsActive = a.IsActive,
                 BookBalance = balances.TryGetValue(a.Id, out var b) ? b.Balance : a.OpeningBalance,
                 LastCompletedDate = lastCompleted?.StatementDate,
@@ -106,9 +107,10 @@ public sealed class BankReconciliationService(
     {
         var account = ctx.Accounts.FirstOrDefault(a => a.Id == request.AccountId);
         if (account is null) return ReconResult<ReconciliationWorkspaceDto>.Fail(400, "account_not_found", "La cuenta no existe en este edificio.");
-        if (account.Type != FinancialAccountType.Bank)
+        if (!account.Reconciles)
         {
-            return ReconResult<ReconciliationWorkspaceDto>.Fail(400, "account_not_bank", "Solo se concilian las cuentas bancarias.");
+            return ReconResult<ReconciliationWorkspaceDto>.Fail(400, "account_not_reconcilable",
+                "La cuenta no está marcada para conciliar con extracto. Activalo en Finanzas → Configuración → Cuentas.");
         }
 
         var dateError = ValidateStatement(ctx, request.StatementDate, request.StatementBalance, request.Notes);

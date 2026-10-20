@@ -10,6 +10,8 @@ public class ReconciliationAccountDto
 {
     public Guid AccountId { get; set; }
     public string AccountName { get; set; } = string.Empty;
+    // Tipo de la cuenta (banco, caja o fondo de reserva): ahora se puede conciliar cualquiera que la empresa marque.
+    public FinancialAccountType AccountType { get; set; }
     public bool IsActive { get; set; }
     // Saldo del libro a hoy.
     public decimal BookBalance { get; set; }

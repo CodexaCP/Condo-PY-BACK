@@ -424,7 +424,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
         }
 
         var bankAccounts = await dbContext.FinancialAccounts.AsNoTracking()
-            .CountAsync(x => !x.IsDeleted && x.BuildingId == b.Id && x.Type == FinancialAccountType.Bank, cancellationToken);
+            .CountAsync(x => !x.IsDeleted && x.BuildingId == b.Id && (x.ReconcileOverride == true || (x.ReconcileOverride == null && x.Type == FinancialAccountType.Bank)), cancellationToken);
         var rows = await dbContext.BankReconciliations.AsNoTracking()
             .Where(x => !x.IsDeleted && x.BuildingId == b.Id)
             .Select(x => new { x.Status, x.StatementDate })
@@ -433,8 +433,8 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
         var last = completed.Count == 0 ? (DateOnly?)null : completed.Max(x => x.StatementDate);
 
         var reason = bankAccounts == 0
-            ? "El edificio no tiene cuentas bancarias cargadas en Finanzas."
-            : completed.Count == 0 ? "Todavía no se concilió ninguna cuenta bancaria." : null;
+            ? "El edificio no tiene cuentas para conciliar cargadas en Finanzas (los bancos se concilian; en las demás cuentas se puede activar)."
+            : completed.Count == 0 ? "Todavía no se concilió ninguna cuenta." : null;
 
         return new ConfigSectionDto
         {

@@ -215,8 +215,8 @@ public class ConfigCenterPhase5Tests
         env.T.Db.SaveChanges();
         var ctx = await Context(env);
 
-        Assert.Equal("account_not_bank", (await Service(env).StartAsync(ctx, Start(env, cash.Id), env.Company.Id, default)).Code);
-        Assert.Equal("account_not_bank", (await Service(env).StartAsync(ctx, Start(env, fund.Id), env.Company.Id, default)).Code);
+        Assert.Equal("account_not_reconcilable", (await Service(env).StartAsync(ctx, Start(env, cash.Id), env.Company.Id, default)).Code);
+        Assert.Equal("account_not_reconcilable", (await Service(env).StartAsync(ctx, Start(env, fund.Id), env.Company.Id, default)).Code);
         Assert.Equal("account_not_found", (await Service(env).StartAsync(ctx, Start(env, Guid.NewGuid()), env.Company.Id, default)).Code);
         _ = bank;
     }

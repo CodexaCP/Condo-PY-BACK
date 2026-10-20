@@ -2796,6 +2796,9 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("OpeningBalance")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<bool?>("ReconcileOverride")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(20)

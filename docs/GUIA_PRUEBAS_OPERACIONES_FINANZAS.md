@@ -72,3 +72,15 @@ Con los triggers instalados, estas sentencias deben fallar con «Una operacion d
 - Comisiones e intereses bancarios y ajuste de saldo (etapa 2, después de que responda el contador).
 - Adjuntar el acta como archivo (hoy es un texto).
 - Aviso de saldo negativo contra el saldo **a la fecha** de una operación atrasada (usa el saldo de hoy).
+
+## 9. Conciliar el fondo de reserva (o la caja): casilla «Se concilia con el extracto»
+
+Antes solo se conciliaban las cuentas de tipo Banco. Ahora cada cuenta tiene una casilla, en **Finanzas → Configuración → Cuentas → Editar**:
+
+1. Editar la cuenta de **Fondo de reserva** y tildar **«Se concilia con el extracto»**. Guardar. En la lista aparece «Fondo de reserva · se concilia».
+2. Ir a **Conciliación bancaria**: la cuenta del fondo ahora figura (con «(fondo de reserva)» al lado del nombre) y se puede empezar una conciliación igual que con un banco.
+3. Cargar un aporte al fondo desde **Operaciones** (Banco → Fondo, con acta): al armar la conciliación del fondo, el aporte aparece como movimiento para tildar contra el extracto.
+4. Los bancos vienen tildados por defecto. Se puede destildar uno (por ejemplo, una cuenta que no tiene extracto): sale de la lista de conciliación. **No se puede destildar una cuenta que tiene una conciliación abierta**: primero se cierra o se descarta.
+5. Una cuenta que ya tenía conciliaciones no cambia nada: los bancos existentes siguen conciliándose (la migración no toca datos).
+
+Sigue siendo una sola cuenta de fondo de reserva y una sola caja por edificio. La casilla solo decide si se concilia; el comportamiento de cada tipo (a dónde van los aportes del fondo, la pantalla del fondo) no cambia.

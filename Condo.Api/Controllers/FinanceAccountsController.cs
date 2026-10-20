@@ -64,7 +64,8 @@ public class FinanceAccountsController(
             Name = request.Name.Trim(),
             Type = request.Type,
             OpeningBalance = decimal.Round(request.OpeningBalance, 2),
-            IsActive = request.IsActive
+            IsActive = request.IsActive,
+            ReconcileOverride = request.Reconciles
         };
 
         Db.FinancialAccounts.Add(entity);
@@ -104,6 +105,13 @@ public class FinanceAccountsController(
             return error;
         }
 
+        // Una cuenta con una conciliacion abierta sigue conciliandose: primero se cierra o se descarta.
+        if (request.Reconciles == false && entity.Reconciles
+            && await Db.BankReconciliations.AsNoTracking().AnyAsync(x => !x.IsDeleted && x.AccountId == entity.Id && x.Status == BankReconciliationStatus.Open, cancellationToken))
+        {
+            return Conflict("La cuenta tiene una conciliación abierta. Cerrala o descartala antes de dejar de conciliarla.");
+        }
+
         var accountChanges = new List<ConfigChange>();
         var newName = request.Name.Trim();
         var newBalance = decimal.Round(request.OpeningBalance, 2);
@@ -119,6 +127,8 @@ public class FinanceAccountsController(
         if (entity.Type != request.Type) accountChanges.Add(new ConfigChange("type", "Tipo", TypeLabel(entity.Type), TypeLabel(request.Type)));
         if (entity.OpeningBalance != newBalance) accountChanges.Add(new ConfigChange("openingBalance", "Saldo inicial", $"{entity.OpeningBalance:N0}", $"{newBalance:N0}"));
         if (entity.IsActive != request.IsActive) accountChanges.Add(new ConfigChange("isActive", "Activa", entity.IsActive ? "Sí" : "No", request.IsActive ? "Sí" : "No"));
+        var newReconciles = request.Reconciles ?? entity.Reconciles;
+        if (entity.Reconciles != newReconciles) accountChanges.Add(new ConfigChange("reconciles", "Se concilia con extracto", entity.Reconciles ? "Sí" : "No", newReconciles ? "Sí" : "No"));
         if (accountChanges.Count > 0)
         {
             Audit.Add(entity.CompanyId, entity.BuildingId, ConfigSectionKeys.Chart, "Updated",
@@ -130,6 +140,7 @@ public class FinanceAccountsController(
         entity.Type = request.Type;
         entity.OpeningBalance = newBalance;
         entity.IsActive = request.IsActive;
+        if (request.Reconciles.HasValue) entity.ReconcileOverride = request.Reconciles;
 
         var conflict = await SaveOrConflictAsync(cancellationToken);
         return conflict ?? Ok(ToDto(entity));
@@ -220,6 +231,7 @@ public class FinanceAccountsController(
         Name = x.Name,
         Type = x.Type,
         OpeningBalance = x.OpeningBalance,
-        IsActive = x.IsActive
+        IsActive = x.IsActive,
+        Reconciles = x.Reconciles
     };
 }
