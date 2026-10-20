@@ -99,6 +99,8 @@ public class OnlinePaymentDto
 
     public Guid ConnectionId { get; set; }
     public string ConnectionName { get; set; } = string.Empty;
+    // Proveedor de la conexión ("Fake" = simulador): la pantalla ofrece simular la respuesta solo para el simulador.
+    public string ConnectionProviderCode { get; set; } = string.Empty;
     public long? AttemptNumber { get; set; }
     public string? AttemptStatus { get; set; }
     // Donde paga el propietario (redireccion). Nulo cuando el intento ya termino.

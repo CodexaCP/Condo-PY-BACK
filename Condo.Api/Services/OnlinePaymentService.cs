@@ -384,6 +384,7 @@ public class OnlinePaymentService(
             CreatedAtUtc = intent.CreatedAtUtc,
             ConnectionId = intent.ConnectionId,
             ConnectionName = intent.Connection?.Name ?? string.Empty,
+            ConnectionProviderCode = intent.Connection?.ProviderCode ?? string.Empty,
             AttemptNumber = attempt?.AttemptNumber,
             AttemptStatus = attempt?.Status.ToString(),
             CheckoutUrl = attempt is { Status: PaymentAttemptStatus.Pending } ? attempt.CheckoutUrl : null,
