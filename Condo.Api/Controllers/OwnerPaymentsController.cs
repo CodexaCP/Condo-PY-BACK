@@ -22,7 +22,8 @@ public class OwnerPaymentsController(
     OwnerCreditService credits,
     ComprobanteService comprobantes,
     InvoiceDraftService invoiceDrafts,
-    PushDispatcher pushDispatcher) : ControllerBase
+    PushDispatcher pushDispatcher,
+    OwnerPaymentSettlementService settlement) : ControllerBase
 {
     // ─── GET MY DEBT (Owner only) ────────────────────────────────────────────
     [HttpGet("my-debt")]
@@ -425,8 +426,8 @@ public class OwnerPaymentsController(
         // reciente); si el monto solo no alcanza, se prueba sumando el saldo a favor disponible
         // (se descuenta solo, nunca lo elige el propietario).
         var openComprobantes = await comprobantes.LoadAsync(ownerUnitIds, companyId.Value, false, ct);
-        var availableCreditForCreate = await GetAvailableCreditAsync(ownerId, companyId.Value, ct);
-        var (createCoverage, _) = CoverWithCredit(request.DeclaredAmount, availableCreditForCreate, openComprobantes);
+        var availableCreditForCreate = await settlement.GetAvailableCreditAsync(ownerId, companyId.Value, ct);
+        var (createCoverage, _) = OwnerPaymentSettlementService.CoverWithCredit(request.DeclaredAmount, availableCreditForCreate, openComprobantes);
         if (!createCoverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.DeclaredAmount + availableCreditForCreate, openComprobantes));
 
@@ -440,7 +441,7 @@ public class OwnerPaymentsController(
             ComprobanteUrl = request.ComprobanteUrl?.Trim() ?? string.Empty,
             DeclaredAmount = request.DeclaredAmount,
             Status = OwnerPaymentStatus.Pending,
-            Reference = await NextReferenceAsync(companyId.Value, year, ct)
+            Reference = await settlement.NextReferenceAsync(companyId.Value, year, ct)
         };
 
         foreach (var unitId in request.UnitIds.Distinct())
@@ -454,22 +455,7 @@ public class OwnerPaymentsController(
         }
 
         dbContext.OwnerPayments.Add(ownerPayment);
-
-        // Dos pagos de la misma empresa enviados a la vez pueden calcular la misma referencia: el indice unico
-        // (empresa, referencia) rechaza al segundo y se reintenta con la siguiente. Las entidades siguen en
-        // estado Added tras el error, asi que alcanza con cambiar la referencia y volver a guardar.
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                await dbContext.SaveChangesAsync(ct);
-                break;
-            }
-            catch (DbUpdateException exception) when (attempt < 5 && IsReferenceCollision(exception))
-            {
-                ownerPayment.Reference = await NextReferenceAsync(companyId.Value, year, ct);
-            }
-        }
+        await settlement.SaveNewAsync(ownerPayment, companyId.Value, year, ct);
 
         var reference = ownerPayment.Reference;
 
@@ -558,13 +544,13 @@ public class OwnerPaymentsController(
         if (request.ReviewedAmount <= 0)
             return BadRequest("El monto revisado debe ser mayor a cero.");
 
-        var openForReview = await LoadOpenComprobantesAsync(payment, companyId.Value, ct);
-        var availableCreditForReview = await GetAvailableCreditAsync(payment.OwnerId, companyId.Value, ct);
-        var (reviewCoverage, _) = CoverWithCredit(request.ReviewedAmount, availableCreditForReview, openForReview);
+        var openForReview = await settlement.LoadOpenComprobantesAsync(payment, companyId.Value, ct);
+        var availableCreditForReview = await settlement.GetAvailableCreditAsync(payment.OwnerId, companyId.Value, ct);
+        var (reviewCoverage, _) = OwnerPaymentSettlementService.CoverWithCredit(request.ReviewedAmount, availableCreditForReview, openForReview);
         if (!reviewCoverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.ReviewedAmount + availableCreditForReview, openForReview)
                               + " Rechace el pago para que el propietario lo envíe nuevamente.");
-        if (!CoverageInScope(reviewCoverage, scope))
+        if (!OwnerPaymentSettlementService.CoverageInScope(reviewCoverage, scope))
             return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
 
         payment.Status = OwnerPaymentStatus.UnderReview;
@@ -620,7 +606,7 @@ public class OwnerPaymentsController(
 
         try
         {
-            await SettlePaymentAsync(payment, companyId.Value, scope, ct);
+            await settlement.SettleAsync(payment, new SettlementContext(companyId.Value, scope), ct);
         }
         catch (PeriodClosedException exception)
         {
@@ -746,7 +732,7 @@ public class OwnerPaymentsController(
         var open = unitIds.Count == 0
             ? new List<Comprobante>()
             : await comprobantes.LoadAsync(unitIds, companyId.Value, false, ct);
-        var credit = await GetAvailableCreditAsync(ownerId, companyId.Value, ct);
+        var credit = await settlement.GetAvailableCreditAsync(ownerId, companyId.Value, ct);
 
         var pending = await dbContext.OwnerPayments
             .AsNoTracking()
@@ -831,16 +817,16 @@ public class OwnerPaymentsController(
         var open = unitIds.Count == 0
             ? new List<Comprobante>()
             : await comprobantes.LoadAsync(unitIds, companyId.Value, false, ct);
-        var availableCredit = await GetAvailableCreditAsync(owner.Id, companyId.Value, ct);
+        var availableCredit = await settlement.GetAvailableCreditAsync(owner.Id, companyId.Value, ct);
 
-        var (coverage, _) = CoverWithCredit(request.Amount, availableCredit, open);
+        var (coverage, _) = OwnerPaymentSettlementService.CoverWithCredit(request.Amount, availableCredit, open);
         if (!coverage.Exact)
             return BadRequest(ComprobanteService.MismatchMessage(request.Amount + availableCredit, open));
-        if (!CoverageInScope(coverage, scope))
+        if (!OwnerPaymentSettlementService.CoverageInScope(coverage, scope))
             return StatusCode(StatusCodes.Status403Forbidden, OutOfScopeMessage);
 
         // Cierre contable de un mes: se rechaza antes de crear el pago, para no dejar un registro rechazado.
-        var closedRegister = await FindClosedForCoverageAsync(coverage, request.PaymentDate, ct);
+        var closedRegister = await settlement.FindClosedForCoverageAsync(coverage, request.PaymentDate, ct);
         if (closedRegister is not null)
             return FinancePeriodGuard.ClosedResponse(closedRegister);
 
@@ -860,27 +846,14 @@ public class OwnerPaymentsController(
             Notes = notes,
             ReviewedByUserId = tenantContext.UserId,
             ReviewedAt = now,
-            Reference = await NextReferenceAsync(companyId.Value, year, ct)
+            Reference = await settlement.NextReferenceAsync(companyId.Value, year, ct)
         };
         dbContext.OwnerPayments.Add(ownerPayment);
-
-        // Misma proteccion que Create: dos pagos a la vez pueden calcular la misma referencia.
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                await dbContext.SaveChangesAsync(ct);
-                break;
-            }
-            catch (DbUpdateException exception) when (attempt < 5 && IsReferenceCollision(exception))
-            {
-                ownerPayment.Reference = await NextReferenceAsync(companyId.Value, year, ct);
-            }
-        }
+        await settlement.SaveNewAsync(ownerPayment, companyId.Value, year, ct);
 
         try
         {
-            await SettlePaymentAsync(ownerPayment, companyId.Value, scope, ct);
+            await settlement.SettleAsync(ownerPayment, new SettlementContext(companyId.Value, scope), ct);
         }
         catch (InvalidOperationException exception)
         {
@@ -1157,177 +1130,6 @@ public class OwnerPaymentsController(
         return Ok(result);
     }
 
-    // ─── SETTLEMENT LOGIC ────────────────────────────────────────────────────
-
-    // Comprobantes pendientes del propietario: todas sus unidades vinculadas más las declaradas en el pago.
-    private async Task<List<Comprobante>> LoadOpenComprobantesAsync(OwnerPayment ownerPayment, Guid companyId, CancellationToken ct)
-    {
-        var unitIds = await credits.LoadLinkedUnitIdsAsync(ownerPayment.OwnerId, companyId, ct);
-
-        foreach (var declaredUnit in ownerPayment.Units.Where(u => !u.IsDeleted))
-        {
-            if (!unitIds.Contains(declaredUnit.UnitId)) unitIds.Add(declaredUnit.UnitId);
-        }
-
-        return await comprobantes.LoadAsync(unitIds, companyId, true, ct);
-    }
-
-    // Un comprobante = un pago completo. Se cubren comprobantes enteros, del más antiguo al más
-    // reciente, y el monto (sumado al saldo a favor disponible) debe coincidir exactamente: sin
-    // pagos parciales ni pago por línea. El Payment de cada comprobante siempre vale su monto
-    // completo (eso es lo que factura Invoice) — el saldo a favor es un detalle de cómo se
-    // financió, se descuenta aparte vía OwnerCreditMovement, nunca reduce el Payment/la factura.
-    private async Task SettlePaymentAsync(OwnerPayment ownerPayment, Guid companyId, HashSet<Guid> scope, CancellationToken ct)
-    {
-        var open = await LoadOpenComprobantesAsync(ownerPayment, companyId, ct);
-        var reviewedAmount = ownerPayment.ReviewedAmount!.Value;
-
-        var ownerCredit = await dbContext.OwnerCredits
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerPayment.OwnerId && x.CompanyId == companyId, ct);
-        var availableCredit = ownerCredit?.Amount ?? 0m;
-
-        var (coverage, creditNeeded) = CoverWithCredit(reviewedAmount, availableCredit, open);
-
-        if (!coverage.Exact)
-            throw new InvalidOperationException(ComprobanteService.MismatchMessage(reviewedAmount + availableCredit, open)
-                                                + " Rechace el pago para que el propietario lo envíe nuevamente.");
-
-        // Se valida antes de tocar nada: no se liquida ningun comprobante de un edificio fuera del alcance.
-        if (!CoverageInScope(coverage, scope))
-            throw new OutOfScopeException(OutOfScopeMessage);
-
-        // Cierre contable de un mes: los pagos nuevos llevan la fecha del pago.
-        var closedMonth = await FindClosedForCoverageAsync(coverage, ownerPayment.PaymentDate, ct);
-        if (closedMonth is not null)
-            throw new PeriodClosedException(closedMonth);
-
-        var allocatedPerUnit = ownerPayment.Units
-            .Where(u => !u.IsDeleted)
-            .ToDictionary(u => u.UnitId, u => 0m);
-
-        var createdPayments = new List<(Comprobante Comprobante, Payment Payment)>();
-
-        foreach (var comprobante in coverage.Covered)
-        {
-            var paymentRecord = new Payment
-            {
-                CompanyId = companyId,
-                ExpensePeriodId = comprobante.ExpensePeriodId,
-                UnitId = comprobante.UnitId,
-                PaymentDate = ownerPayment.PaymentDate,
-                Amount = comprobante.Total,
-                Method = ownerPayment.Method,
-                Reference = ownerPayment.Reference,
-                Notes = ownerPayment.Channel == OwnerPaymentChannel.Web
-                    ? $"Pago registrado por el sistema. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}" +
-                      (string.IsNullOrWhiteSpace(ownerPayment.ExternalReference) ? "" : $". Doc.: {ownerPayment.ExternalReference}")
-                    : $"Pago de propietario aprobado. Comprobante {comprobante.Label}. Ref: {ownerPayment.Reference}"
-            };
-            dbContext.Payments.Add(paymentRecord);
-            createdPayments.Add((comprobante, paymentRecord));
-
-            foreach (var (charge, pending) in comprobante.Lines)
-            {
-                dbContext.PaymentAllocations.Add(new PaymentAllocation
-                {
-                    CompanyId = companyId,
-                    PaymentId = paymentRecord.Id,
-                    ExpenseChargeId = charge.Id,
-                    AllocatedAmount = pending
-                });
-            }
-
-            if (!allocatedPerUnit.ContainsKey(comprobante.UnitId))
-            {
-                var extraUnit = new OwnerPaymentUnit
-                {
-                    CompanyId = companyId,
-                    OwnerPaymentId = ownerPayment.Id,
-                    UnitId = comprobante.UnitId,
-                    AllocatedAmount = 0
-                };
-                dbContext.OwnerPaymentUnits.Add(extraUnit);
-                ownerPayment.Units.Add(extraUnit);
-                allocatedPerUnit[comprobante.UnitId] = 0m;
-            }
-
-            allocatedPerUnit[comprobante.UnitId] += comprobante.Total;
-        }
-
-        foreach (var pUnit in ownerPayment.Units.Where(u => !u.IsDeleted))
-        {
-            if (allocatedPerUnit.TryGetValue(pUnit.UnitId, out var allocated))
-                pUnit.AllocatedAmount = allocated;
-        }
-
-        // Saldo a favor consumido automáticamente (nunca lo elige el propietario), del comprobante
-        // más antiguo cubierto en adelante. creditNeeded ya viene en 0 si el monto solo alcanzaba.
-        var creditUsed = creditNeeded;
-        if (creditUsed > 0 && ownerCredit is not null)
-        {
-            var lots = await credits.EnsureLotsAsync(ownerPayment.OwnerId, companyId, ownerCredit.Amount, ct);
-            var remaining = creditUsed;
-            foreach (var (comprobante, paymentRecord) in createdPayments)
-            {
-                if (remaining <= 0) break;
-                var take = Math.Min(remaining, comprobante.Total);
-                credits.ConsumeLots(lots, take, ownerPayment.OwnerId, companyId, CreditApplyMode.OnPaymentApproval,
-                    paymentRecord.Id, null, $"Aplicado automáticamente al comprobante {comprobante.Label}.");
-                paymentRecord.Notes += $" Incluye Gs. {ComprobanteService.Gs(take)} de saldo a favor.";
-                remaining -= take;
-            }
-
-            ownerCredit.Amount -= creditUsed;
-        }
-    }
-
-    private async Task<decimal> GetAvailableCreditAsync(Guid ownerId, Guid companyId, CancellationToken ct) =>
-        (await dbContext.OwnerCredits.AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.OwnerId == ownerId && x.CompanyId == companyId, ct))?.Amount ?? 0m;
-
-    // Prueba primero el monto solo (comportamiento de siempre, no se toca un pago que ya cerraba
-    // exacto aunque el propietario tenga saldo a favor sin usar) y, solo si no alcanza a cubrir
-    // comprobantes completos, prueba sumando el saldo a favor disponible. Nunca fuerza el crédito
-    // cuando no hace falta — sumarlo siempre rompía pagos exactos si quedaba un resto de crédito.
-    private static (ComprobanteCoverage Coverage, decimal CreditUsed) CoverWithCredit(
-        decimal amount, decimal availableCredit, IReadOnlyList<Comprobante> comprobantes)
-    {
-        var withoutCredit = ComprobanteService.Cover(amount, comprobantes);
-        if (withoutCredit.Exact) return (withoutCredit, 0m);
-        if (availableCredit <= 0) return (withoutCredit, 0m);
-
-        var withCredit = ComprobanteService.Cover(amount + availableCredit, comprobantes);
-        if (!withCredit.Exact) return (withCredit, 0m);
-
-        var creditUsed = Math.Min(availableCredit, Math.Max(0, withCredit.CoveredTotal - amount));
-        return (withCredit, creditUsed);
-    }
-
-    // ─── REFERENCIA DEL PAGO ─────────────────────────────────────────────────
-    // PAY-{año}-{n de 6 digitos}, numerada POR EMPRESA (dos empresas pueden tener el mismo PAY-2026-000001;
-    // por eso toda busqueda por referencia debe filtrar tambien por empresa).
-    private async Task<string> NextReferenceAsync(Guid companyId, int year, CancellationToken ct)
-    {
-        var prefix = $"PAY-{year}-";
-
-        // El sufijo lleva ceros a la izquierda: el mayor en orden alfabetico es el ultimo numero usado
-        // (incluye pagos eliminados, para no reutilizar numeros).
-        var last = await dbContext.OwnerPayments
-            .AsNoTracking()
-            .Where(x => x.CompanyId == companyId && x.Reference.StartsWith(prefix))
-            .OrderByDescending(x => x.Reference)
-            .Select(x => x.Reference)
-            .FirstOrDefaultAsync(ct);
-
-        var next = last is not null && int.TryParse(last[prefix.Length..], out var number) ? number + 1 : 1;
-        return $"{prefix}{next:D6}";
-    }
-
-    private static bool IsReferenceCollision(DbUpdateException exception) =>
-        exception.InnerException is SqlException sql
-        && (sql.Number == 2601 || sql.Number == 2627)
-        && sql.Message.Contains("IX_OwnerPayments_", StringComparison.OrdinalIgnoreCase);
-
     // ─── ALCANCE POR EDIFICIO (personal) ─────────────────────────────────────
     // Un pago de propietario puede abarcar unidades de varios edificios. El personal (Encargado/Operador)
     // solo trabaja con los edificios que tiene asignados; el Administrador de empresa, con los de su empresa
@@ -1335,17 +1137,7 @@ public class OwnerPaymentsController(
     //   - ver: el pago tiene al menos una unidad en un edificio de su alcance;
     //   - revisar / aprobar / rechazar: TODAS las unidades del pago y TODOS los comprobantes que cubre
     //     estan en su alcance (un pago se liquida completo, del mas antiguo al mas nuevo, no por edificio).
-    private const string OutOfScopeMessage =
-        "Este pago incluye unidades o comprobantes de edificios que no tenés asignados. " +
-        "Debe procesarlo un Administrador de empresa o un encargado con acceso a todos esos edificios.";
-
-    private sealed class OutOfScopeException(string message) : InvalidOperationException(message);
-
-    // El pago caeria en un mes contable cerrado (Centro de configuracion): se responde 409 con el codigo de cierre.
-    private sealed class PeriodClosedException(ClosedMonth month) : InvalidOperationException(FinancePeriodGuard.MessageFor(month))
-    {
-        public ClosedMonth Month { get; } = month;
-    }
+    private const string OutOfScopeMessage = OwnerPaymentSettlementService.OutOfScopeMessage;
 
     // Aviso "pago recibido" del Centro de configuracion: encendido salvo que el edificio lo haya apagado. Un pago de varios edificios avisa
     // si el aviso esta encendido en alguno de ellos.
@@ -1366,19 +1158,6 @@ public class OwnerPaymentsController(
     private async Task<ClosedMonth?> FindClosedForPaymentsAsync(IReadOnlyCollection<Payment> payments, CancellationToken ct) =>
         await new FinancePeriodGuard(dbContext).FindClosedForPaymentsAsync(payments, ct);
 
-    // Cierre contable de un mes: el primer mes cerrado entre los edificios que cubre el pago, segun la fecha del pago.
-    private async Task<ClosedMonth?> FindClosedForCoverageAsync(ComprobanteCoverage coverage, DateOnly paymentDate, CancellationToken ct)
-    {
-        var guard = new FinancePeriodGuard(dbContext);
-        foreach (var buildingId in coverage.Covered.Select(c => c.BuildingId).Distinct())
-        {
-            var closed = await guard.FindClosedAsync(buildingId, paymentDate, ct);
-            if (closed is not null) return closed;
-        }
-
-        return null;
-    }
-
     private static bool TouchesScope(OwnerPayment payment, HashSet<Guid> scope) =>
         payment.Units.Any(u => !u.IsDeleted && u.Unit is not null && scope.Contains(u.Unit.BuildingId));
 
@@ -1387,9 +1166,6 @@ public class OwnerPaymentsController(
         var units = payment.Units.Where(u => !u.IsDeleted).ToList();
         return units.Count > 0 && units.All(u => u.Unit is not null && scope.Contains(u.Unit.BuildingId));
     }
-
-    private static bool CoverageInScope(ComprobanteCoverage coverage, HashSet<Guid> scope) =>
-        coverage.Covered.All(c => scope.Contains(c.BuildingId));
 
     // Propietario visible para el personal: tiene al menos una unidad vinculada en su alcance
     // (requireAll: todas, para acciones que lo afectan por completo, como aplicar saldo a favor).

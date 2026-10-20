@@ -35,9 +35,11 @@ public class OwnerPaymentSettlementTests : IDisposable
     private OwnerPaymentsController Api()
     {
         var credits = new OwnerCreditService(_env.T.Db);
+        var comprobantes = new ComprobanteService(_env.T.Db, credits);
         return new OwnerPaymentsController(
-            _env.T.Db, _env.Tenant, _env.Access, credits, new ComprobanteService(_env.T.Db, credits), new InvoiceDraftService(_env.T.Db, _env.Access),
-            new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance));
+            _env.T.Db, _env.Tenant, _env.Access, credits, comprobantes, new InvoiceDraftService(_env.T.Db, _env.Access),
+            new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance),
+            new OwnerPaymentSettlementService(_env.T.Db, credits, comprobantes));
     }
 
     private CondoDbContext Fresh() => _env.T.NewContext();
@@ -712,11 +714,10 @@ public class OwnerPaymentSettlementTests : IDisposable
         Assert.Equal(2, rows.Count);
         Assert.Equal(100_000m, rows.Single(r => r.UnitId == a1.Id).AllocatedAmount);
         Assert.Equal(50_000m, rows.Single(r => r.UnitId == a2.Id).AllocatedAmount);
-        // Peculiaridad actual (no es un dato guardado): la respuesta de Aprobar lista DOS veces la unidad agregada, porque la liquidacion la
-        // suma a la coleccion y ademas al contexto. El registro por el sistema no la tiene (relee el pago). Si al extraer la liquidacion esto
-        // pasa a 2, es una mejora de la respuesta y se actualiza esta prueba.
-        Assert.Equal(3, approved.Units.Count);
-        Assert.Equal(2, approved.Units.Count(u => u.UnitCode == "A2"));
+        // La respuesta de Aprobar lista cada unidad una sola vez. (Antes de extraer la liquidacion a su servicio listaba DOS veces la unidad
+        // agregada, porque se sumaba a la coleccion y ademas al contexto; el dato guardado siempre fue correcto.)
+        Assert.Equal(2, approved.Units.Count);
+        Assert.Equal(50_000m, approved.Units.Single(u => u.UnitCode == "A2").AllocatedAmount);
     }
 
     [Fact]

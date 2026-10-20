@@ -989,9 +989,11 @@ public class ConfigCenterPhase3Tests : IDisposable
     private OwnerPaymentsController OwnerPayments()
     {
         var credits = new OwnerCreditService(_env.T.Db);
+        var comprobantes = new ComprobanteService(_env.T.Db, credits);
         return new OwnerPaymentsController(
-            _env.T.Db, _env.Tenant, _env.Access, credits, new ComprobanteService(_env.T.Db, credits), new InvoiceDraftService(_env.T.Db, _env.Access),
-            new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance));
+            _env.T.Db, _env.Tenant, _env.Access, credits, comprobantes, new InvoiceDraftService(_env.T.Db, _env.Access),
+            new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance),
+            new OwnerPaymentSettlementService(_env.T.Db, credits, comprobantes));
     }
 
     private async Task<(ApplicationUser Owner, OwnerPaymentRegisterRequest Request)> OwnerReadyToPay()

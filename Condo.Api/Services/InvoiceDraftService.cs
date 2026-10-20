@@ -15,7 +15,8 @@ namespace Condo.Api.Services;
 /// </summary>
 public sealed class InvoiceDraftService(ICondoDbContext dbContext, IAccessScopeService accessScope)
 {
-    public async Task<List<Guid>> CreateDraftsFromOwnerPaymentAsync(OwnerPayment ownerPayment, Guid actingUserId, CancellationToken ct)
+    public async Task<List<Guid>> CreateDraftsFromOwnerPaymentAsync(
+        OwnerPayment ownerPayment, Guid actingUserId, CancellationToken ct, bool systemContext = false)
     {
         var payments = await dbContext.Payments
             .AsNoTracking()
@@ -31,7 +32,9 @@ public sealed class InvoiceDraftService(ICondoDbContext dbContext, IAccessScopeS
         foreach (var unitGroup in payments.GroupBy(x => (x.UnitId, x.ExpensePeriodId)))
         {
             var unit = unitGroup.First().Unit!;
-            if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, ct)) continue;
+            // Con contexto de sistema (por ejemplo, la confirmacion de un proveedor de pagos, que llega sin sesion) no hay alcance por
+            // edificio que verificar: sin esto el pago se registraria pero no se generarian los borradores.
+            if (!systemContext && !await accessScope.CanAccessBuildingAsync(unit.BuildingId, ct)) continue;
 
             var paymentIds = unitGroup.Select(x => x.Id).ToList();
             var alreadyInvoiced = await dbContext.Invoices.AnyAsync(x =>
