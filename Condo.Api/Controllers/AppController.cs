@@ -23,7 +23,7 @@ public class AppController(IConfiguration configuration) : ControllerBase
         {
             MinVersionCode = configuration.GetValue("App:MinVersionCode", 1),
             LatestVersionCode = configuration.GetValue("App:LatestVersionCode", 1),
-            ApkUrl = configuration["App:ApkUrl"] ?? "https://tramiya.com.py/downloads/condopy.apk",
+            ApkUrl = configuration["App:ApkUrl"] ?? "https://expenses.com.py/downloads/condopy.apk",
             Message = string.IsNullOrWhiteSpace(message) ? null : message
         });
     }

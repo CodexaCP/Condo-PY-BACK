@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Condo.Infrastructure.Services;
 
 // Envio de correo via Resend (https://resend.com). Config en appsettings/variables de entorno:
-// Resend:ApiKey, Resend:FromEmail (ej: "CONDOPY <no-reply@tramiya.com.py>", requiere dominio verificado en Resend).
+// Resend:ApiKey, Resend:FromEmail (ej: "CONDOPY <no-reply@expenses.com.py>", requiere dominio verificado en Resend).
 // Si falta la ApiKey (todavia no configurada), no revienta: solo loguea y no manda nada, para que el
 // resto del flujo (generacion de token, etc.) se pueda seguir probando sin la integracion lista.
 public class ResendEmailSender(HttpClient httpClient, IConfiguration configuration, ILogger<ResendEmailSender> logger) : IEmailSender
@@ -15,7 +15,7 @@ public class ResendEmailSender(HttpClient httpClient, IConfiguration configurati
     public async Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken cancellationToken)
     {
         var apiKey = configuration["Resend:ApiKey"];
-        var fromEmail = configuration["Resend:FromEmail"] ?? "CONDOPY <no-reply@tramiya.com.py>";
+        var fromEmail = configuration["Resend:FromEmail"] ?? "CONDOPY <no-reply@expenses.com.py>";
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {

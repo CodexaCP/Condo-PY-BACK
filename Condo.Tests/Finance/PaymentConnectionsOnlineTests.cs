@@ -21,7 +21,7 @@ public class PaymentConnectionsOnlineTests : IDisposable
     private readonly FinanceEnv _env = new();
     private readonly AesGcmSecretProtector _protector = new(AesGcmSecretProtector.GenerateMasterKey(), "k1");
     private readonly Building _plain;   // un edificio SIN Finanzas habilitado
-    private readonly Dictionary<string, string?> _settings = new() { ["Payments:CallbackBaseUrl"] = "https://api.tramiya.com.py" };
+    private readonly Dictionary<string, string?> _settings = new() { ["Payments:CallbackBaseUrl"] = "https://api.expenses.com.py" };
 
     public PaymentConnectionsOnlineTests()
     {

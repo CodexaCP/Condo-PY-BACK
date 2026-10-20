@@ -39,7 +39,7 @@ En el editor escribir (con la clave generada) y guardar:
 [Service]
 Environment="Payments__MasterKey=PEGAR_AQUI_LA_CLAVE"
 Environment="Payments__MasterKeyId=k1"
-Environment="Payments__CallbackBaseUrl=https://api.tramiya.com.py"
+Environment="Payments__CallbackBaseUrl=https://api.expenses.com.py"
 ```
 
 Luego reiniciar con el despliegue normal del backend (o `systemctl restart condo-py-api`).

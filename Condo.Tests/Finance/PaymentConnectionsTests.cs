@@ -115,7 +115,7 @@ public class PaymentConnectionsTests
         {
             var t = tenant ?? _tenant;
             var config = new ConfigurationBuilder().AddInMemoryCollection(
-                new Dictionary<string, string?> { ["Payments:CallbackBaseUrl"] = "https://api.tramiya.com.py" }).Build();
+                new Dictionary<string, string?> { ["Payments:CallbackBaseUrl"] = "https://api.expenses.com.py" }).Build();
             var controller = new PaymentConnectionsController(
                 T.Db, t, scope ?? _scope, protector ?? Protector, config, NullLogger<PaymentConnectionsController>.Instance)
             {
@@ -171,7 +171,7 @@ public class PaymentConnectionsTests
         Assert.Equal("••••WXYZ", created.SecretsMasked!["privateKey"]);
         Assert.Equal("COM-001", created.Settings!["commerceCode"]);
         Assert.Empty(created.MissingFields);
-        Assert.StartsWith("https://api.tramiya.com.py/api/payment-webhooks/", created.CallbackUrl);
+        Assert.StartsWith("https://api.expenses.com.py/api/payment-webhooks/", created.CallbackUrl);
 
         // La clave no sale en ninguna respuesta ni queda en claro en la base.
         Assert.DoesNotContain("0123456789abcdef", JsonSerializer.Serialize(created));

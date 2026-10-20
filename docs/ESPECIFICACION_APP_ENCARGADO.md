@@ -41,7 +41,7 @@ Verificado leyendo el código actual (2026-10-01).
 10. **Nombres:** la app muestra `Porter` como "Encargado" (`dashboard.page.ts`, `profile.page.ts`). En el sistema el Encargado de edificio es `BuildingManager`. Hay que corregir las etiquetas antes de mostrar menús por rol.
 11. **Login:** `LoginResponse` incluye `role`, `companyId`, `scopeLabel`. No incluye la lista de edificios; se obtiene de `GET /api/buildings`.
 12. **Restricción por plan vencido (implementada 2026-10-01):** la API responde `403` con `{ "error": "plan_read_only" | "plan_blocked", "message": "..." }` a Administrador de empresa, Operador y Encargado. La app móvil **no** lo maneja todavía (el interceptor solo trata 401).
-13. **Producción:** `environment.prod.ts` apunta a `https://api.tramiya.com.py/api`. `environment.ts` apunta a un túnel de Cloudflare de desarrollo: verificar que el APK publicado se compile con `prod`.
+13. **Producción:** `environment.prod.ts` apunta a `https://api.expenses.com.py/api`. `environment.ts` apunta a un túnel de Cloudflare de desarrollo: verificar que el APK publicado se compile con `prod`.
 
 ---
 
@@ -326,7 +326,7 @@ Decisión 4: los reclamos solo cambian de estado. No hay columna nueva ni migrac
 `GET /api/app/version` (anónimo)
 
 ```json
-{ "minVersionCode": 2, "latestVersionCode": 3, "apkUrl": "https://tramiya.com.py/downloads/condopy.apk", "message": "Hay una versión nueva." }
+{ "minVersionCode": 2, "latestVersionCode": 3, "apkUrl": "https://expenses.com.py/downloads/condopy.apk", "message": "Hay una versión nueva." }
 ```
 
 - La app compara su `versionCode` (plugin `@capacitor/app` → `App.getInfo()`) al abrir y al volver a primer plano.
@@ -421,7 +421,7 @@ Fase 1: ~1,5 a 2 semanas (backend ~2 días, app ~8 días). Fase 2: ~1 semana.
 | 2 | Revisión de pagos | **Atajo "Verificar y aprobar" en un toque** (una confirmación, dos llamadas seguidas) + botón Rechazar con motivo. |
 | 3 | Comunicados | El Encargado **solo puede desactivarlos**, no eliminarlos. Eliminar queda para la web. |
 | 4 | Reclamos | **Solo cambio de estado**, sin nota de respuesta. Se descarta la sección 6.6 (no hay migración). |
-| 5 | Distribución | **Solo descarga directa** desde `tramiya.com.py`, con control de versión mínima dentro de la app. |
+| 5 | Distribución | **Solo descarga directa** desde `expenses.com.py`, con control de versión mínima dentro de la app. |
 | 6 | Avisos push al Encargado | **Verificado:** ya se envían (campanita y push). Ver abajo. |
 
 ### Verificación de la decisión 6 (código actual)
@@ -500,4 +500,4 @@ Repo `CondoPY-APP`. Compila en desarrollo y en producción. Probado en el navega
 | Etiquetas de rol corregidas (`Porter` ya no se muestra como "Encargado") | Hecho |
 | M7 Morosos, M8 Comunicado rápido, M9 Gasto rápido | Fase 2 |
 
-Para publicarlo: desplegar primero el backend (la app nueva usa `/api/manager/summary` y `/api/app/version`), subir el `versionCode` en `android/app/build.gradle`, compilar el APK de release con `environment.prod` (apunta a `https://api.tramiya.com.py/api`) y copiarlo a `Condo-PY-WEB/public/downloads/condopy.apk`.
+Para publicarlo: desplegar primero el backend (la app nueva usa `/api/manager/summary` y `/api/app/version`), subir el `versionCode` en `android/app/build.gradle`, compilar el APK de release con `environment.prod` (apunta a `https://api.expenses.com.py/api`) y copiarlo a `Condo-PY-WEB/public/downloads/condopy.apk`.

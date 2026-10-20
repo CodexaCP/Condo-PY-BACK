@@ -156,7 +156,7 @@ public class AuthController(
                         (isEmail ? x.Email == normalizedIdentifier : x.Username == normalizedIdentifier))
             .ToListAsync(cancellationToken);
 
-        var frontendBaseUrl = (configuration["Frontend:BaseUrl"] ?? "https://tramiya.com.py").TrimEnd('/');
+        var frontendBaseUrl = (configuration["Frontend:BaseUrl"] ?? "https://expenses.com.py").TrimEnd('/');
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
 
         foreach (var user in users)

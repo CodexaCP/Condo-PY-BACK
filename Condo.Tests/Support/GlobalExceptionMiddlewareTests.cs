@@ -58,7 +58,7 @@ public class GlobalExceptionMiddlewareTests
     private static HttpRequestMessage Get(string path)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
-        request.Headers.Add("Origin", "https://app.tramiya.com.py");
+        request.Headers.Add("Origin", "https://app.expenses.com.py");
         return request;
     }
 
