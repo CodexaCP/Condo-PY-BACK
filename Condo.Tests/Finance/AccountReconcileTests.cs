@@ -99,6 +99,8 @@ public class AccountReconcileTests
 
         var on = FinanceEnv.Ok(await api.Update(fund.Id, Upsert(env, "Fondo", FinancialAccountType.ReserveFund, reconciles: true), default));
         Assert.True(on.Reconciles);
+        Assert.Equal(true, env.T.NewContext().FinancialAccounts.Single(x => x.Id == fund.Id).ReconcileOverride);   // quedo guardado en la base, no solo en la respuesta
+        Assert.True(env.T.NewContext().FinancialAccounts.Single(x => x.Id == fund.Id).Reconciles);
         var kept = FinanceEnv.Ok(await api.Update(fund.Id, Upsert(env, "Fondo renombrado", FinancialAccountType.ReserveFund), default));   // no manda la casilla
         Assert.True(kept.Reconciles);
 
