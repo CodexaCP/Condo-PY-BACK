@@ -84,3 +84,13 @@ Antes solo se conciliaban las cuentas de tipo Banco. Ahora cada cuenta tiene una
 5. Una cuenta que ya tenía conciliaciones no cambia nada: los bancos existentes siguen conciliándose (la migración no toca datos).
 
 Sigue siendo una sola cuenta de fondo de reserva y una sola caja por edificio. La casilla solo decide si se concilia; el comportamiento de cada tipo (a dónde van los aportes del fondo, la pantalla del fondo) no cambia.
+
+## 10. Conciliación: listas largas, «esta conciliación» y Excel
+
+En **Conciliación bancaria → Ver** (una conciliación):
+
+1. **Conciliados en esta conciliación:** solo muestra lo que se tildó **en esa conciliación**, no todo lo de la cuenta. Si la cuenta tiene movimientos conciliados en otras conciliaciones, un aviso dice cuántos son y que **cuentan en el saldo conciliado** aunque no se listen.
+2. Casilla **«Mostrar también los conciliados en otras conciliaciones de esta cuenta»**: los suma a la lista (y al Excel).
+3. **Pendientes y Conciliados:** cada lista tiene **buscador** (por detalle, referencia, tipo, importe o fecha) y **paginación** con selector de 25, 50, 100 o 250 por página. «Seleccionar todos» actúa sobre todo lo que coincide con la búsqueda, no solo la página.
+4. **Exportar a Excel** (arriba a la derecha, también en las cerradas y para los cuatro roles): archivo con hojas **Resumen** (saldos, diferencia, cuántos movimientos), **Conciliados** (de esa conciliación), **Pendientes** (**todos**, sin el tope de 1000 de la pantalla) y, si tildaste la casilla del punto 2, **Otras conciliaciones**.
+5. Marcar o desmarcar movimientos con la casilla del punto 2 activada sigue funcionando: la lista se vuelve a cargar completa.
