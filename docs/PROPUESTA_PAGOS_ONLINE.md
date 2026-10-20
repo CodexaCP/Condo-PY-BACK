@@ -4,6 +4,8 @@ Fecha del análisis: 2026-10-05. Documento de análisis y diseño. **No hay cód
 
 > **Actualización 2026-10-12:** se implementó la **configuración** de la conexión con Bancard (entidades `PaymentConnection`, `BuildingPaymentConfig` y su historial, cifrado de secretos con clave maestra fuera de la base, catálogo en código de Bancard Tpago y vPOS, y la sección *Pagos online* del Centro de configuración). El cobro sigue sin existir: ver `GUIA_PRUEBAS_PAGOS_BANCARD_CONFIG.md`. El resto de la sección 5.2 (extraer la liquidación, intentos de cobro, callback y proveedor falso) queda pendiente.
 
+> **Actualización 2026-10-20:** se implementó la **base del cobro con proveedor falso** (Etapa 1): extracción de la liquidación a un servicio, cuenta «Cobros online por liquidar», tablas de cobros, intentos y eventos, aviso idempotente, simulador y pantalla «Cobros online» en el WEB. Decisiones D-1 a D-7 cerradas (ver [INFORME_RETOMA_PAGOS_ONLINE_2026-10-20.md](INFORME_RETOMA_PAGOS_ONLINE_2026-10-20.md)). Cómo desplegar y probar: [GUIA_PRUEBAS_PAGOS_ONLINE_ETAPA1.md](GUIA_PRUEBAS_PAGOS_ONLINE_ETAPA1.md). **Sigue sin existir el adaptador de Bancard** ni la pantalla de pago del APP.
+
 Convención de etiquetas en todo el documento:
 
 - **[Confirmado]** lo publica el proveedor en una fuente oficial (se cita el enlace).

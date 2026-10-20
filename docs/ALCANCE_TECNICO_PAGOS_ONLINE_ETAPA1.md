@@ -1,5 +1,18 @@
 # Alcance técnico: pagos online, Etapa 1
 
+> **Actualización 2026-10-20 — implementado** (rama `feature/pagos-online`; cómo desplegar y probar: [GUIA_PRUEBAS_PAGOS_ONLINE_ETAPA1.md](GUIA_PRUEBAS_PAGOS_ONLINE_ETAPA1.md)). Lo que cambió respecto de este documento:
+>
+> - **D-7 resuelta: NO se crearon las tablas de liquidaciones** (`PaymentSettlements` / `PaymentSettlementItems`) ni `SettlementId` en el intento. La migración es `20261020143213_OnlinePaymentIntents`. Los campos de comisión y neto del intento quedan nulos y sin lógica (D-1/D-2).
+> - **Sin índice nuevo para la cuenta en tránsito:** el índice único de `FinancialAccounts` `(BuildingId, Type)` para los tipos que no son banco ya impide una segunda cuenta `Clearing` por edificio.
+> - **Transferencias:** desde que existen las transferencias entre cuentas (2026-10-19) la hipótesis H4 está resuelta: el neto pasa de la cuenta en tránsito al banco con una transferencia (`Clearing` solo puede ser origen). No hizo falta un concepto nuevo.
+> - **D-3 resuelta:** `BuildingPaymentConfig.IsTest`; un cobro del simulador o de sandbox solo se aplica a la deuda en edificios de prueba, en los demás queda «simulado».
+> - **D-4 resuelta:** importe cambiado → `ReviewRequired`; si el proveedor devuelve el dinero cuando no se le responde éxito (Tpago y el simulador) se le responde error.
+> - **Saldo a favor:** el cobro online paga el total de los comprobantes y no usa el saldo a favor.
+> - **Simulador:** el endpoint del simulador procesa el aviso firmado **en el mismo proceso** por el mismo código que el webhook (no hace una llamada HTTP a sí mismo).
+> - **Proceso en segundo plano:** vence los cobros pasado su plazo; todavía no consulta al proveedor (el contrato `IPaymentProvider` no tiene `QueryAsync`; se suma con el adaptador de Tpago).
+> - **Actor del sistema:** los borradores de factura de un pago online quedan a nombre de quien activó la conexión.
+> - **Pendiente:** adaptador de Tpago, pantalla del propietario en el APP, filtro por IP de Bancard.
+
 Fecha: 2026-10-12. **Documento de análisis para revisión. No se modificó código.** La implementación solo empieza cuando se apruebe este alcance y se resuelvan las decisiones de la sección 9.
 
 Etapa 1 = **cobro con proveedor falso + cuenta en tránsito por edificio**, sin credenciales reales de Bancard ni liquidaciones bancarias. Antecedentes: [PROPUESTA_PAGOS_ONLINE.md](PROPUESTA_PAGOS_ONLINE.md) (diseño general) y [GUIA_PRUEBAS_PAGOS_BANCARD_CONFIG.md](GUIA_PRUEBAS_PAGOS_BANCARD_CONFIG.md) (configuración ya implementada).
