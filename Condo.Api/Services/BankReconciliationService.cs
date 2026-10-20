@@ -94,11 +94,16 @@ public sealed class BankReconciliationService(
         return rows.Select(x => ToSummary(x.Entity, x.AccountName, counts.GetValueOrDefault(x.Entity.Id), names)).ToList();
     }
 
-    public async Task<ReconResult<ReconciliationWorkspaceDto>> GetAsync(LedgerContext ctx, Guid id, bool canEdit, CancellationToken ct)
+    /// <summary>
+    /// La conciliacion con sus listas. Por defecto muestra solo lo conciliado en ella; <paramref name="includePrevious"/> suma lo de las conciliaciones
+    /// anteriores de la cuenta. <paramref name="full"/> (para exportar) devuelve ademas todos los pendientes, sin el tope de la pantalla.
+    /// </summary>
+    public async Task<ReconResult<ReconciliationWorkspaceDto>> GetAsync(
+        LedgerContext ctx, Guid id, bool canEdit, CancellationToken ct, bool includePrevious = false, bool full = false)
     {
         var reconciliation = await FindAsync(ctx.BuildingId, id, tracking: false, ct);
         if (reconciliation is null) return NotFoundResult<ReconciliationWorkspaceDto>();
-        return ReconResult<ReconciliationWorkspaceDto>.Success(await BuildWorkspaceAsync(ctx, reconciliation, canEdit, ct));
+        return ReconResult<ReconciliationWorkspaceDto>.Success(await BuildWorkspaceAsync(ctx, reconciliation, canEdit, ct, includePrevious, full));
     }
 
     // ─── Alta, edicion y descarte ─────────────────────────────────────────────
@@ -438,7 +443,8 @@ public sealed class BankReconciliationService(
 
     // ─── Armado de la pantalla ────────────────────────────────────────────────
 
-    private async Task<ReconciliationWorkspaceDto> BuildWorkspaceAsync(LedgerContext ctx, BankReconciliation entity, bool canEdit, CancellationToken ct)
+    private async Task<ReconciliationWorkspaceDto> BuildWorkspaceAsync(
+        LedgerContext ctx, BankReconciliation entity, bool canEdit, CancellationToken ct, bool includePrevious = false, bool unlimitedPending = false)
     {
         var account = ctx.Accounts.First(a => a.Id == entity.AccountId);
         var rows = await AccountRowsAsync(ctx, entity.AccountId, entity.StatementDate, ct);
@@ -480,12 +486,15 @@ public sealed class BankReconciliationService(
             PendingIn = calc.PendingIn,
             PendingOut = calc.PendingOut,
             PendingCount = calc.Pending.Count,
-            PendingTruncated = calc.Pending.Count > MaxPendingRows,
+            PendingTruncated = !unlimitedPending && calc.Pending.Count > MaxPendingRows,
             ChangedCount = calc.ChangedCount,
             MissingCount = calc.MissingCount,
             Alerts = alerts,
-            Marked = calc.Marked,
-            Pending = calc.Pending.Take(MaxPendingRows).ToList()
+            Marked = includePrevious ? calc.Marked : calc.Marked.Where(m => m.InThisReconciliation).ToList(),
+            Pending = unlimitedPending ? calc.Pending.ToList() : calc.Pending.Take(MaxPendingRows).ToList(),
+            PreviousMarkedCount = calc.Marked.Count(m => !m.InThisReconciliation),
+            PreviousMarkedAmount = calc.Marked.Where(m => !m.InThisReconciliation).Sum(m => m.Amount),
+            IncludesPrevious = includePrevious
         };
     }
 

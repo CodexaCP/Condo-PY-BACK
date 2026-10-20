@@ -52,12 +52,30 @@ public class FinanceReconciliationController(
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ReconciliationWorkspaceDto>> Get(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<ReconciliationWorkspaceDto>> Get(
+        Guid id, [FromQuery] bool includePrevious = false, CancellationToken cancellationToken = default)
     {
         var (denied, ctx) = await ResolveAsync(id, write: false, cancellationToken);
         if (denied is not null) return denied;
 
-        return Map(await reconciliations.GetAsync(ctx!, id, CanReconcile, cancellationToken));
+        return Map(await reconciliations.GetAsync(ctx!, id, CanReconcile, cancellationToken, includePrevious));
+    }
+
+    // Excel de la conciliacion: resumen, lo conciliado en ella y todos los pendientes (sin el tope de la pantalla); con includePrevious, tambien lo de las anteriores.
+    [HttpGet("{id:guid}/export")]
+    public async Task<IActionResult> Export(Guid id, [FromQuery] bool includePrevious = false, CancellationToken cancellationToken = default)
+    {
+        var (denied, ctx) = await ResolveAsync(id, write: false, cancellationToken);
+        if (denied is not null) return denied;
+
+        var result = await reconciliations.GetAsync(ctx!, id, CanReconcile, cancellationToken, includePrevious: true, full: true);
+        if (!result.Ok) return ToError(result.Status, result.Code, result.Message);
+
+        var workspace = result.Value!;
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        Condo.Api.Documents.FinanceExcelExporter.AddReconciliation(workbook, workspace, ctx!.BuildingName, includePrevious);
+        return File(Condo.Api.Documents.FinanceExcelExporter.Save(workbook), Condo.Api.Documents.FinanceExcelExporter.ContentType,
+            Condo.Api.Documents.FinanceExcelExporter.FileName($"conciliacion-{Condo.Api.Documents.FinanceExcelExporter.Slug(workspace.AccountName)}", ctx.BuildingName, workspace.StatementDate.ToString("yyyy-MM-dd")));
     }
 
     [HttpPost]

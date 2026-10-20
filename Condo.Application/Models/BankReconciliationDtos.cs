@@ -102,8 +102,13 @@ public class ReconciliationWorkspaceDto
     public int MissingCount { get; set; }
     public IReadOnlyList<string> Alerts { get; set; } = [];
 
+    // Conciliados: por defecto solo los de esta conciliacion; con includePrevious tambien los de otras conciliaciones de la cuenta (cuentan en el saldo conciliado igual).
     public IReadOnlyList<ReconciliationMovementDto> Marked { get; set; } = [];
     public IReadOnlyList<ReconciliationMovementDto> Pending { get; set; } = [];
+    // Cuantos movimientos de otras conciliaciones de la cuenta cuentan en el saldo conciliado y por cuanto (con signo). Siempre se informan, se listen o no.
+    public int PreviousMarkedCount { get; set; }
+    public decimal PreviousMarkedAmount { get; set; }
+    public bool IncludesPrevious { get; set; }
 }
 
 public class StartReconciliationRequest

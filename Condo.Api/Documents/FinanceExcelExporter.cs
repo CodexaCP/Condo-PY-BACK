@@ -29,13 +29,19 @@ public static class FinanceExcelExporter
     // Nombre de archivo seguro: sin tildes, espacios ni simbolos.
     public static string FileName(string kind, string buildingName, string period)
     {
-        var decomposed = buildingName.Normalize(System.Text.NormalizationForm.FormD);
+        var slug = Slug(buildingName);
+        return $"finanzas-{kind}-{(slug.Length == 0 ? "edificio" : slug)}-{period}.xlsx";
+    }
+
+    /// <summary>Texto apto para un nombre de archivo: sin tildes ni simbolos, con guiones.</summary>
+    public static string Slug(string text)
+    {
+        var decomposed = text.Normalize(System.Text.NormalizationForm.FormD);
         var chars = decomposed
             .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
             .Select(c => char.IsLetterOrDigit(c) ? c : '-')
             .ToArray();
-        var slug = System.Text.RegularExpressions.Regex.Replace(new string(chars), "-{2,}", "-").Trim('-');
-        return $"finanzas-{kind}-{(slug.Length == 0 ? "edificio" : slug)}-{period}.xlsx";
+        return System.Text.RegularExpressions.Regex.Replace(new string(chars), "-{2,}", "-").Trim('-');
     }
 
     public static byte[] Save(XLWorkbook workbook)
@@ -209,6 +215,92 @@ public static class FinanceExcelExporter
             ? [12, 22, 12, 32, 30, 18, 15, 15, 16, 48, 22, 22, 22]
             : [12, 22, 12, 32, 30, 18, 15, 15, 48, 22, 22, 22];
         Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, widths);
+    }
+
+    /// <summary>
+    /// Conciliacion bancaria: resumen (saldos y diferencia), los movimientos conciliados en ella, los pendientes (todos) y, si se pide, los de
+    /// otras conciliaciones de la cuenta, que tambien cuentan en el saldo conciliado.
+    /// </summary>
+    public static void AddReconciliation(XLWorkbook wb, ReconciliationWorkspaceDto w, string buildingName, bool includePrevious)
+    {
+        var own = w.Marked.Where(m => m.InThisReconciliation).ToList();
+        var previous = w.Marked.Where(m => !m.InThisReconciliation).ToList();
+
+        var summary = wb.Worksheets.Add("Resumen");
+        summary.Cell(1, 1).Value = $"Conciliación bancaria — {w.AccountName}";
+        summary.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(14);
+        var rows = new (string Label, string Value)[]
+        {
+            ("Edificio", buildingName),
+            ("Cuenta", w.AccountName),
+            ("Fecha de corte", w.StatementDate.ToString("dd/MM/yyyy")),
+            ("Estado", w.Status == BankReconciliationStatus.Open ? "Abierta" : "Cerrada"),
+            ("Saldo del extracto", w.StatementBalance.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"))),
+            ("Saldo conciliado", w.ReconciledBalance.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"))),
+            ("Diferencia (extracto − conciliado)", w.Difference.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"))),
+            ("Saldo del libro a la fecha de corte", w.BookBalance.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"))),
+            ("Saldo inicial de la cuenta", w.OpeningBalance.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"))),
+            ("Conciliados en esta conciliación", $"{own.Count} movimientos"),
+            ("Conciliados en otras conciliaciones de la cuenta", $"{w.PreviousMarkedCount} movimientos"),
+            ("Pendientes de conciliar", $"{w.PendingCount} movimientos (entradas {w.PendingIn:N0}, salidas {w.PendingOut:N0})"),
+            ("Notas", w.Notes ?? string.Empty)
+        };
+        var r = 3;
+        foreach (var (label, value) in rows)
+        {
+            summary.Cell(r, 1).Value = label;
+            summary.Cell(r, 1).Style.Font.SetBold();
+            summary.Cell(r, 2).Value = value;
+            r++;
+        }
+
+        summary.Cell(r + 1, 1).Value = "Saldo conciliado = saldo inicial de la cuenta + los movimientos conciliados (de esta y de otras conciliaciones de la cuenta) hasta la fecha de corte.";
+        summary.Cell(r + 1, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
+        summary.Column(1).Width = 40;
+        summary.Column(2).Width = 60;
+
+        ReconciliationSheet(wb, "Conciliados", $"Conciliados en esta conciliación — {w.AccountName}", own, marked: true);
+        ReconciliationSheet(wb, "Pendientes", $"Pendientes de conciliar al {w.StatementDate:dd/MM/yyyy} — {w.AccountName}", w.Pending.ToList(), marked: false);
+        if (includePrevious)
+        {
+            ReconciliationSheet(wb, "Otras conciliaciones", $"Conciliados en otras conciliaciones de la cuenta — {w.AccountName}", previous, marked: true);
+        }
+    }
+
+    private static void ReconciliationSheet(XLWorkbook wb, string name, string title, IReadOnlyList<ReconciliationMovementDto> items, bool marked)
+    {
+        var ws = Sheet(wb, name, title, "Importe con signo: positivo entra a la cuenta, negativo sale.");
+        string[] headers = marked
+            ? ["Fecha", "Tipo", "Detalle", "Unidad / tercero", "Referencia", "Importe", "Estado", "Marcado el", "Marcado por"]
+            : ["Fecha", "Tipo", "Detalle", "Unidad / tercero", "Referencia", "Importe"];
+        Header(ws, 4, headers);
+
+        var row = 5;
+        foreach (var m in items.OrderBy(i => i.Date).ThenBy(i => i.Description, StringComparer.CurrentCultureIgnoreCase))
+        {
+            ws.Cell(row, 1).Value = m.Date.ToDateTime(TimeOnly.MinValue);
+            ws.Cell(row, 1).Style.DateFormat.Format = DateFormat;
+            ws.Cell(row, 2).Value = SourceLabel(m.SourceType);
+            ws.Cell(row, 3).Value = m.Description;
+            ws.Cell(row, 4).Value = m.ThirdParty;
+            ws.Cell(row, 5).Value = m.Reference;
+            Amount(ws, row, 6, m.Amount);
+            if (marked)
+            {
+                ws.Cell(row, 7).Value = m.State switch { "Changed" => "Cambió de importe", "Missing" => "Ya no figura en el libro", _ => "Ok" };
+                if (m.MarkedAtUtc.HasValue) ws.Cell(row, 8).Value = m.MarkedAtUtc.Value.ToLocalTime();
+                ws.Cell(row, 8).Style.DateFormat.Format = "dd/mm/yyyy hh:mm";
+                ws.Cell(row, 9).Value = m.MarkedByName ?? string.Empty;
+            }
+
+            row++;
+        }
+
+        ws.Cell(row, 1).Value = $"Total ({items.Count})";
+        Amount(ws, row, 6, items.Sum(i => i.Amount));
+        ws.Range(row, 1, row, headers.Length).Style.Font.SetBold();
+        ws.Range(row, 1, row, headers.Length).Style.Border.TopBorder = XLBorderStyleValues.Thin;
+        Finish(ws, 4, Math.Max(row - 1, 4), headers.Length, marked ? [12, 16, 52, 26, 22, 16, 24, 18, 24] : [12, 16, 52, 26, 22, 16]);
     }
 
     /// <summary>Libro de compras: un renglon por factura de proveedor (y por nota de credito, en negativo) con el IVA incluido, y el resumen por tasa.</summary>

@@ -1,4 +1,5 @@
 using Condo.Api.Controllers;
+using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Models;
 using Condo.Application.Services;
@@ -408,9 +409,73 @@ public class ConfigCenterPhase5Tests
         Assert.Equal("mark_in_other_reconciliation", unmark.Code);
         Assert.Equal(409, unmark.Status);
 
-        var open = await Service(env).GetAsync(ctx, second.Id, true, default);
+        var open = await Service(env).GetAsync(ctx, second.Id, true, default, includePrevious: true);
         Assert.False(open.Value!.Marked.Single().InThisReconciliation);        // el deposito figura como conciliado, pero no de esta
         Assert.Equal(1_000_000m, open.Value.ReconciledBalance);
+    }
+
+    [SqlServerFact]
+    public async Task LaPantallaMuestraSoloLoConciliadoEnEstaYAvisaCuantosHayDeOtrasConciliaciones()
+    {
+        using var env = new FinanceEnv(sqlServer: true);
+        var f = Seed(env);
+        var first = await StartOk(env, f, FinanceEnv.Yesterday.AddDays(-5), 1_000_000m);
+        await MarkOk(env, first.Id, Ref(f.Deposit));
+        Assert.True((await Service(env).CompleteAsync(await Context(env), first.Id, default)).Ok);
+        var second = await StartOk(env, f, FinanceEnv.Yesterday, 700_000m);
+        await MarkOk(env, second.Id, Ref(f.Payment));
+        var ctx = await Context(env);
+
+        var mine = (await Service(env).GetAsync(ctx, second.Id, true, default)).Value!;
+        var all = (await Service(env).GetAsync(ctx, second.Id, true, default, includePrevious: true)).Value!;
+        var firstView = (await Service(env).GetAsync(ctx, first.Id, true, default)).Value!;
+
+        Assert.All(mine.Marked, m => Assert.True(m.InThisReconciliation));            // por defecto, solo las de esta conciliacion
+        Assert.Single(mine.Marked);
+        Assert.False(mine.IncludesPrevious);
+        Assert.Equal(1, mine.PreviousMarkedCount);                                    // pero avisa que hay una de una anterior
+        Assert.Equal(1_000_000m - mine.OpeningBalance, mine.PreviousMarkedAmount);
+        Assert.True(all.IncludesPrevious);
+        Assert.Equal(2, all.Marked.Count);                                            // con includePrevious, las dos
+        Assert.Equal(mine.ReconciledBalance, all.ReconciledBalance);                  // el saldo conciliado no depende de lo que se lista
+        Assert.Equal(mine.PendingCount, all.PendingCount);
+        Assert.Single(firstView.Marked);                                              // la primera ve solo su deposito
+        Assert.All(firstView.Marked, m => Assert.True(m.InThisReconciliation));
+    }
+
+    [SqlServerFact]
+    public async Task LaConciliacionSeExportaAExcelConResumenConciliadosYPendientes()
+    {
+        using var env = new FinanceEnv(sqlServer: true);
+        var f = Seed(env);
+        var first = await StartOk(env, f, FinanceEnv.Yesterday.AddDays(-5), 1_000_000m);
+        await MarkOk(env, first.Id, Ref(f.Deposit));
+        Assert.True((await Service(env).CompleteAsync(await Context(env), first.Id, default)).Ok);
+        var second = await StartOk(env, f, FinanceEnv.Yesterday, 700_000m);
+        await MarkOk(env, second.Id, Ref(f.Payment));
+        var api = Api(env);
+
+        foreach (var role in new[] { "SuperAdmin", "CompanyAdmin", "CompanyOperator", "BuildingManager" })
+        {
+            env.LoginAs(role);
+            var file = Assert.IsType<FileContentResult>(await api.Export(second.Id, includePrevious: false, default));
+            Assert.Equal(FinanceExcelExporter.ContentType, file.ContentType);
+            Assert.StartsWith("finanzas-conciliacion-", file.FileDownloadName);
+
+            using var book = new ClosedXML.Excel.XLWorkbook(new MemoryStream(file.FileContents));
+            Assert.Equal(["Resumen", "Conciliados", "Pendientes"], book.Worksheets.Select(w => w.Name).ToArray());
+            var cells = book.Worksheet("Conciliados").CellsUsed().Select(c => c.GetString()).ToList();
+            Assert.Contains("Total (1)", cells);                                       // solo lo de esta conciliacion
+        }
+
+        var withPrevious = Assert.IsType<FileContentResult>(await api.Export(second.Id, includePrevious: true, default));
+        using var book2 = new ClosedXML.Excel.XLWorkbook(new MemoryStream(withPrevious.FileContents));
+        Assert.Contains("Otras conciliaciones", book2.Worksheets.Select(w => w.Name));
+        Assert.Contains("Total (1)", book2.Worksheet("Otras conciliaciones").CellsUsed().Select(c => c.GetString()));
+        var pending = book2.Worksheet("Pendientes").CellsUsed().Select(c => c.GetString()).ToList();
+        Assert.Contains($"Total ({(await Service(env).GetAsync(await Context(env), second.Id, true, default, full: true)).Value!.PendingCount})", pending);   // todos, sin tope
+
+        Assert.Equal(404, Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.Infrastructure.IStatusCodeActionResult>(await api.Export(Guid.NewGuid(), false, default)).StatusCode);
     }
 
     [SqlServerFact]
