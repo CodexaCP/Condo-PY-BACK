@@ -89,6 +89,7 @@ builder.Services.AddHostedService<PaymentReminderService>();
 builder.Services.AddHostedService<PlanExpiryService>();
 builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>();
 builder.Services.AddHostedService<MarketplaceMaintenanceService>();
+builder.Services.AddHostedService<PaymentIntentMaintenanceService>();
 builder.Services.AddHostedService<AdCampaignMaintenanceService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

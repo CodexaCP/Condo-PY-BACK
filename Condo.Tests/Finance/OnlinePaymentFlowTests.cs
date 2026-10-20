@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Condo.Tests.Finance;
@@ -440,6 +441,73 @@ public class OnlinePaymentFlowTests : IDisposable
         Assert.False(intent.Items.First().IsOpen);
         Assert.Contains(Events(), e => e.Outcome == PaymentEventOutcomes.Failed && e.Error!.Contains("proveedor caido"));
         Assert.True((await Create()).Ok);
+    }
+
+    // ── Proceso en segundo plano ─────────────────────────────────────────────
+
+    private PaymentIntentMaintenanceService Maintenance()
+    {
+        var provider = new ServiceCollection().AddSingleton(Service()).BuildServiceProvider();
+        return new PaymentIntentMaintenanceService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PaymentIntentMaintenanceService>.Instance);
+    }
+
+    [Fact]
+    public async Task ElProcesoVenceSoloLosCobrosAbiertosQuePasaronSuPlazoDeTodosLosPropietarios()
+    {
+        var overdue = await CreateOk();   // propietario 1: vencido
+        _env.T.Db.PaymentIntents.Single(x => x.Id == overdue.Id).ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-5);
+
+        var unit2 = _env.T.AddUnit(_env.Building, "B1");
+        var owner2 = _env.T.AddUser(_env.Company, UserRole.Owner);
+        _env.T.AddOwner(unit2, owner2);
+        _env.T.Db.ExpenseCharges.Add(new ExpenseCharge
+        {
+            CompanyId = _env.Company.Id, ExpensePeriodId = _january.Id, UnitId = unit2.Id, ChargeType = ExpenseChargeType.Ordinary, Concept = "Expensas", Amount = 80_000m
+        });
+        _env.T.Db.SaveChanges();
+        var current = await Service().CreateAsync(
+            owner2.Id, _env.Company.Id,
+            new CreateOnlinePaymentRequest { BuildingId = _env.Building.Id, ThroughUnitId = unit2.Id, ThroughExpensePeriodId = _january.Id }, "https://api.test", null, default);
+        Assert.True(current.Ok);   // propietario 2: todavia dentro del plazo
+
+        var closed = await Maintenance().RunOnceAsync(default);
+
+        Assert.Equal(1, closed);
+        Assert.Equal(PaymentIntentStatus.Closed, IntentOf(overdue.Id).Status);
+        Assert.Equal("Expired", IntentOf(overdue.Id).CloseReason);
+        Assert.Equal(PaymentIntentStatus.Open, IntentOf(current.Value!.Id).Status);
+        Assert.True(IntentOf(current.Value.Id).Items.All(i => i.IsOpen));
+        // Una segunda pasada no encuentra nada que vencer.
+        Assert.Equal(0, await Maintenance().RunOnceAsync(default));
+    }
+
+    [Fact]
+    public async Task ElProcesoNoTocaCobrosPagadosNiEnRevision()
+    {
+        var paid = await CreateOk(_january);
+        await Send(Attempt(1));
+        Assert.Equal(PaymentIntentStatus.Paid, IntentOf(paid.Id).Status);
+        // Aunque su plazo ya haya pasado, un cobro pagado sigue pagado.
+        _env.T.Db.PaymentIntents.Single(x => x.Id == paid.Id).ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-30);
+        _env.T.Db.SaveChanges();
+
+        var closed = await Maintenance().RunOnceAsync(default);
+
+        Assert.Equal(0, closed);
+        Assert.Equal(PaymentIntentStatus.Paid, IntentOf(paid.Id).Status);
+        Assert.Single(Fresh().Payments.ToList());
+    }
+
+    [Fact]
+    public async Task ElProcesoSeDetieneLimpioAlCancelarse()
+    {
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+
+        await Maintenance().StartAsync(cancel.Token);
+        await Maintenance().StopAsync(CancellationToken.None);   // no lanza aunque se cancele durante la espera inicial
     }
 
     // ═════════════════════════════════════════════════════════════════════════
