@@ -19,7 +19,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
     public DocumentMetadata GetMetadata() => new()
     {
         Title = $"Comprobante {receipt.UnitCode} - {receipt.ExpensePeriodName}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -47,7 +47,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Comprobante individual de expensas").FontSize(11).FontColor(ColorAccent);
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
@@ -300,7 +300,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text("Generado por CONDOPY").FontColor(ColorGray);
+            row.RelativeItem().Text("Generado por Expenses").FontColor(ColorGray);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray);

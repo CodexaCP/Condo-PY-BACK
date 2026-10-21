@@ -10,9 +10,9 @@ namespace Condo.Api.Documents;
 public sealed record SettlementSignature(string Name, string Title, byte[]? Image);
 
 /// <summary>
-/// Liquidacion de expensas A4. Con el modelo estandar sale con los colores de CONDOPY; con el modelo propio
+/// Liquidacion de expensas A4. Con el modelo estandar sale con los colores de Expenses; con el modelo propio
 /// del edificio (backgroundImage, cargado por el superadmin) el papel ya trae su diseno, asi que se imprime
-/// sobre el a pagina completa y el texto va en negro/gris, sin marca ni colores de CONDOPY.
+/// sobre el a pagina completa y el texto va en negro/gris, sin marca ni colores de Expenses.
 /// </summary>
 public sealed class SettlementPdfDocument(
     ExpenseSettlementSummaryDto summary,
@@ -251,7 +251,7 @@ public sealed class SettlementPdfDocument(
     public DocumentMetadata GetMetadata() => new()
     {
         Title = $"Liquidacion {summary.ExpensePeriodName} - {summary.BuildingName}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     private bool hasSignatures => approver is not null || president is not null || publisher is not null;
@@ -773,7 +773,7 @@ public sealed class SettlementPdfDocument(
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(p.Primary);
+                    c.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(p.Primary);
                     c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
@@ -990,7 +990,7 @@ public sealed class SettlementPdfDocument(
             row.RelativeItem().Text(t =>
             {
                 if (standardTemplate)
-                    t.Span("Generado por CONDOPY").FontColor(p.Gray);
+                    t.Span("Generado por Expenses").FontColor(p.Gray);
                 if (summary.GeneratedAtUtc.HasValue)
                 {
                     var stamp = summary.GeneratedAtUtc.Value.ToString("dd/MM/yyyy HH:mm");

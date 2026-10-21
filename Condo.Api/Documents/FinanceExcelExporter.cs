@@ -66,7 +66,7 @@ public static class FinanceExcelExporter
             ("Fecha de arranque del módulo", ctx.StartDate.ToString("dd/MM/yyyy")),
             ("Generado el", generatedAtLocal.ToString("dd/MM/yyyy HH:mm")),
             ("Criterio", CriteriaText),
-            ("Origen de los datos", "Libro derivado de los cobros de propietarios, los gastos y los ingresos cargados en CondoPY; no es una contabilidad."),
+            ("Origen de los datos", "Libro derivado de los cobros de propietarios, los gastos y los ingresos cargados en Expenses; no es una contabilidad."),
             ("Hojas", string.Join(", ", sheets))
         };
 

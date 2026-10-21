@@ -20,8 +20,8 @@ public sealed class CollectionReportPdfDocument(CollectionReportDto report, stri
 
     public DocumentMetadata GetMetadata() => new()
     {
-        Title = "Reporte de Cobranza - CONDOPY",
-        Author = "CONDOPY"
+        Title = "Reporte de Cobranza - Expenses",
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -45,7 +45,7 @@ public sealed class CollectionReportPdfDocument(CollectionReportDto report, stri
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(18).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(18).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Reporte de cobranza").FontSize(11).FontColor(ColorAccent);
                     c.Item().PaddingTop(2).Text(filterDescription).FontSize(8).FontColor(ColorGray);
                 });
@@ -264,7 +264,7 @@ public sealed class CollectionReportPdfDocument(CollectionReportDto report, stri
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text("Generado por CONDOPY · Reporte de Cobranza").FontColor(ColorGray).FontSize(7.5f);
+            row.RelativeItem().Text("Generado por Expenses · Reporte de Cobranza").FontColor(ColorGray).FontSize(7.5f);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray).FontSize(7.5f);

@@ -190,7 +190,7 @@ public class AuthController(
                 <p>Este link vence en 45 minutos y sirve una sola vez. Si no lo pediste vos, podés ignorar este correo.</p>
                 """;
 
-            await emailSender.SendAsync(user.Email, "Restablecer tu contraseña — CONDOPY", html, cancellationToken);
+            await emailSender.SendAsync(user.Email, "Restablecer tu contraseña — Expenses", html, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

@@ -27,8 +27,8 @@ public sealed class AssemblyReportPdfDocument(AssemblyReportDto report) : IDocum
 
     public DocumentMetadata GetMetadata() => new()
     {
-        Title = $"Informe de asamblea {report.BuildingName} - CONDOPY",
-        Author = "CONDOPY"
+        Title = $"Informe de asamblea {report.BuildingName} - Expenses",
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -54,7 +54,7 @@ public sealed class AssemblyReportPdfDocument(AssemblyReportDto report) : IDocum
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(18).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(18).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Informe para la asamblea").FontSize(11).FontColor(ColorAccent);
                     c.Item().PaddingTop(2).Text($"{report.BuildingName}  ·  {report.From:dd/MM/yyyy} – {report.To:dd/MM/yyyy}")
                         .FontSize(8).FontColor(ColorGray);
@@ -70,7 +70,7 @@ public sealed class AssemblyReportPdfDocument(AssemblyReportDto report) : IDocum
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text($"CONDOPY · Informe de asamblea: {report.BuildingName}").FontColor(ColorGray).FontSize(7.5f);
+            row.RelativeItem().Text($"Expenses · Informe de asamblea: {report.BuildingName}").FontColor(ColorGray).FontSize(7.5f);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray).FontSize(7.5f);

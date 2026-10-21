@@ -12,7 +12,7 @@ public static class LibroMovimientosExcelBuilder
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Libro de movimientos");
 
-        sheet.Cell(1, 1).Value = "CONDOPY - Libro de movimientos";
+        sheet.Cell(1, 1).Value = "Expenses - Libro de movimientos";
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(14);
 
         sheet.Cell(2, 1).Value = report.BuildingName;

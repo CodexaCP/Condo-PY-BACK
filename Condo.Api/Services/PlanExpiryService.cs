@@ -252,8 +252,8 @@ public sealed class PlanExpiryService(
                 <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Plan</td><td><strong>{E(bp.Plan?.Name)}</strong></td></tr>
                 <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Vencimiento</td><td><strong>{bp.EndDate:dd/MM/yyyy}</strong></td></tr>
               </table>
-              <p>Para regularizarlo ingrese a CONDOPY, sección <strong>Mi plan</strong>, y envíe el comprobante de pago.</p>
-              <p style="color:#6b7280;font-size:12px;margin-top:24px">Este es un aviso automático de CONDOPY.</p>
+              <p>Para regularizarlo ingrese a Expenses, sección <strong>Mi plan</strong>, y envíe el comprobante de pago.</p>
+              <p style="color:#6b7280;font-size:12px;margin-top:24px">Este es un aviso automático de Expenses.</p>
             </div>
             """;
     }

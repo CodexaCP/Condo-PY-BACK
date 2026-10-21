@@ -16,7 +16,7 @@ public sealed class MarketplaceHandoverPdfDocument(MarketplaceHandoverNoteDto no
     public DocumentMetadata GetMetadata() => new()
     {
         Title = $"Cambio de propietario principal — unidad {note.UnitCode}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -28,7 +28,7 @@ public sealed class MarketplaceHandoverPdfDocument(MarketplaceHandoverNoteDto no
             page.DefaultTextStyle(x => x.FontFamily("Arial").FontSize(9));
             page.Header().PaddingBottom(10).Column(col =>
             {
-                col.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(CondoPdfColors.Primary);
+                col.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(CondoPdfColors.Primary);
                 col.Item().Text("Cambio de propietario principal — Marketplace").FontSize(11).FontColor(CondoPdfColors.Accent);
                 col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(CondoPdfColors.Primary);
             });
@@ -36,7 +36,7 @@ public sealed class MarketplaceHandoverPdfDocument(MarketplaceHandoverNoteDto no
             page.Footer().Column(col =>
             {
                 col.Item().Element(PdfWatermark.ComposeNonFiscal);
-                col.Item().PaddingTop(4).Text($"Generado el {Local(generatedAtUtc)} · CONDOPY")
+                col.Item().PaddingTop(4).Text($"Generado el {Local(generatedAtUtc)} · Expenses")
                     .FontSize(8).FontColor(CondoPdfColors.Gray);
             });
         });

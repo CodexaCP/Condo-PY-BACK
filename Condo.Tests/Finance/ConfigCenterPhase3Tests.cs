@@ -1165,7 +1165,7 @@ public class ConfigCenterPhase3Tests : IDisposable
         var before = FinanceEnv.Ok(await Api().GetOverview(_env.Building.Id, default)).Sections.Single(s => s.Key == ConfigSectionKeys.Documents);
         Assert.Equal(ConfigSectionStatus.Optional, before.Status);
         Assert.Contains(before.Summary, i => i.Label == "Avisos automáticos encendidos" && i.Value == "2 de 5");
-        Assert.Contains(before.Summary, i => i.Label == "Modelos de documentos" && i.Value == "Estándar de CONDOPY");
+        Assert.Contains(before.Summary, i => i.Label == "Modelos de documentos" && i.Value == "Estándar de Expenses");
         Assert.Equal("self", before.LinkKind);
 
         SetRule(NoticeKind.OnDue, true);

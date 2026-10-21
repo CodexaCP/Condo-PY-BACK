@@ -23,8 +23,8 @@ public sealed class AccountStatementPdfDocument(
 
     public DocumentMetadata GetMetadata() => new()
     {
-        Title = $"Estado de Cuenta {unitCode} - CONDOPY",
-        Author = "CONDOPY"
+        Title = $"Estado de Cuenta {unitCode} - Expenses",
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -53,7 +53,7 @@ public sealed class AccountStatementPdfDocument(
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(18).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(18).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Estado de cuenta por unidad").FontSize(11).FontColor(ColorAccent);
                     c.Item().PaddingTop(2).Text($"{unitCode}  ·  {buildingName}").FontSize(8.5f).FontColor(ColorGray);
                 });
@@ -175,7 +175,7 @@ public sealed class AccountStatementPdfDocument(
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text($"CONDOPY · Estado de cuenta: {unitCode} · {buildingName}").FontColor(ColorGray).FontSize(7.5f);
+            row.RelativeItem().Text($"Expenses · Estado de cuenta: {unitCode} · {buildingName}").FontColor(ColorGray).FontSize(7.5f);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray).FontSize(7.5f);

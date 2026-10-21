@@ -21,7 +21,7 @@ public class MarketplaceModuleGate(ICondoDbContext dbContext)
     public const string ForbiddenCode = "marketplace_forbidden";
 
     public const string DisabledMessage =
-        "El Marketplace no está habilitado para este edificio. Pedí su activación al administrador de CondoPY.";
+        "El Marketplace no está habilitado para este edificio. Pedí su activación al administrador de Expenses.";
     public const string PlanNotIncludedMessage =
         "El plan actual del edificio no incluye el Marketplace.";
     public const string AdminOnlyMessage =

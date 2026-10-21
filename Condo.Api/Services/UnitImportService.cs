@@ -37,7 +37,7 @@ public static partial class UnitImportService
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
 
-        sheet.Cell(1, 1).Value = "Carga de unidades — CONDOPY";
+        sheet.Cell(1, 1).Value = "Carga de unidades — Expenses";
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(12);
         sheet.Cell(2, 1).Value =
             "Completá una fila por unidad desde la fila 5. No cambies los encabezados ni las hojas. Edificio: elegilo de la lista. " +

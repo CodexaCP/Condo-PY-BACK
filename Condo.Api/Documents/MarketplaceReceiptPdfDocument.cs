@@ -61,7 +61,7 @@ public sealed class MarketplaceReceiptPdfDocument(MarketplaceReceiptData data) :
     public DocumentMetadata GetMetadata() => new()
     {
         Title = $"Comprobante interno de reserva {data.Reference}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -76,7 +76,7 @@ public sealed class MarketplaceReceiptPdfDocument(MarketplaceReceiptData data) :
             page.Footer().Column(col =>
             {
                 col.Item().Element(PdfWatermark.ComposeNonFiscal);
-                col.Item().PaddingTop(4).Text($"Generado el {Local(data.GeneratedAtUtc)} · CONDOPY")
+                col.Item().PaddingTop(4).Text($"Generado el {Local(data.GeneratedAtUtc)} · Expenses")
                     .FontSize(8).FontColor(CondoPdfColors.Gray);
             });
         });
@@ -90,7 +90,7 @@ public sealed class MarketplaceReceiptPdfDocument(MarketplaceReceiptData data) :
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(CondoPdfColors.Primary);
+                    c.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(CondoPdfColors.Primary);
                     c.Item().Text("Comprobante interno de reserva").FontSize(11).FontColor(CondoPdfColors.Accent);
                     c.Item().Text("Marketplace de espacios").FontSize(9).FontColor(CondoPdfColors.Gray);
                 });

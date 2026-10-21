@@ -1,7 +1,7 @@
 namespace Condo.Api.Documents;
 
 /// <summary>
-/// Colores de la marca CONDOPY para los PDF con el modelo estandar (los mismos del comprobante).
+/// Colores de la marca Expenses para los PDF con el modelo estandar (los mismos del comprobante).
 /// </summary>
 public static class CondoPdfColors
 {

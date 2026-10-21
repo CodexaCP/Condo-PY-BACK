@@ -12,7 +12,7 @@ public static class EstadoResultadosExcelBuilder
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Estado de resultados");
 
-        sheet.Cell(1, 1).Value = "CONDOPY - Estado de resultados";
+        sheet.Cell(1, 1).Value = "Expenses - Estado de resultados";
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(14);
 
         sheet.Cell(2, 1).Value = report.BuildingName;

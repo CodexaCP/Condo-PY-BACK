@@ -52,7 +52,7 @@ public static partial class ResidentsImportService
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
 
-        PeopleImportCommon.WriteTitle(sheet, "Carga de residentes — CONDOPY",
+        PeopleImportCommon.WriteTitle(sheet, "Carga de residentes — Expenses",
             "Completá una fila por persona y unidad desde la fila 5. Para un residente en varias unidades repetí sus datos en una fila por unidad. " +
             "Edificio y Unidad son opcionales (juntos): sin ellos solo se da de alta la ficha. Desde: fecha de inicio (dd/mm/aaaa; vacío = hoy). " +
             "Principal: Si o No (vacío = Si si la unidad aún no tiene residente principal). Vence el contrato: solo para inquilinos.");

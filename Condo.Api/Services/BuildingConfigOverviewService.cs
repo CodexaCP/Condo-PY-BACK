@@ -235,7 +235,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
             Reasons = rules.Count > 0 ? [] : ["Los avisos automáticos están con su configuración por defecto (solo pago recibido y período publicado)."],
             Summary =
             [
-                Item("Modelos de documentos", b.UseStandardTemplates ? "Estándar de CONDOPY" : "Propios del edificio"),
+                Item("Modelos de documentos", b.UseStandardTemplates ? "Estándar de Expenses" : "Propios del edificio"),
                 Item("Avisos automáticos encendidos", $"{activeCount} de {kinds.Length}")
             ],
             LinkKind = "self",

@@ -72,7 +72,7 @@ public class Building : BaseEntity
     public int AdsRotationSeconds { get; set; } = 10;
 
     // Modelos de documentos (factura, nota de credito y liquidacion). Con UseStandardTemplates los PDF
-    // salen con el diseno estandar de CONDOPY (colores de la marca); si no, el edificio adjunta sus
+    // salen con el diseno estandar de Expenses (colores de la marca); si no, el edificio adjunta sus
     // propios modelos, uno por concepto, y los PDF salen con el formato clasico preimpreso.
     public bool UseStandardTemplates { get; set; } = true;
     public string? InvoiceTemplateUrl { get; set; }

@@ -4,7 +4,7 @@ using Condo.Domain.Enums;
 
 namespace Condo.Tests.Finance;
 
-/// <summary>El plan generico de CondoPY (el plan de cuentas de Tony): estructura, categorias de la liquidacion, funciones y activacion por defecto.</summary>
+/// <summary>El plan generico de Expenses (el plan de cuentas de Tony): estructura, categorias de la liquidacion, funciones y activacion por defecto.</summary>
 public class FinanceChartTemplateTests
 {
     private static readonly IReadOnlyList<FinanceChartTemplate.Node> Nodes = FinanceChartTemplate.Nodes;

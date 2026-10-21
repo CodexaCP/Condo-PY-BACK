@@ -15,7 +15,7 @@ public static class SupplierCreditNotesExcelBuilder
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("NC de proveedor");
 
-        sheet.Cell(1, 1).Value = "CONDOPY - Notas de crédito de proveedor";
+        sheet.Cell(1, 1).Value = "Expenses - Notas de crédito de proveedor";
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(14);
         sheet.Cell(2, 1).Value = buildingName;
         sheet.Cell(2, 1).Style.Font.SetBold();

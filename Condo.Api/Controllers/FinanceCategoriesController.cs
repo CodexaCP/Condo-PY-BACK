@@ -11,7 +11,7 @@ namespace Condo.Api.Controllers;
 
 /// <summary>
 /// Plan de cuentas del edificio: arbol de hasta <see cref="FinanceChartTemplate.MaxDepth"/> niveles (clase → grupo → cuenta) con codigos
-/// editables. Nace del plan generico de CondoPY al habilitar el modulo y se puede reemplazar por el plan del cliente (importado de Excel),
+/// editables. Nace del plan generico de Expenses al habilitar el modulo y se puede reemplazar por el plan del cliente (importado de Excel),
 /// copiar de otro edificio o ajustar a mano. Solo las cuentas finales de ingresos y egresos reciben gastos e ingresos; el resto es de
 /// referencia y se exporta al contador. Una cuenta puede tener una <i>funcion especial</i> (<c>SystemKey</c>): cobranza de expensas o
 /// cuenta por defecto de una categoria. Solo el SuperAdmin modifica el plan (servicio de configuracion).
@@ -401,7 +401,7 @@ public class FinanceCategoriesController(
         return denied ?? Ok(await planService.GetImpactAsync(buildingId, cancellationToken));
     }
 
-    /// <summary>Aplica el plan generico de CondoPY: reemplaza el plan entero o solo agrega las cuentas que faltan.</summary>
+    /// <summary>Aplica el plan generico de Expenses: reemplaza el plan entero o solo agrega las cuentas que faltan.</summary>
     [HttpPost("apply-template")]
     public async Task<ActionResult<LedgerPlanApplyResultDto>> ApplyTemplate([FromBody] LedgerPlanApplyRequest request, CancellationToken cancellationToken)
     {
@@ -417,7 +417,7 @@ public class FinanceCategoriesController(
             return BadRequest(NoCompanyMessage);
         }
 
-        return await ApplyAsync(request.BuildingId, companyId.Value, FinanceChartTemplate.Specs, request.Mode, request.ConfirmReplace, "plan genérico de CondoPY", cancellationToken);
+        return await ApplyAsync(request.BuildingId, companyId.Value, FinanceChartTemplate.Specs, request.Mode, request.ConfirmReplace, "plan genérico de Expenses", cancellationToken);
     }
 
     [HttpGet("import-template")]

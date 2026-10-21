@@ -4,7 +4,7 @@ using Condo.Domain.Enums;
 namespace Condo.Application.Services;
 
 /// <summary>
-/// Plan de cuentas generico de CondoPY: la base de la que parte cada edificio (el SuperAdmin elige cuales cuentas usa, o lo reemplaza
+/// Plan de cuentas generico de Expenses: la base de la que parte cada edificio (el SuperAdmin elige cuales cuentas usa, o lo reemplaza
 /// por el plan del cliente). Esta fijo en codigo y se versiona con el sistema; lo que se edita es el plan de cada edificio.
 /// Cinco clases: 1 Activo, 2 Pasivo, 3 Patrimonio / Fondos, 4 Ingresos y 5 Egresos; clase → grupo → cuenta (hasta 3 niveles, y los
 /// planes importados pueden tener mas). Solo las cuentas de ingresos y egresos reciben movimientos; las demas son de referencia

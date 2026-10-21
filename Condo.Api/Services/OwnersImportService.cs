@@ -59,7 +59,7 @@ public static partial class OwnersImportService
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
 
-        PeopleImportCommon.WriteTitle(sheet, "Carga de propietarios — CONDOPY",
+        PeopleImportCommon.WriteTitle(sheet, "Carga de propietarios — Expenses",
             "Completá una fila por persona y unidad desde la fila 5. Para un propietario con varias unidades repetí sus datos en una fila por unidad. " +
             "Edificio y Unidad son opcionales (juntos): sin ellos solo se da de alta a la persona. Usuario vacío = se arma con el correo. " +
             "% titularidad: de 1 a 100 (solo si hay copropietarios). Principal: Si o No (vacío = Si si la unidad aún no tiene principal). " +

@@ -11,7 +11,7 @@ namespace Condo.Api.Documents;
 /// <summary>
 /// Factura A4 con el diseno de la plantilla "modelo_factura_A4_preimpreso": las posiciones (en puntos,
 /// medidas desde la esquina inferior izquierda como en la plantilla) se respetan tal cual.
-/// Todos los conceptos van como exentos (sin IVA). Con el modelo estandar de CONDOPY se dibuja igual
+/// Todos los conceptos van como exentos (sin IVA). Con el modelo estandar de Expenses se dibuja igual
 /// pero con los colores de la marca (los del comprobante); sin el, en negro como el formulario preimpreso.
 /// Si el timbrado tiene posiciones calibradas (invoice.FieldPositionsJson), cada campo se corre por su
 /// offset guardado, para calzar sobre el papel preimpreso real de esa imprenta.
@@ -143,7 +143,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         Title = invoice.Status == InvoiceStatus.Issued
             ? $"Factura {invoice.NumeroFormateado}"
             : $"Vista previa de factura - {invoice.UnitCode}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -469,7 +469,7 @@ public sealed class InvoicePdfDocument(InvoiceDto invoice, bool standardTemplate
         Text(l, 34.01575f, 131, 6.5f, "Original: Comprador - Copia: Arch. Tributario", bold: true, width: 527.2441f, align: Align.Right, key: "pieOriginal", label: true);
         Text(l, 34.01575f, 122, 6.5f, "2°Copia: Contabilidad(No válido p/ crédito fiscal)", bold: true, width: 527.2441f, align: Align.Right, key: "pieCopia", label: true);
         if (standardTemplate)
-            Text(l, 34.01575f, 131, 6.5f, "Generado por CONDOPY", width: 200, color: CondoPdfColors.Gray, key: "generadoPor");
+            Text(l, 34.01575f, 131, 6.5f, "Generado por Expenses", width: 200, color: CondoPdfColors.Gray, key: "generadoPor");
 
         if (invoice.Status == InvoiceStatus.Voided)
         {

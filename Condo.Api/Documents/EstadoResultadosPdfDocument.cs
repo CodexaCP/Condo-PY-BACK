@@ -19,8 +19,8 @@ public sealed class EstadoResultadosPdfDocument(EstadoResultadosReportDto report
 
     public DocumentMetadata GetMetadata() => new()
     {
-        Title = $"Estado de Resultados {report.BuildingName} - CONDOPY",
-        Author = "CONDOPY"
+        Title = $"Estado de Resultados {report.BuildingName} - Expenses",
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -44,7 +44,7 @@ public sealed class EstadoResultadosPdfDocument(EstadoResultadosReportDto report
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(18).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(18).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Estado de resultados").FontSize(11).FontColor(ColorAccent);
                     c.Item().PaddingTop(2).Text($"{report.BuildingName}  ·  {report.FromDate:dd/MM/yyyy} – {report.ToDate:dd/MM/yyyy}")
                         .FontSize(8).FontColor(ColorGray);
@@ -127,7 +127,7 @@ public sealed class EstadoResultadosPdfDocument(EstadoResultadosReportDto report
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text($"CONDOPY · Estado de resultados: {report.BuildingName}").FontColor(ColorGray).FontSize(7.5f);
+            row.RelativeItem().Text($"Expenses · Estado de resultados: {report.BuildingName}").FontColor(ColorGray).FontSize(7.5f);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray).FontSize(7.5f);

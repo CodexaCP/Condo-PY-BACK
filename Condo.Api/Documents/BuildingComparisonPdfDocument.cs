@@ -19,8 +19,8 @@ public sealed class BuildingComparisonPdfDocument(BuildingComparisonReportDto re
 
     public DocumentMetadata GetMetadata() => new()
     {
-        Title = "Comparativo de edificios - CONDOPY",
-        Author = "CONDOPY"
+        Title = "Comparativo de edificios - Expenses",
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -44,7 +44,7 @@ public sealed class BuildingComparisonPdfDocument(BuildingComparisonReportDto re
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(18).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(18).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Comparativo de edificios").FontSize(11).FontColor(ColorAccent);
                     c.Item().PaddingTop(2).Text($"{report.FromDate:dd/MM/yyyy} – {report.ToDate:dd/MM/yyyy}  ·  morosidad a la fecha de hoy")
                         .FontSize(8).FontColor(ColorGray);
@@ -124,7 +124,7 @@ public sealed class BuildingComparisonPdfDocument(BuildingComparisonReportDto re
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text("CONDOPY · Comparativo de edificios").FontColor(ColorGray).FontSize(7.5f);
+            row.RelativeItem().Text("Expenses · Comparativo de edificios").FontColor(ColorGray).FontSize(7.5f);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray).FontSize(7.5f);

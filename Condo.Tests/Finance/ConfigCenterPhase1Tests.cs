@@ -322,7 +322,7 @@ public class ConfigCenterPhase1Tests : IDisposable
         var page = await Audit(ConfigSectionKeys.Chart);
         var entry = Assert.Single(page.Items);
         Assert.Equal("Replaced", entry.Action);
-        Assert.Contains("plan genérico de CondoPY", entry.Summary);
+        Assert.Contains("plan genérico de Expenses", entry.Summary);
     }
 
     [Fact]

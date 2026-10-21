@@ -483,7 +483,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
              string.IsNullOrWhiteSpace(request.CreditNoteTemplateUrl) ||
              string.IsNullOrWhiteSpace(request.SettlementTemplateUrl)))
         {
-            return "Adjuntá los 3 modelos (factura, nota de crédito y liquidación) o marcá \"Usar modelos estándar de CONDOPY\".";
+            return "Adjuntá los 3 modelos (factura, nota de crédito y liquidación) o marcá \"Usar modelos estándar de Expenses\".";
         }
 
         return BuildingProfile.Validate(request, request.BankAccounts, currentRuc, canEditFinancial);

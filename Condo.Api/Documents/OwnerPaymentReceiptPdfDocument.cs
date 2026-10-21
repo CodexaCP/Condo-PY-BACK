@@ -43,7 +43,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
     public DocumentMetadata GetMetadata() => new()
     {
         Title  = $"Comprobante de propietario {data.Reference}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -71,7 +71,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
             {
                 row.RelativeItem().Column(c =>
                 {
-                    c.Item().Text("CONDOPY").FontSize(16).Bold().FontColor(ColorPrimary);
+                    c.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(ColorPrimary);
                     c.Item().Text("Comprobante de pago del propietario").FontSize(11).FontColor(ColorAccent);
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
@@ -244,7 +244,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
     {
         container.PaddingTop(6).Row(row =>
         {
-            row.RelativeItem().Text("Generado por CONDOPY").FontColor(ColorGray);
+            row.RelativeItem().Text("Generado por Expenses").FontColor(ColorGray);
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(ColorGray);

@@ -25,7 +25,7 @@ public sealed class JournalBookPdfDocument(JournalBookPrint print) : IDocument
     public DocumentMetadata GetMetadata() => new()
     {
         Title = $"Libro Diario {print.FiscalYear} - {print.BuildingName}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -147,7 +147,7 @@ public sealed class JournalBookPdfDocument(JournalBookPrint print) : IDocument
             Totals(col, sheet.Folio == print.Pages[^1].Folio ? "Total del ejercicio" : "Suma y sigue", sheet.CumulativeDebit, sheet.CumulativeCredit, bold: true);
             col.Item().PaddingTop(3).Row(r =>
             {
-                r.RelativeItem().Text($"Libro Diario {print.FiscalYear} · {print.EntryCount} asientos · Generado por CONDOPY el {DateTime.Now:dd/MM/yyyy HH:mm}").FontSize(7).FontColor(Muted);
+                r.RelativeItem().Text($"Libro Diario {print.FiscalYear} · {print.EntryCount} asientos · Generado por Expenses el {DateTime.Now:dd/MM/yyyy HH:mm}").FontSize(7).FontColor(Muted);
                 r.ConstantItem(60).AlignRight().Text($"Folio {sheet.Folio}").FontSize(7).FontColor(Muted);
             });
         });

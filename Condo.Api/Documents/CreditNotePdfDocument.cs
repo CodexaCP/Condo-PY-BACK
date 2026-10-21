@@ -38,7 +38,7 @@ public sealed record CreditNotePdfData(
 /// <summary>
 /// Nota de credito A4 con el diseno del modelo "ejemplo_nota_credito_condo_py": encabezado con emisor y
 /// timbrado, documento que se ajusta, cliente, items, totales y referencia fiscal. Con el modelo estandar
-/// de CONDOPY lleva los colores de la marca (los del comprobante); sin el, sale en blanco y negro.
+/// de Expenses lleva los colores de la marca (los del comprobante); sin el, sale en blanco y negro.
 /// </summary>
 public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardTemplate = true) : IDocument
 {
@@ -67,7 +67,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
         Title = data.NumeroFormateado is not null
             ? $"Nota de crédito {data.NumeroFormateado}"
             : $"Vista previa de nota de crédito - {data.UnitCode}",
-        Author = "CONDOPY"
+        Author = "EXPENSES"
     };
 
     public void Compose(IDocumentContainer container)
@@ -94,7 +94,7 @@ public sealed class CreditNotePdfDocument(CreditNotePdfData data, bool standardT
                 col.Item().Text("Original: Comprador - Copia: Archivo Tributario - 2ª Copia: Contabilidad")
                     .FontSize(6.5f).FontColor(p.Muted);
                 if (standardTemplate)
-                    col.Item().PaddingTop(2).Text("Generado por CONDOPY").FontSize(6.5f).FontColor(CondoPdfColors.Gray);
+                    col.Item().PaddingTop(2).Text("Generado por Expenses").FontSize(6.5f).FontColor(CondoPdfColors.Gray);
             });
         });
     }

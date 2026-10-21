@@ -37,7 +37,7 @@ public abstract class FinanceControllerBase(
         FinanceRoles.Contains(tenantContext.Role, StringComparer.OrdinalIgnoreCase);
 
     // Configurar (fecha de arranque, cuentas y plan de cuentas): solo SuperAdmin, porque la configuracion inicial de cada edificio
-    // es un servicio de CondoPY. Los demas roles ven la configuracion en solo lectura.
+    // es un servicio de Expenses. Los demas roles ven la configuracion en solo lectura.
     protected bool CanConfigure => tenantContext.IsSuperAdmin;
 
     // Presupuesto: SuperAdmin y Administrador de empresa.

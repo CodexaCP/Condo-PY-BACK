@@ -506,7 +506,7 @@ public class InvoicesController(
         var backgroundImage = TryReadReferenceScan(buildingTemplate?.InvoiceTemplateUrl)
             ?? TryReadReferenceScan(row.SeriesReferenceScanUrl);
         // Con papel propio (imagen de fondo) el texto va en negro simple, sin los colores de marca de
-        // CONDOPY — esos solo tienen sentido sobre la plantilla estandar del sistema.
+        // Expenses — esos solo tienen sentido sobre la plantilla estandar del sistema.
         var document = new InvoicePdfDocument(dto, standardTemplate: backgroundImage is null && standardTemplate, backgroundImage);
         var pdfBytes = document.GeneratePdf();
 

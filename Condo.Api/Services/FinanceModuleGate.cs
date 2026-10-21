@@ -21,13 +21,13 @@ public class FinanceModuleGate(ICondoDbContext dbContext)
     public const string ForbiddenCode = "finance_forbidden";
 
     public const string DisabledMessage =
-        "El módulo Finanzas del edificio no está habilitado para este edificio. Pedí su activación al administrador de CondoPY.";
+        "El módulo Finanzas del edificio no está habilitado para este edificio. Pedí su activación al administrador de Expenses.";
     public const string PlanNotIncludedMessage =
         "El plan actual del edificio no incluye el módulo Finanzas del edificio.";
     public const string RoleNotAllowedMessage =
         "Tu rol no tiene acceso al módulo Finanzas del edificio.";
     public const string ReadOnlyRoleMessage =
-        "La configuración financiera del edificio (fecha de arranque, cuentas y plan de cuentas) la realiza CondoPY. Pedí los cambios que necesites a tu administrador de CondoPY.";
+        "La configuración financiera del edificio (fecha de arranque, cuentas y plan de cuentas) la realiza Expenses. Pedí los cambios que necesites a tu administrador de Expenses.";
     public const string BudgetReadOnlyRoleMessage =
         "Solo el Administrador de empresa o el SuperAdmin pueden modificar el presupuesto.";
 

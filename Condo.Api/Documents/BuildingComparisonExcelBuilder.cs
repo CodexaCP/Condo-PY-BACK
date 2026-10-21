@@ -12,7 +12,7 @@ public static class BuildingComparisonExcelBuilder
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Comparativo de edificios");
 
-        sheet.Cell(1, 1).Value = "CONDOPY - Comparativo de edificios";
+        sheet.Cell(1, 1).Value = "Expenses - Comparativo de edificios";
         sheet.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(14);
 
         sheet.Cell(2, 1).Value = $"Periodo: {report.FromDate:dd/MM/yyyy} - {report.ToDate:dd/MM/yyyy} (morosidad a la fecha de hoy)";

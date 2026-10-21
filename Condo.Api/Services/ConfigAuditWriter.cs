@@ -112,7 +112,7 @@ public sealed class BuildingConfigSnapshot
         s.Add("fundPolicyConfirmed", ConfigSectionKeys.Funds, "Política de fondos confirmada", YesNo(b.FundPolicyConfirmed));
 
         // Documentos y comunicacion
-        s.Add("useStandardTemplates", ConfigSectionKeys.Documents, "Modelos estándar de CONDOPY", YesNo(b.UseStandardTemplates));
+        s.Add("useStandardTemplates", ConfigSectionKeys.Documents, "Modelos estándar de Expenses", YesNo(b.UseStandardTemplates));
 
         return s;
     }

@@ -239,7 +239,7 @@ public sealed class AdCampaignMaintenanceService(
             UserRole.CompanyAdmin => (
                 "Una campaña publicitaria de sus edificios está por vencer",
                 $"La publicidad de <strong>{E(campaign.AdvertiserName)}</strong>, que se muestra en {(plural ? "los edificios" : "el edificio")} de su empresa, {when}. Al pasar la fecha dejará de mostrarse a propietarios y residentes.",
-                "Si desea que continúe, comuníquese con CONDOPY para gestionar la renovación. Si no se renueva, no necesita hacer nada."),
+                "Si desea que continúe, comuníquese con Expenses para gestionar la renovación. Si no se renueva, no necesita hacer nada."),
             _ => (
                 "Una campaña publicitaria de su edificio está por vencer",
                 $"La publicidad de <strong>{E(campaign.AdvertiserName)}</strong> que se muestra en {(plural ? "sus edificios" : "su edificio")} {when}. Después de esa fecha los propietarios y residentes dejarán de verla en la app.",
@@ -266,7 +266,7 @@ public sealed class AdCampaignMaintenanceService(
                 <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Vencimiento</td><td><strong>{campaign.EndDate:dd/MM/yyyy}</strong></td></tr>
               </table>
               <p>{action}</p>
-              <p style="color:#6b7280;font-size:12px;margin-top:24px">Este es un aviso automático de CONDOPY.</p>
+              <p style="color:#6b7280;font-size:12px;margin-top:24px">Este es un aviso automático de Expenses.</p>
             </div>
             """;
     }

@@ -27,7 +27,7 @@ public static class PaymentProviderCatalog
         new(Bancard, "Bancard",
         [
             new(Tpago, "Tpago (link de pago y API)",
-                "El propietario paga en una página de Bancard a la que se lo redirige. Bancard avisa el resultado a Condo-PY por una dirección de callback.",
+                "El propietario paga en una página de Bancard a la que se lo redirige. Bancard avisa el resultado a Expenses por una dirección de callback.",
                 [
                     new("commerceCode", "Código de comercio (commerce_code)", false, true, 40,
                         "Lo entrega Bancard al dar de alta el comercio."),
@@ -50,7 +50,7 @@ public static class PaymentProviderCatalog
                         "Usá conexiones distintas para el ambiente de pruebas (sandbox) y para producción: tienen claves distintas."
                     ])),
             new(VPos, "vPOS 2.0 (formulario de pago)",
-                "El formulario de pago de Bancard se muestra dentro de Condo-PY. Bancard confirma el resultado a Condo-PY con un token firmado.",
+                "El formulario de pago de Bancard se muestra dentro de Expenses. Bancard confirma el resultado a Expenses con un token firmado.",
                 [
                     new("publicKey", "Clave pública", false, true, 200,
                         "No es secreta: identifica al comercio."),

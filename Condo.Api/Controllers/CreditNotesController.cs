@@ -471,7 +471,7 @@ public class CreditNotesController(
         return Ok(ToDto(row!, lines, attachments));
     }
 
-    // PDF de la NC con el modelo del edificio: estandar de CONDOPY (colores de la marca) o, si el
+    // PDF de la NC con el modelo del edificio: estandar de Expenses (colores de la marca) o, si el
     // edificio usa modelos propios, el mismo formato en blanco y negro. Personal del edificio, o el
     // propietario/residente de la unidad cuando la NC ya esta aprobada.
     [HttpGet("{id:guid}/pdf")]
