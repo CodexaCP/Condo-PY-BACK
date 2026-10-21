@@ -12,7 +12,8 @@ namespace Condo.Api.Controllers;
 public class DashboardController(ICondoDbContext dbContext, IAccessScopeService accessScope) : ControllerBase
 {
     [HttpGet("summary")]
-    public async Task<ActionResult<DashboardSummaryDto>> GetSummary(CancellationToken cancellationToken)
+    // buildingId (opcional): el mismo resumen pero de un solo edificio; sin el, suma todos los edificios a los que el usuario tiene acceso.
+    public async Task<ActionResult<DashboardSummaryDto>> GetSummary([FromQuery] Guid? buildingId, CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var accessibleBuildingIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
@@ -75,6 +76,24 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
             }
         }
 
+        var unitOwnersQuery = dbContext.UnitOwners.AsNoTracking().Where(x => !x.IsDeleted);
+
+        if (buildingId.HasValue)
+        {
+            var only = buildingId.Value;
+            if (!await accessScope.CanAccessBuildingAsync(only, cancellationToken)) return Forbid();
+
+            buildingsQuery = buildingsQuery.Where(x => x.Id == only);
+            unitsQuery = unitsQuery.Where(x => x.BuildingId == only);
+            assignmentsQuery = assignmentsQuery.Where(x => x.Unit!.BuildingId == only);
+            expensePeriodsQuery = expensePeriodsQuery.Where(x => x.BuildingId == only);
+            expenseChargesQuery = expenseChargesQuery.Where(x => x.Unit!.BuildingId == only);
+            paymentsQuery = paymentsQuery.Where(x => x.Unit!.BuildingId == only);
+            unitOwnersQuery = unitOwnersQuery.Where(x => x.Unit!.BuildingId == only);
+            residentsQuery = residentsQuery.Where(x =>
+                x.UnitResidents.Any(link => !link.IsDeleted && (link.EndDate == null || link.EndDate >= today) && link.Unit!.BuildingId == only));
+        }
+
         var totalBuildings = await buildingsQuery.CountAsync(cancellationToken);
         var activeBuildings = await buildingsQuery.CountAsync(x => x.IsActive, cancellationToken);
         var totalUnits = await unitsQuery.CountAsync(cancellationToken);
@@ -84,7 +103,6 @@ public class DashboardController(ICondoDbContext dbContext, IAccessScopeService 
         var activeAssignments = await assignmentsQuery.CountAsync(cancellationToken);
         var occupiedUnits = await assignmentsQuery.Select(x => x.UnitId).Distinct().CountAsync(cancellationToken);
 
-        var unitOwnersQuery = dbContext.UnitOwners.AsNoTracking().Where(x => !x.IsDeleted);
         if (!accessScope.IsSuperAdmin)
         {
             if (accessScope.IsCompanyAdmin && accessScope.CompanyId.HasValue)
