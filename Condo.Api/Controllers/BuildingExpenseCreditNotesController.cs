@@ -19,6 +19,13 @@ namespace Condo.Api.Controllers;
 //  - Periodo publicado: el gasto ya se repartio y cobro. La nota se prorratea entre las unidades segun lo que realmente se les cobro
 //    de ese gasto y la parte de cada una se acredita como saldo a favor de su propietario principal (se consume como cualquier otro
 //    saldo, sin restriccion por edificio). Los aportes de fondo de reserva y extraordinario no se recalculan.
+//
+// Cuentas por cobrar al proveedor: si el gasto YA estaba pagado, quien registra la nota elige como se recupera lo acreditado:
+//  - Refund (devolucion de dinero): queda pendiente (RecoveryStatus.Pending) y, en periodo publicado, los propietarios NO reciben saldo
+//    a favor hasta que se marque devuelto (mark-refunded): ahi se acredita igual que antes.
+//  - NextInvoiceDiscount (descuento en la proxima factura): los propietarios se acreditan al registrar la nota; el descuento pendiente se
+//    acumula por proveedor y se va aplicando (discounts) hasta cubrir el monto de la nota.
+// Si el gasto todavia esta por pagar, la nota solo baja la cuenta por pagar y no hay nada que recuperar.
 [ApiController]
 [Authorize]
 [Route("api/building-expenses")]
@@ -51,8 +58,148 @@ public class BuildingExpenseCreditNotesController(
             .ToListAsync(cancellationToken);
 
         var allocations = await LoadAllocationDtosAsync(notes.Select(x => x.Id).ToList(), cancellationToken);
+        var discounts = await LoadDiscountDtosAsync(notes.Select(x => x.Id).ToList(), cancellationToken);
 
-        return Ok(notes.Select(n => ToDto(n, allocations.GetValueOrDefault(n.Id))).ToList());
+        return Ok(notes.Select(n => ToDto(n, allocations.GetValueOrDefault(n.Id), discounts.GetValueOrDefault(n.Id))).ToList());
+    }
+
+    // ── Cuentas por cobrar al proveedor: devolucion y descuento ───────────────
+
+    // El proveedor devolvio el dinero: se registra y, en periodo publicado, recien ahora se acredita el saldo a favor de las unidades.
+    [HttpPost("credit-notes/{id:guid}/mark-refunded")]
+    public async Task<ActionResult<BuildingExpenseCreditNoteResultDto>> MarkRefunded(
+        Guid id, [FromBody] MarkBuildingExpenseCreditNoteRefundedRequest request, CancellationToken cancellationToken)
+    {
+        var reference = string.IsNullOrWhiteSpace(request.Reference) ? null : request.Reference.Trim();
+        if (reference is not null && reference.Length > 200) return BadRequest("La referencia no puede superar los 200 caracteres.");
+
+        var note = await dbContext.BuildingExpenseCreditNotes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (note is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(note.BuildingId, cancellationToken)) return Forbid();
+
+        if (note.Status != BuildingExpenseCreditNoteStatus.Applied) return BadRequest("Esta nota de crédito está anulada.");
+        if (note.RecoveryType != SupplierRecoveryType.Refund)
+            return BadRequest("Esta nota no es una devolución de dinero.");
+        if (note.RecoveryStatus != SupplierRecoveryStatus.Pending)
+            return BadRequest("El proveedor ya devolvió el dinero de esta nota de crédito.");
+        if (request.RefundedOn < note.IssueDate || request.RefundedOn > DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            return BadRequest("La fecha de la devolución no es válida (no puede ser anterior a la nota ni futura).");
+
+        var expense = await dbContext.BuildingExpenses.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == note.BuildingExpenseId, cancellationToken);
+        if (expense is null) return BadRequest("El gasto de la nota de crédito ya no existe.");
+        var period = await dbContext.ExpensePeriods.AsNoTracking()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == note.ExpensePeriodId, cancellationToken);
+        if (period is null) return BadRequest("El periodo de expensas asociado no existe.");
+
+        // La devolucion es un movimiento de dinero con esa fecha: no entra a un mes contable cerrado.
+        var closedMonth = await new FinancePeriodGuard(dbContext).FindClosedAsync(note.BuildingId, request.RefundedOn, cancellationToken);
+        if (closedMonth is not null) return FinancePeriodGuard.ClosedResponse(closedMonth);
+
+        var pushes = new List<PendingPush>();
+        decimal creditedToOwners = 0m;
+
+        if (note.Mode == BuildingExpenseCreditNoteMode.Credited)
+        {
+            var plan = await BuildPlanAsync(expense, note.Amount, cancellationToken);
+            if (plan.Error is not null) return BadRequest(plan.Error);
+            if (plan.UnitsWithoutOwner.Count > 0) return BadRequest(UnitsWithoutOwnerMessage(plan.UnitsWithoutOwner));
+            if (plan.Rows.Count > 0)
+                creditedToOwners = await CreditOwnersAsync(note, expense, period, plan, pushes, cancellationToken);
+        }
+
+        note.RecoveryStatus = SupplierRecoveryStatus.Recovered;
+        note.RefundedOn = request.RefundedOn;
+        note.RefundReference = reference;
+        note.RecoveredAtUtc = DateTime.UtcNow;
+        note.RecoveredByUserId = tenantContext.UserId;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await SendPushesAsync(pushes);
+        return Ok(await BuildResultAsync(note, expense, period, creditedToOwners, cancellationToken));
+    }
+
+    // El proveedor descontó (parte de) la nota en una factura posterior.
+    [HttpPost("credit-notes/{id:guid}/discounts")]
+    public async Task<ActionResult<BuildingExpenseCreditNoteResultDto>> AddDiscount(
+        Guid id, [FromBody] AddBuildingExpenseCreditNoteDiscountRequest request, CancellationToken cancellationToken)
+    {
+        var amount = decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero);
+        var noteText = (request.Note ?? string.Empty).Trim();
+        if (amount <= 0m) return BadRequest("El monto del descuento debe ser mayor que cero.");
+        if (noteText.Length > ReasonMaxLength) return BadRequest($"La observación no puede superar los {ReasonMaxLength} caracteres.");
+
+        var note = await dbContext.BuildingExpenseCreditNotes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (note is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(note.BuildingId, cancellationToken)) return Forbid();
+
+        if (note.Status != BuildingExpenseCreditNoteStatus.Applied) return BadRequest("Esta nota de crédito está anulada.");
+        if (note.RecoveryType != SupplierRecoveryType.NextInvoiceDiscount)
+            return BadRequest("Esta nota no es un descuento en la próxima factura.");
+        if (request.AppliedOn < note.IssueDate || request.AppliedOn > DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            return BadRequest("La fecha del descuento no es válida (no puede ser anterior a la nota ni futura).");
+
+        var applied = (await dbContext.BuildingExpenseCreditNoteDiscounts.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.CreditNoteId == note.Id).Select(x => x.Amount).ToListAsync(cancellationToken)).Sum();
+        var remaining = note.Amount - applied;
+        if (amount > remaining) return BadRequest($"El descuento supera lo que falta aplicar de la nota (Gs. {remaining:N0}).");
+
+        if (request.AppliedToExpenseId.HasValue)
+        {
+            var target = await dbContext.BuildingExpenses.AsNoTracking()
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.AppliedToExpenseId.Value, cancellationToken);
+            if (target is null || target.BuildingId != note.BuildingId)
+                return BadRequest("La factura elegida no existe en este edificio.");
+            if (target.Id == note.BuildingExpenseId)
+                return BadRequest("El descuento tiene que aplicarse a una factura posterior, no al mismo gasto de la nota.");
+            if (BuildingExpenseCreditNoteKeys.Normalize(target.SupplierName) != note.SupplierKey)
+                return BadRequest("La factura elegida es de otro proveedor.");
+        }
+
+        dbContext.BuildingExpenseCreditNoteDiscounts.Add(new BuildingExpenseCreditNoteDiscount
+        {
+            CompanyId = note.CompanyId,
+            CreditNoteId = note.Id,
+            Amount = amount,
+            AppliedOn = request.AppliedOn,
+            AppliedToExpenseId = request.AppliedToExpenseId,
+            Note = noteText,
+            CreatedByUserId = tenantContext.UserId
+        });
+
+        if (amount == remaining)
+        {
+            note.RecoveryStatus = SupplierRecoveryStatus.Recovered;
+            note.RecoveredAtUtc = DateTime.UtcNow;
+            note.RecoveredByUserId = tenantContext.UserId;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(await BuildResultForNoteAsync(note, cancellationToken));
+    }
+
+    // Quita un descuento mal cargado: la nota vuelve a tener ese saldo pendiente.
+    [HttpDelete("credit-notes/{id:guid}/discounts/{discountId:guid}")]
+    public async Task<ActionResult<BuildingExpenseCreditNoteResultDto>> RemoveDiscount(Guid id, Guid discountId, CancellationToken cancellationToken)
+    {
+        var note = await dbContext.BuildingExpenseCreditNotes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
+        if (note is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(note.BuildingId, cancellationToken)) return Forbid();
+        if (note.Status != BuildingExpenseCreditNoteStatus.Applied) return BadRequest("Esta nota de crédito está anulada.");
+
+        var discount = await dbContext.BuildingExpenseCreditNoteDiscounts
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == discountId && x.CreditNoteId == id, cancellationToken);
+        if (discount is null) return NotFound();
+
+        discount.IsDeleted = true;
+        if (note.RecoveryStatus == SupplierRecoveryStatus.Recovered)
+        {
+            note.RecoveryStatus = SupplierRecoveryStatus.Pending;
+            note.RecoveredAtUtc = null;
+            note.RecoveredByUserId = null;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(await BuildResultForNoteAsync(note, cancellationToken));
     }
 
     // Simula la nota con ese monto sin guardar nada: en borrador, como quedaria el gasto; en periodo publicado, el reparto por unidad.
@@ -74,6 +221,8 @@ public class BuildingExpenseCreditNotesController(
 
         if (period.Status == ExpensePeriodStatus.Closed) return BadRequest(ClosedMessage);
 
+        var paidToSupplier = IsPaidToSupplier(expense);
+
         if (period.Status == ExpensePeriodStatus.Draft)
         {
             if (amount >= expense.Amount) return BadRequest(DraftCapMessage(expense.Amount));
@@ -82,7 +231,8 @@ public class BuildingExpenseCreditNotesController(
                 Mode = BuildingExpenseCreditNoteMode.Netted,
                 Amount = amount,
                 NewExpenseAmount = expense.Amount - amount,
-                MaxAmount = expense.Amount - 1m
+                MaxAmount = expense.Amount - 1m,
+                ExpensePaid = paidToSupplier
             });
         }
 
@@ -95,6 +245,8 @@ public class BuildingExpenseCreditNotesController(
         {
             Mode = BuildingExpenseCreditNoteMode.Credited,
             Amount = amount,
+            ExpensePaid = paidToSupplier,
+            OwnersCreditedOnRefund = paidToSupplier && request.RecoveryType == SupplierRecoveryType.Refund,
             CreditedSoFar = creditedSoFar,
             MaxAmount = max,
             ChargedTotal = plan.ChargedTotal,
@@ -168,6 +320,15 @@ public class BuildingExpenseCreditNotesController(
 
         var published = period.Status == ExpensePeriodStatus.Published;
 
+        // Gasto ya pagado al proveedor: hay que decidir como se recupera lo acreditado. Si todavia esta por pagar, no hay nada que recuperar.
+        var recovery = SupplierRecoveryType.None;
+        if (IsPaidToSupplier(expense))
+        {
+            if (request.RecoveryType is not (SupplierRecoveryType.Refund or SupplierRecoveryType.NextInvoiceDiscount))
+                return BadRequest("Este gasto ya se pagó al proveedor. Indicá cómo se recupera el importe: devolución de dinero o descuento en su próxima factura.");
+            recovery = request.RecoveryType.Value;
+        }
+
         // Validaciones y calculo propios de cada caso, antes de tocar nada.
         AllocationPlan? plan = null;
         if (published)
@@ -204,7 +365,9 @@ public class BuildingExpenseCreditNotesController(
             DocumentUrl = documentUrl,
             Mode = published ? BuildingExpenseCreditNoteMode.Credited : BuildingExpenseCreditNoteMode.Netted,
             Status = BuildingExpenseCreditNoteStatus.Applied,
-            CreatedByUserId = tenantContext.UserId
+            CreatedByUserId = tenantContext.UserId,
+            RecoveryType = recovery,
+            RecoveryStatus = recovery == SupplierRecoveryType.None ? SupplierRecoveryStatus.None : SupplierRecoveryStatus.Pending
         };
         dbContext.BuildingExpenseCreditNotes.Add(note);
 
@@ -213,7 +376,9 @@ public class BuildingExpenseCreditNotesController(
 
         if (published)
         {
-            creditedToOwners = await CreditOwnersAsync(note, expense, period, plan!, pushes, cancellationToken);
+            // Con devolucion de dinero pendiente los propietarios no reciben nada todavia: se acredita al marcarla devuelta.
+            if (recovery != SupplierRecoveryType.Refund)
+                creditedToOwners = await CreditOwnersAsync(note, expense, period, plan!, pushes, cancellationToken);
         }
         else
         {
@@ -254,6 +419,12 @@ public class BuildingExpenseCreditNotesController(
 
         if (note.Status != BuildingExpenseCreditNoteStatus.Applied)
             return BadRequest("Esta nota de crédito ya está anulada.");
+
+        if (note.RecoveryType == SupplierRecoveryType.Refund && note.RecoveryStatus == SupplierRecoveryStatus.Recovered)
+            return BadRequest("El proveedor ya devolvió el dinero de esta nota de crédito: no se puede anular.");
+        if (note.RecoveryType == SupplierRecoveryType.NextInvoiceDiscount
+            && await dbContext.BuildingExpenseCreditNoteDiscounts.AnyAsync(x => !x.IsDeleted && x.CreditNoteId == note.Id, cancellationToken))
+            return BadRequest("Esta nota ya tiene descuentos aplicados en facturas del proveedor. Quitá primero los descuentos para poder anularla.");
 
         var expense = await dbContext.BuildingExpenses
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == note.BuildingExpenseId, cancellationToken);
@@ -361,11 +532,22 @@ public class BuildingExpenseCreditNotesController(
                 x.Status,
                 x.Reason,
                 x.DocumentUrl,
-                x.VoidReason
+                x.VoidReason,
+                x.RecoveryType,
+                x.RecoveryStatus,
+                x.RefundedOn
             })
             .ToListAsync(ct);
 
         var noteIds = notes.Select(n => n.Id).ToList();
+        var discountTotals = noteIds.Count == 0
+            ? new Dictionary<Guid, decimal>()
+            : (await dbContext.BuildingExpenseCreditNoteDiscounts.AsNoTracking()
+                    .Where(d => !d.IsDeleted && noteIds.Contains(d.CreditNoteId))
+                    .Select(d => new { d.CreditNoteId, d.Amount })
+                    .ToListAsync(ct))
+                .GroupBy(d => d.CreditNoteId)
+                .ToDictionary(g => g.Key, g => g.Sum(d => d.Amount));
         var allocations = noteIds.Count == 0
             ? new Dictionary<Guid, (int Count, decimal Amount)>()
             : (await dbContext.BuildingExpenseCreditNoteAllocations.AsNoTracking()
@@ -396,18 +578,36 @@ public class BuildingExpenseCreditNotesController(
                 Amount = n.Amount,
                 Mode = n.Mode,
                 Status = n.Status,
-                Treatment = TreatmentLabel(n.Mode, alloc.Count > 0, n.PaidByReserveFund),
+                Treatment = TreatmentLabel(n.Mode, alloc.Count > 0, n.PaidByReserveFund, n.RecoveryType, n.RecoveryStatus),
                 Reason = n.Reason,
                 DocumentUrl = n.DocumentUrl,
                 VoidReason = n.VoidReason,
                 AllocationsCount = alloc.Count,
-                AllocatedAmount = alloc.Amount
+                AllocatedAmount = alloc.Amount,
+                RecoveryType = n.RecoveryType,
+                RecoveryStatus = n.RecoveryStatus,
+                RefundedOn = n.RefundedOn,
+                PendingRecoveryAmount = PendingRecovery(n.Status, n.RecoveryType, n.RecoveryStatus, n.Amount, discountTotals.GetValueOrDefault(n.Id))
             };
         }).ToList();
     }
 
-    private static string TreatmentLabel(BuildingExpenseCreditNoteMode mode, bool hasAllocations, bool paidByReserveFund) => mode switch
+    // Lo que el proveedor todavia debe al edificio por la nota (cuenta por cobrar): 0 si esta anulada, no hay nada que recuperar o ya se recupero.
+    public static decimal PendingRecovery(
+        BuildingExpenseCreditNoteStatus status, SupplierRecoveryType type, SupplierRecoveryStatus recovery, decimal amount, decimal discountApplied) =>
+        status != BuildingExpenseCreditNoteStatus.Applied || recovery != SupplierRecoveryStatus.Pending
+            ? 0m
+            : type == SupplierRecoveryType.NextInvoiceDiscount ? Math.Max(amount - discountApplied, 0m) : amount;
+
+    // El gasto ya salio de la caja (sin vencimiento cuenta en su fecha) o se registro su pago: lo acreditado hay que recuperarlo del proveedor.
+    public static bool IsPaidToSupplier(BuildingExpense expense) => expense.DueDate is null || expense.PaidAt is not null;
+
+    private static string TreatmentLabel(
+        BuildingExpenseCreditNoteMode mode, bool hasAllocations, bool paidByReserveFund, SupplierRecoveryType recoveryType,
+        SupplierRecoveryStatus recoveryStatus) => mode switch
     {
+        BuildingExpenseCreditNoteMode.Credited when recoveryType == SupplierRecoveryType.Refund && recoveryStatus == SupplierRecoveryStatus.Pending && !hasAllocations
+            => "A la espera de la devolución del proveedor (se acredita a las unidades al recibirla)",
         BuildingExpenseCreditNoteMode.Netted => "Descontada del gasto (período sin publicar)",
         _ when hasAllocations => "Acreditada como saldo a favor de las unidades",
         _ when paidByReserveFund => "Devuelta al fondo de reserva",
@@ -746,20 +946,60 @@ public class BuildingExpenseCreditNotesController(
             x => !x.IsDeleted && x.ExpensePeriodId == period.Id && x.Status == ExpenseSettlementStatus.Calculated, cancellationToken);
 
         var allocations = await LoadAllocationDtosAsync(new[] { note.Id }, cancellationToken);
+        var discounts = await LoadDiscountDtosAsync(new[] { note.Id }, cancellationToken);
 
         var expenseDto = BuildingExpensesController.ToDto(expense, building, period, targetUnit, rubro);
         expenseDto.CreditedAfterPublishAmount = await CreditedSoFarAsync(expense.Id, cancellationToken);
 
         return new BuildingExpenseCreditNoteResultDto
         {
-            CreditNote = ToDto(note, allocations.GetValueOrDefault(note.Id)),
+            CreditNote = ToDto(note, allocations.GetValueOrDefault(note.Id), discounts.GetValueOrDefault(note.Id)),
             Expense = expenseDto,
             SettlementNeedsRecalculation = settlementCalculated && period.Status == ExpensePeriodStatus.Draft,
             CreditedToOwners = creditedToOwners
         };
     }
 
-    private static BuildingExpenseCreditNoteDto ToDto(BuildingExpenseCreditNote x, List<BuildingExpenseCreditNoteAllocationDto>? allocations) => new()
+    private async Task<BuildingExpenseCreditNoteResultDto> BuildResultForNoteAsync(BuildingExpenseCreditNote note, CancellationToken ct)
+    {
+        var expense = await dbContext.BuildingExpenses.FirstAsync(x => x.Id == note.BuildingExpenseId, ct);
+        var period = await dbContext.ExpensePeriods.AsNoTracking().FirstAsync(x => x.Id == note.ExpensePeriodId, ct);
+        return await BuildResultAsync(note, expense, period, 0m, ct);
+    }
+
+    private async Task<Dictionary<Guid, List<BuildingExpenseCreditNoteDiscountDto>>> LoadDiscountDtosAsync(
+        IReadOnlyCollection<Guid> noteIds, CancellationToken ct)
+    {
+        if (noteIds.Count == 0) return new();
+
+        var rows = await dbContext.BuildingExpenseCreditNoteDiscounts.AsNoTracking()
+            .Where(x => !x.IsDeleted && noteIds.Contains(x.CreditNoteId))
+            .OrderBy(x => x.AppliedOn).ThenBy(x => x.CreatedAtUtc)
+            .Select(x => new
+            {
+                x.CreditNoteId,
+                x.Id,
+                x.Amount,
+                x.AppliedOn,
+                x.AppliedToExpenseId,
+                Description = x.AppliedToExpense != null ? x.AppliedToExpense.Description : null,
+                Invoice = x.AppliedToExpense != null ? x.AppliedToExpense.InvoiceNumber : null,
+                x.Note
+            })
+            .ToListAsync(ct);
+
+        return rows.GroupBy(x => x.CreditNoteId).ToDictionary(
+            g => g.Key,
+            g => g.Select(x => new BuildingExpenseCreditNoteDiscountDto
+            {
+                Id = x.Id, Amount = x.Amount, AppliedOn = x.AppliedOn, AppliedToExpenseId = x.AppliedToExpenseId,
+                AppliedToExpenseDescription = x.Description, AppliedToInvoiceNumber = x.Invoice, Note = x.Note
+            }).ToList());
+    }
+
+    private static BuildingExpenseCreditNoteDto ToDto(
+        BuildingExpenseCreditNote x, List<BuildingExpenseCreditNoteAllocationDto>? allocations,
+        List<BuildingExpenseCreditNoteDiscountDto>? discounts) => new()
     {
         Id = x.Id,
         BuildingId = x.BuildingId,
@@ -778,6 +1018,14 @@ public class BuildingExpenseCreditNotesController(
         CreatedAtUtc = x.CreatedAtUtc,
         VoidReason = x.VoidReason,
         VoidedAtUtc = x.VoidedAtUtc,
+        RecoveryType = x.RecoveryType,
+        RecoveryStatus = x.RecoveryStatus,
+        RefundedOn = x.RefundedOn,
+        RefundReference = x.RefundReference,
+        RecoveredAtUtc = x.RecoveredAtUtc,
+        DiscountAppliedAmount = (discounts ?? new()).Sum(d => d.Amount),
+        PendingRecoveryAmount = PendingRecovery(x.Status, x.RecoveryType, x.RecoveryStatus, x.Amount, (discounts ?? new()).Sum(d => d.Amount)),
+        Discounts = discounts ?? new(),
         Allocations = allocations ?? new()
     };
 }

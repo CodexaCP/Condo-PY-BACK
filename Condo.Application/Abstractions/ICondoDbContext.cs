@@ -18,6 +18,7 @@ public interface ICondoDbContext
     DbSet<BuildingExpense> BuildingExpenses { get; }
     DbSet<BuildingExpenseCreditNote> BuildingExpenseCreditNotes { get; }
     DbSet<BuildingExpenseCreditNoteAllocation> BuildingExpenseCreditNoteAllocations { get; }
+    DbSet<BuildingExpenseCreditNoteDiscount> BuildingExpenseCreditNoteDiscounts { get; }
     DbSet<RecurringBuildingExpense> RecurringBuildingExpenses { get; }
     DbSet<BuildingIncome> BuildingIncomes { get; }
     DbSet<ExpenseCharge> ExpenseCharges { get; }

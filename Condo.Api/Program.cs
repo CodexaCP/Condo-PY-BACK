@@ -54,6 +54,7 @@ builder.Services.AddScoped<Condo.Api.Services.PushDispatcher>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceModuleGate>();
 builder.Services.AddScoped<Condo.Api.Services.BuildingConfigOverviewService>();
 builder.Services.AddScoped<Condo.Api.Services.FinancePayablesService>();
+builder.Services.AddScoped<Condo.Api.Services.SupplierAccountsService>();
 builder.Services.AddScoped<Condo.Api.Services.FinanceVatService>();
 builder.Services.AddScoped<Condo.Api.Services.BankReconciliationService>();
 builder.Services.AddScoped<Condo.Api.Services.AccountingEntriesService>();

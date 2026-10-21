@@ -12,6 +12,24 @@ public class CreateBuildingExpenseCreditNoteRequest
     public string Reason { get; set; } = string.Empty;
     // Ruta devuelta por /api/uploads (opcional).
     public string? DocumentUrl { get; set; }
+    // Obligatorio cuando el gasto ya estaba pagado al proveedor (Refund o NextInvoiceDiscount); se ignora si todavia esta por pagar.
+    public SupplierRecoveryType? RecoveryType { get; set; }
+}
+
+public class MarkBuildingExpenseCreditNoteRefundedRequest
+{
+    public DateOnly RefundedOn { get; set; }
+    // Transferencia, cheque, recibo... (opcional).
+    public string? Reference { get; set; }
+}
+
+public class AddBuildingExpenseCreditNoteDiscountRequest
+{
+    public decimal Amount { get; set; }
+    public DateOnly AppliedOn { get; set; }
+    // Factura siguiente (gasto del mismo edificio y proveedor) donde vino el descuento; opcional.
+    public Guid? AppliedToExpenseId { get; set; }
+    public string? Note { get; set; }
 }
 
 public class VoidBuildingExpenseCreditNoteRequest
@@ -38,8 +56,28 @@ public class BuildingExpenseCreditNoteDto
     public DateTime CreatedAtUtc { get; set; }
     public string VoidReason { get; set; } = string.Empty;
     public DateTime? VoidedAtUtc { get; set; }
+    public SupplierRecoveryType RecoveryType { get; set; }
+    public SupplierRecoveryStatus RecoveryStatus { get; set; }
+    public DateOnly? RefundedOn { get; set; }
+    public string? RefundReference { get; set; }
+    public DateTime? RecoveredAtUtc { get; set; }
+    // Lo que el proveedor todavia debe al edificio por esta nota (devolucion pendiente o descuento sin aplicar; 0 si ya se recupero).
+    public decimal PendingRecoveryAmount { get; set; }
+    public decimal DiscountAppliedAmount { get; set; }
+    public List<BuildingExpenseCreditNoteDiscountDto> Discounts { get; set; } = new();
     // Solo en notas de periodo publicado (Credited): lo acreditado a cada unidad.
     public List<BuildingExpenseCreditNoteAllocationDto> Allocations { get; set; } = new();
+}
+
+public class BuildingExpenseCreditNoteDiscountDto
+{
+    public Guid Id { get; set; }
+    public decimal Amount { get; set; }
+    public DateOnly AppliedOn { get; set; }
+    public Guid? AppliedToExpenseId { get; set; }
+    public string? AppliedToExpenseDescription { get; set; }
+    public string? AppliedToInvoiceNumber { get; set; }
+    public string Note { get; set; } = string.Empty;
 }
 
 public class BuildingExpenseCreditNoteAllocationDto
@@ -77,11 +115,17 @@ public class PeriodSupplierCreditNoteDto
     public string VoidReason { get; set; } = string.Empty;
     public int AllocationsCount { get; set; }
     public decimal AllocatedAmount { get; set; }
+    public SupplierRecoveryType RecoveryType { get; set; }
+    public SupplierRecoveryStatus RecoveryStatus { get; set; }
+    public DateOnly? RefundedOn { get; set; }
+    public decimal PendingRecoveryAmount { get; set; }
 }
 
 public class BuildingExpenseCreditNotePreviewRequest
 {
     public decimal Amount { get; set; }
+    // Para mostrar si los propietarios se acreditan ya o al marcar la devolucion.
+    public SupplierRecoveryType? RecoveryType { get; set; }
 }
 
 // Simulacion (no guarda nada) de lo que pasaria al registrar la nota con ese monto.
@@ -99,6 +143,10 @@ public class BuildingExpenseCreditNotePreviewDto
     // Unidades del reparto sin propietario principal: mientras haya alguna, la nota no se puede registrar.
     public List<string> UnitsWithoutOwner { get; set; } = new();
     public string? Message { get; set; }
+    // El gasto ya estaba pagado al proveedor: hay que elegir como se recupera (devolucion o descuento en la proxima factura).
+    public bool ExpensePaid { get; set; }
+    // Periodo publicado con devolucion de dinero: el saldo a favor de las unidades se acredita recien cuando se marca devuelto.
+    public bool OwnersCreditedOnRefund { get; set; }
 }
 
 public class BuildingExpenseCreditNotePreviewRowDto

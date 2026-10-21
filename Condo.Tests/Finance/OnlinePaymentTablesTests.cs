@@ -51,7 +51,8 @@ public class OnlinePaymentTablesTests : IDisposable
         var migrations = db.Database.GetMigrations().ToList();
 
         Assert.Contains(MigrationId, migrations);
-        Assert.Equal(MigrationId, migrations[^1]);
+        // Puede haber migraciones posteriores (otros cambios); lo que importa es que esta siga registrada despues de la anterior.
+        Assert.True(string.CompareOrdinal(MigrationId, migrations[^1]) <= 0);
     }
 
     private static string MigrationSql()

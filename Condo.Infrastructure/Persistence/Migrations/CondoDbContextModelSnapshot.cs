@@ -1309,6 +1309,33 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<DateTime?>("RecoveredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RecoveredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RecoveryStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("RecoveryType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("RefundReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateOnly?>("RefundedOn")
+                        .HasColumnType("date");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1354,6 +1381,8 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.HasIndex("BuildingExpenseId", "Status");
 
                     b.HasIndex("BuildingId", "ExpensePeriodId");
+
+                    b.HasIndex("BuildingId", "RecoveryStatus");
 
                     b.HasIndex("CompanyId", "SupplierKey", "TimbradoKey", "NumeroKey")
                         .IsUnique()
@@ -1408,6 +1437,55 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.HasIndex("UnitId");
 
                     b.ToTable("BuildingExpenseCreditNoteAllocations");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.BuildingExpenseCreditNoteDiscount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateOnly>("AppliedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("AppliedToExpenseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CreditNoteId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedToExpenseId");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CreditNoteId");
+
+                    b.ToTable("BuildingExpenseCreditNoteDiscounts");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.BuildingIncome", b =>
@@ -6149,6 +6227,30 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("Unit");
                 });
 
+            modelBuilder.Entity("Condo.Domain.Entities.BuildingExpenseCreditNoteDiscount", b =>
+                {
+                    b.HasOne("Condo.Domain.Entities.BuildingExpense", "AppliedToExpense")
+                        .WithMany()
+                        .HasForeignKey("AppliedToExpenseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Condo.Domain.Entities.BuildingExpenseCreditNote", "CreditNote")
+                        .WithMany("Discounts")
+                        .HasForeignKey("CreditNoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppliedToExpense");
+
+                    b.Navigation("CreditNote");
+                });
+
             modelBuilder.Entity("Condo.Domain.Entities.BuildingIncome", b =>
                 {
                     b.HasOne("Condo.Domain.Entities.Building", "Building")
@@ -7925,6 +8027,8 @@ namespace Condo.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Condo.Domain.Entities.BuildingExpenseCreditNote", b =>
                 {
                     b.Navigation("Allocations");
+
+                    b.Navigation("Discounts");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.BuildingPlan", b =>

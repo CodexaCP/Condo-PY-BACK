@@ -33,9 +33,19 @@ public class BuildingExpenseCreditNote : CompanyScopedEntity
     public DateTime? VoidedAtUtc { get; set; }
     public Guid? VoidedByUserId { get; set; }
 
+    // Cuenta por cobrar al proveedor: solo cuando el gasto ya estaba pagado (si no, la nota solo baja la cuenta por pagar).
+    public SupplierRecoveryType RecoveryType { get; set; } = SupplierRecoveryType.None;
+    public SupplierRecoveryStatus RecoveryStatus { get; set; } = SupplierRecoveryStatus.None;
+    // Devolucion de dinero: fecha en que el proveedor devolvio y referencia (transferencia, cheque...).
+    public DateOnly? RefundedOn { get; set; }
+    public string? RefundReference { get; set; }
+    public DateTime? RecoveredAtUtc { get; set; }
+    public Guid? RecoveredByUserId { get; set; }
+
     public Company? Company { get; set; }
     public Building? Building { get; set; }
     public BuildingExpense? BuildingExpense { get; set; }
     public ExpensePeriod? ExpensePeriod { get; set; }
     public ICollection<BuildingExpenseCreditNoteAllocation> Allocations { get; set; } = new List<BuildingExpenseCreditNoteAllocation>();
+    public ICollection<BuildingExpenseCreditNoteDiscount> Discounts { get; set; } = new List<BuildingExpenseCreditNoteDiscount>();
 }

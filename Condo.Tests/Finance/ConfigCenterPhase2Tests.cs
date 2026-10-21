@@ -582,7 +582,8 @@ public class ConfigCenterPhase2Tests : IDisposable
 
     private static CreateBuildingExpenseCreditNoteRequest NoteReq(DateOnly issued, string numero = "001-001-0000001") => new()
     {
-        Numero = numero, IssueDate = issued, Amount = 10_000m, Reason = "Descuento", DocumentUrl = "/uploads/nc.pdf"
+        Numero = numero, IssueDate = issued, Amount = 10_000m, Reason = "Descuento", DocumentUrl = "/uploads/nc.pdf",
+        RecoveryType = SupplierRecoveryType.NextInvoiceDiscount
     };
 
     [Fact]

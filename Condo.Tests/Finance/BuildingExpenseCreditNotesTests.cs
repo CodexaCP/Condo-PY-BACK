@@ -35,7 +35,9 @@ public partial class BuildingExpenseCreditNotesTests : IDisposable
         IssueDate = new DateOnly(2026, 10, 2),
         Amount = amount,
         Reason = "Descuento por mercadería devuelta",
-        DocumentUrl = "/uploads/nc-proveedor.pdf"
+        DocumentUrl = "/uploads/nc-proveedor.pdf",
+        // Los gastos de prueba no tienen vencimiento (ya salieron de la caja): la nota se recupera con descuento, que acredita al registrarla.
+        RecoveryType = SupplierRecoveryType.NextInvoiceDiscount
     };
 
     private Task<ActionResult<BuildingExpenseCreditNoteResultDto>> Create(BuildingExpense expense, CreateBuildingExpenseCreditNoteRequest request) =>

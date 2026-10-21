@@ -16,6 +16,8 @@ public sealed record SupplierCreditEntry(
 ///
 /// No entran:
 ///  - Las de periodo en borrador: ya bajaron el monto del gasto (BuildingExpense.Amount es el neto), los reportes lo leen asi.
+///  - Las de devolucion de dinero todavia pendiente (el proveedor no devolvio nada): no hay movimiento hasta que se marca devuelta; entonces
+///    entran con la fecha de la devolucion, no la de la nota.
 ///  - Las acreditadas a los propietarios como saldo a favor: ese saldo ya entra a los reportes cuando el propietario lo usa en un pago
 ///    (el cobro del comprobante incluye la parte pagada con saldo). Contarlas tambien aca duplicaria el beneficio.
 /// </summary>
@@ -29,10 +31,12 @@ public static class SupplierCreditNoteLedger
         var query = dbContext.BuildingExpenseCreditNotes.AsNoTracking()
             .Where(x => !x.IsDeleted && x.Status == BuildingExpenseCreditNoteStatus.Applied && x.Mode == BuildingExpenseCreditNoteMode.Credited
                         && buildingIds.Contains(x.BuildingId)
+                        && !(x.RecoveryType == SupplierRecoveryType.Refund && x.RefundedOn == null)
                         && !dbContext.BuildingExpenseCreditNoteAllocations.Any(a => !a.IsDeleted && a.CreditNoteId == x.Id));
 
-        if (from.HasValue) query = query.Where(x => x.IssueDate >= from.Value);
-        if (to.HasValue) query = query.Where(x => x.IssueDate <= to.Value);
+        // Fecha del movimiento: la de la devolucion si el proveedor devolvio dinero; si no, la de la nota.
+        if (from.HasValue) query = query.Where(x => (x.RecoveryType == SupplierRecoveryType.Refund ? x.RefundedOn!.Value : x.IssueDate) >= from.Value);
+        if (to.HasValue) query = query.Where(x => (x.RecoveryType == SupplierRecoveryType.Refund ? x.RefundedOn!.Value : x.IssueDate) <= to.Value);
 
         var rows = await query
             .Select(x => new
@@ -40,7 +44,7 @@ public static class SupplierCreditNoteLedger
                 x.Id,
                 x.BuildingExpenseId,
                 x.BuildingId,
-                x.IssueDate,
+                Date = x.RecoveryType == SupplierRecoveryType.Refund ? x.RefundedOn!.Value : x.IssueDate,
                 x.Amount,
                 x.Numero,
                 x.SupplierName,
@@ -53,7 +57,7 @@ public static class SupplierCreditNoteLedger
 
         return rows
             .Select(x => new SupplierCreditEntry(
-                x.Id, x.BuildingExpenseId, x.BuildingId, x.IssueDate, x.Amount, x.Numero, x.SupplierName, x.Description,
+                x.Id, x.BuildingExpenseId, x.BuildingId, x.Date, x.Amount, x.Numero, x.SupplierName, x.Description,
                 x.Category, x.PaidByReserveFund, x.LedgerCategoryId))
             .ToList();
     }

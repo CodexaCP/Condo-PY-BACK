@@ -17,6 +17,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<BuildingExpense> BuildingExpenses => Set<BuildingExpense>();
     public DbSet<BuildingExpenseCreditNote> BuildingExpenseCreditNotes => Set<BuildingExpenseCreditNote>();
     public DbSet<BuildingExpenseCreditNoteAllocation> BuildingExpenseCreditNoteAllocations => Set<BuildingExpenseCreditNoteAllocation>();
+    public DbSet<BuildingExpenseCreditNoteDiscount> BuildingExpenseCreditNoteDiscounts => Set<BuildingExpenseCreditNoteDiscount>();
     public DbSet<RecurringBuildingExpense> RecurringBuildingExpenses => Set<RecurringBuildingExpense>();
     public DbSet<BuildingIncome> BuildingIncomes => Set<BuildingIncome>();
     public DbSet<ExpenseCharge> ExpenseCharges => Set<ExpenseCharge>();
@@ -344,6 +345,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.VoidReason).HasMaxLength(500);
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
         modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.RecoveryType).HasConversion<string>().HasMaxLength(30).HasDefaultValue(SupplierRecoveryType.None);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.RecoveryStatus).HasConversion<string>().HasMaxLength(20).HasDefaultValue(SupplierRecoveryStatus.None);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().Property(x => x.RefundReference).HasMaxLength(200);
+        modelBuilder.Entity<BuildingExpenseCreditNote>().HasIndex(x => new { x.BuildingId, x.RecoveryStatus });
         modelBuilder.Entity<BuildingExpenseCreditNote>().HasIndex(x => new { x.BuildingExpenseId, x.Status });
         modelBuilder.Entity<BuildingExpenseCreditNote>().HasIndex(x => new { x.BuildingId, x.ExpensePeriodId });
         modelBuilder.Entity<BuildingExpenseCreditNote>()
@@ -369,6 +374,17 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
             .HasOne(x => x.OwnerCreditMovement).WithMany().HasForeignKey(x => x.OwnerCreditMovementId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<BuildingExpenseCreditNoteAllocation>()
+            .HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+
+        // Descuentos ya aplicados de una nota de credito de proveedor (tratamiento NextInvoiceDiscount).
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>().Property(x => x.Amount).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>().Property(x => x.Note).HasMaxLength(500);
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>().HasIndex(x => x.CreditNoteId);
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>()
+            .HasOne(x => x.CreditNote).WithMany(x => x.Discounts).HasForeignKey(x => x.CreditNoteId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>()
+            .HasOne(x => x.AppliedToExpense).WithMany().HasForeignKey(x => x.AppliedToExpenseId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<BuildingExpenseCreditNoteDiscount>()
             .HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
 
         // ── RecurringBuildingExpense ───────────────────────────────────────────
