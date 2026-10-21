@@ -79,6 +79,7 @@ public class FinanceLedgerPaymentRulesTests
     [InlineData(CollectionClass.Ordinary, "Ordinary")]
     [InlineData(CollectionClass.Extraordinary, "Extraordinary")]
     [InlineData(CollectionClass.IndividualAdjustment, "IndividualAdjustment")]
+    [InlineData(CollectionClass.IndividualRecovery, "IndividualRecovery")]
     [InlineData(CollectionClass.LateFee, "LateFee")]
     [InlineData(CollectionClass.ReserveFund, "ReserveFund")]
     public void CadaClaseDeCobroTieneSuPropioRubro(CollectionClass cls, string name)
@@ -88,6 +89,7 @@ public class FinanceLedgerPaymentRulesTests
             "Ordinary" => FinanceChartTemplate.CollectionOrdinary,
             "Extraordinary" => FinanceChartTemplate.CollectionExtraordinary,
             "IndividualAdjustment" => FinanceChartTemplate.CollectionIndividualAdjustment,
+            "IndividualRecovery" => FinanceChartTemplate.RecoveryIndividualKey,
             "LateFee" => FinanceChartTemplate.CollectionLateFee,
             _ => FinanceChartTemplate.CollectionReserveFund
         };
@@ -100,7 +102,7 @@ public class FinanceLedgerPaymentRulesTests
     [InlineData(ExpenseChargeType.Ordinary, false, CollectionClass.Ordinary)]
     [InlineData(ExpenseChargeType.ReserveFund, false, CollectionClass.ReserveFund)]
     [InlineData(ExpenseChargeType.Extraordinary, false, CollectionClass.Extraordinary)]
-    [InlineData(ExpenseChargeType.Individual, false, CollectionClass.IndividualAdjustment)]
+    [InlineData(ExpenseChargeType.Individual, false, CollectionClass.IndividualRecovery)]
     [InlineData(ExpenseChargeType.Adjustment, false, CollectionClass.IndividualAdjustment)]
     [InlineData(ExpenseChargeType.Ordinary, true, CollectionClass.LateFee)]
     [InlineData(ExpenseChargeType.Adjustment, true, CollectionClass.LateFee)]

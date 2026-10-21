@@ -47,6 +47,10 @@ public static class FinanceChartTemplate
     // Clave de los movimientos de una transferencia entre cuentas propias: no es un rubro del plan (no es ingreso ni gasto). Los reportes por rubro la ignoran.
     public const string TransferKey = "Transfer";
 
+    // Clave de los movimientos de un cargo individual: lo que el edificio adelanta al proveedor por una unidad y lo que la unidad le devuelve. No es
+    // ingreso ni gasto del edificio sino un credito a recuperar (1.3.06 del plan generico, que no tiene funcion especial: se busca por codigo).
+    public const string RecoveryIndividualKey = "Recovery.Individual";
+
     public static string ExpenseKey(BuildingExpenseCategory category) => $"Expense.{category}";
     public static string IncomeKey(BuildingIncomeCategory category) => $"Income.{category}";
 
@@ -124,6 +128,7 @@ public static class FinanceChartTemplate
     /// </summary>
     public static string FallbackName(string rubroKey) =>
         rubroKey == TransferKey ? "Transferencia entre cuentas"
+        : rubroKey == RecoveryIndividualKey ? "Cargos particulares a recuperar"
         : FindRole(rubroKey)?.FallbackName
         ?? (rubroKey == ExpenseKey(BuildingExpenseCategory.ReserveFund) ? "Fondo de reserva (sin rubro)" : rubroKey);
 

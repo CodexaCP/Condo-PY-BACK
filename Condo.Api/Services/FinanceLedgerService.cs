@@ -100,6 +100,12 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             {
                 var amount = cls.Sum(a => a.Amount);
                 allocated += amount;
+                // Lo que devuelve la unidad de un cargo individual no es ingreso: solo se devuelve a quien pide los movimientos fuera del resultado.
+                if (cls.Key == CollectionClass.IndividualRecovery && !includeTransfers)
+                {
+                    continue;
+                }
+
                 AddBucket(raw, pt.Year, pt.Month, FinanceLedgerRules.ForPayment(pt.Method, cls.Key, ctx.Resolved), amount);
             }
 
@@ -131,12 +137,23 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             {
                 Year = (e.PaidAt ?? e.ExpenseDate).Year,
                 Month = (e.PaidAt ?? e.ExpenseDate).Month,
-                e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.PaidFromAccountId
+                e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.PaidFromAccountId, e.DistributionType
             })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, g.Key.LedgerCategoryId, g.Key.PaidFromAccountId, Amount = g.Sum(x => x.Amount) })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Category, g.Key.PaidByReserveFund, g.Key.LedgerCategoryId, g.Key.PaidFromAccountId, g.Key.DistributionType, Amount = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
         foreach (var et in expenseTotals)
         {
+            // Gasto de una sola unidad: credito a recuperar, no egreso. Solo se devuelve a quien pide los movimientos fuera del resultado.
+            if (et.DistributionType == BuildingExpenseDistributionType.IndividualUnit)
+            {
+                if (includeTransfers)
+                {
+                    AddBucket(raw, et.Year, et.Month, WithPaidAccount(FinanceLedgerRules.ForIndividualExpense(et.PaidByReserveFund, ctx.Resolved), et.PaidFromAccountId), et.Amount);
+                }
+
+                continue;
+            }
+
             var rule = FinanceLedgerRules.ForExpense(et.Category, et.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(et.LedgerCategoryId, et.Category));
             AddBucket(raw, et.Year, et.Month, WithPaidAccount(rule, et.PaidFromAccountId), et.Amount);
         }
@@ -152,6 +169,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
 
         // Las transferencias entre cuentas propias mueven el saldo de cada cuenta pero no son ingreso ni egreso: solo se devuelven si el
         // consumidor las pide (saldos por cuenta, conciliacion, fondo de reserva). Por defecto el libro es solo lo operativo.
+        // Lo mismo vale para los cargos individuales (lo adelantado al proveedor y lo devuelto por la unidad): mueven la cuenta pero no son resultado.
         if (includeTransfers)
         {
             foreach (var t in await LoadTransfersAsync(buildingId, from, to, cancellationToken))
@@ -208,6 +226,11 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             foreach (var (cls, amount) in classes)
             {
                 allocated += amount;
+                if (cls == CollectionClass.IndividualRecovery && !includeTransfers)
+                {
+                    continue;
+                }
+
                 AddPaymentRow(rows, ctx, p.Id, p.PaymentDate, p.Method, cls, amount, p.Notes, p.UnitCode, p.Reference);
             }
 
@@ -238,18 +261,38 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
         var expenses = await dbContext.BuildingExpenses.AsNoTracking()
             .Where(e => !e.IsDeleted && e.BuildingId == buildingId && (e.PaidAt != null || e.DueDate == null)
                         && (e.PaidAt ?? e.ExpenseDate) >= from && (e.PaidAt ?? e.ExpenseDate) <= to)
-            .Select(e => new { e.Id, e.ExpenseDate, e.PaidAt, e.PaidFromAccountId, e.Amount, e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.Description, e.SupplierName, e.InvoiceNumber })
+            .Select(e => new { e.Id, e.ExpenseDate, e.PaidAt, e.PaidFromAccountId, e.Amount, e.Category, e.PaidByReserveFund, e.LedgerCategoryId, e.Description, e.SupplierName, e.InvoiceNumber, e.DistributionType, e.TargetUnitId })
             .ToListAsync(cancellationToken);
+        var targetUnitCodes = includeTransfers
+            ? await UnitCodesAsync(
+                expenses.Where(e => e.DistributionType == BuildingExpenseDistributionType.IndividualUnit && e.TargetUnitId.HasValue)
+                    .Select(e => e.TargetUnitId!.Value).Distinct().ToList(),
+                cancellationToken)
+            : new Dictionary<Guid, string>();
         foreach (var e in expenses)
         {
+            var isIndividual = e.DistributionType == BuildingExpenseDistributionType.IndividualUnit;
+            if (isIndividual && !includeTransfers)
+            {
+                continue;
+            }
+
             var rule = WithPaidAccount(
-                FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(e.LedgerCategoryId, e.Category)), e.PaidFromAccountId);
+                isIndividual
+                    ? FinanceLedgerRules.ForIndividualExpense(e.PaidByReserveFund, ctx.Resolved)
+                    : FinanceLedgerRules.ForExpense(e.Category, e.PaidByReserveFund, ctx.Resolved, ctx.ExpenseKey(e.LedgerCategoryId, e.Category)),
+                e.PaidFromAccountId);
             if (rule is null)
             {
                 continue;
             }
 
             var description = string.IsNullOrWhiteSpace(e.Description) ? "Gasto del edificio" : e.Description;
+            if (isIndividual && e.TargetUnitId.HasValue && targetUnitCodes.TryGetValue(e.TargetUnitId.Value, out var unitCode))
+            {
+                description += $" (cargo a la unidad {unitCode})";
+            }
+
             // Una factura pagada despues de su fecha se aclara: el movimiento lleva la fecha del pago.
             if (e.PaidAt.HasValue && e.PaidAt.Value != e.ExpenseDate)
             {
@@ -301,6 +344,14 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ToList();
     }
 
+    // Codigo de cada unidad pedida (para rotular a quien se le cobra un cargo individual).
+    private async Task<Dictionary<Guid, string>> UnitCodesAsync(IReadOnlyCollection<Guid> unitIds, CancellationToken cancellationToken) =>
+        unitIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await dbContext.Units.AsNoTracking()
+                .Where(u => unitIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.Code, cancellationToken);
+
     // Transferencias vigentes (no anuladas) del edificio en el rango.
     private async Task<List<FinanceTransfer>> LoadTransfersAsync(Guid buildingId, DateOnly from, DateOnly to, CancellationToken cancellationToken) =>
         await dbContext.FinanceTransfers.AsNoTracking()
@@ -332,6 +383,7 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             CollectionClass.ReserveFund => "Aporte al fondo de reserva",
             CollectionClass.Extraordinary => "Aporte extraordinario",
             CollectionClass.IndividualAdjustment => "Cargos individuales y ajustes",
+            CollectionClass.IndividualRecovery => "Recupero de cargos individuales",
             CollectionClass.LateFee => "Intereses por mora",
             _ => "Cobro de expensas"
         };

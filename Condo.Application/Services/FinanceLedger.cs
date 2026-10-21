@@ -34,7 +34,9 @@ public enum CollectionClass
     Extraordinary = 2,
     IndividualAdjustment = 3,
     LateFee = 4,
-    ReserveFund = 5
+    ReserveFund = 5,
+    // Lo que un propietario devuelve de un cargo individual (el edificio ya le pago al proveedor): cancela un credito a recuperar, no es ingreso.
+    IndividualRecovery = 6
 }
 
 /// <summary>Cuentas del edificio que usa el libro para asignar cada movimiento (las que no tienen cuenta propia en el sistema).</summary>
@@ -98,7 +100,8 @@ public static class FinanceLedgerRules
         {
             ExpenseChargeType.ReserveFund => CollectionClass.ReserveFund,
             ExpenseChargeType.Extraordinary => CollectionClass.Extraordinary,
-            ExpenseChargeType.Individual or ExpenseChargeType.Adjustment => CollectionClass.IndividualAdjustment,
+            ExpenseChargeType.Individual => CollectionClass.IndividualRecovery,
+            ExpenseChargeType.Adjustment => CollectionClass.IndividualAdjustment,
             _ => CollectionClass.Ordinary
         };
     }
@@ -108,6 +111,7 @@ public static class FinanceLedgerRules
         CollectionClass.ReserveFund => FinanceChartTemplate.CollectionReserveFund,
         CollectionClass.Extraordinary => FinanceChartTemplate.CollectionExtraordinary,
         CollectionClass.IndividualAdjustment => FinanceChartTemplate.CollectionIndividualAdjustment,
+        CollectionClass.IndividualRecovery => FinanceChartTemplate.RecoveryIndividualKey,
         CollectionClass.LateFee => FinanceChartTemplate.CollectionLateFee,
         _ => FinanceChartTemplate.CollectionOrdinary
     };
@@ -174,6 +178,13 @@ public static class FinanceLedgerRules
         var account = paidByReserveFund ? accounts.FundId ?? accounts.DefaultId : accounts.DefaultId;
         return new LedgerClassification(account, rubroKey ?? FinanceChartTemplate.ExpenseKey(category), LedgerDirection.Out);
     }
+
+    /// <summary>
+    /// Gasto de una sola unidad (cargo individual): el edificio le paga al proveedor y se lo cobra a esa unidad. Es un credito a recuperar, no un
+    /// egreso: sale de la cuenta que pago (la del fondo si lo pago el fondo) y se rubra como recupero. Lo que la unidad devuelve entra con el mismo rubro.
+    /// </summary>
+    public static LedgerClassification ForIndividualExpense(bool paidByReserveFund, LedgerAccounts accounts) =>
+        new(paidByReserveFund ? accounts.FundId ?? accounts.DefaultId : accounts.DefaultId, FinanceChartTemplate.RecoveryIndividualKey, LedgerDirection.Out);
 }
 
 /// <summary>Meses y ejercicios. El ejercicio se identifica por el año calendario en que empieza.</summary>
@@ -206,6 +217,12 @@ public sealed record LedgerBucket(int Year, int Month, Guid? AccountId, string R
 {
     /// <summary>Transferencia entre cuentas propias: mueve el saldo de cada cuenta pero no es ingreso ni egreso del edificio.</summary>
     public bool IsTransfer => RubroKey == FinanceChartTemplate.TransferKey;
+
+    /// <summary>Cargo individual: lo adelantado al proveedor o lo devuelto por la unidad. Mueve el saldo de la cuenta pero no es ingreso ni egreso.</summary>
+    public bool IsRecovery => RubroKey == FinanceChartTemplate.RecoveryIndividualKey;
+
+    /// <summary>Mueve saldos pero no cuenta en los ingresos, egresos, flujo ni presupuesto (transferencias y cargos individuales).</summary>
+    public bool IsNonOperating => IsTransfer || IsRecovery;
 }
 
 /// <summary>Un movimiento del libro (una linea de cobro, de gasto o de ingreso).</summary>
@@ -225,6 +242,12 @@ public sealed record LedgerRow(
 
     /// <summary>Transferencia entre cuentas propias: mueve el saldo de cada cuenta pero no es ingreso ni egreso del edificio.</summary>
     public bool IsTransfer => SourceType == LedgerSourceType.Transfer;
+
+    /// <summary>Cargo individual: lo adelantado al proveedor o lo devuelto por la unidad. Mueve el saldo de la cuenta pero no es ingreso ni egreso.</summary>
+    public bool IsRecovery => RubroKey == FinanceChartTemplate.RecoveryIndividualKey;
+
+    /// <summary>Mueve saldos pero no cuenta en los ingresos, egresos, flujo ni presupuesto (transferencias y cargos individuales).</summary>
+    public bool IsNonOperating => IsTransfer || IsRecovery;
 }
 
 /// <summary>Todo lo que hace falta para clasificar y presentar el libro de un edificio.</summary>

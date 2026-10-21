@@ -56,6 +56,17 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             : DefaultFund(ctx, "3.2.02", "resultado del per");
     }
 
+    /// <summary>
+    /// Cuenta del plan donde se asienta lo adelantado por cargos individuales y lo que las unidades devuelven: «Cargos particulares a recuperar»
+    /// (1.3.06 del plan generico) o, en un plan propio, la cuenta final de activo cuyo nombre diga «a recuperar». Nula si el plan no tiene ninguna.
+    /// </summary>
+    public static LedgerCategory? RecoveryAccount(LedgerContext ctx)
+    {
+        var assets = Candidates(ctx).Where(c => c.Type == LedgerCategoryType.Asset).ToList();
+        return assets.FirstOrDefault(c => c.Code == "1.3.06")
+               ?? assets.FirstOrDefault(c => c.Name.Contains("a recuperar", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ─── Contrapartidas ───────────────────────────────────────────────────────
 
     public async Task<AccountingRolesDto> RolesAsync(LedgerContext ctx, bool canEdit, CancellationToken ct)
@@ -320,14 +331,18 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
             FinancialNames = ctx.Accounts.ToDictionary(a => a.Id, a => a.Name),
             Opening = opening,
             VatCredit = vatCredit,
-            RubroPlan = key => ctx.CategoryFor(key) is { } c ? ToPlan(c) : null,
+            RubroPlan = key => RubroCategory(ctx, key) is { } c ? ToPlan(c) : null,
             // Sin cuenta en el plan, el nombre que ya usa el libro («Aportes extraordinarios (sin rubro)») y no la clave interna.
-            RubroLabel = key => ctx.CategoryFor(key) is { } c ? $"{c.Code} {c.Name}" : FinanceChartTemplate.FallbackName(key),
+            RubroLabel = key => RubroCategory(ctx, key) is { } c ? $"{c.Code} {c.Name}" : FinanceChartTemplate.FallbackName(key),
             VatRates = await VatRatesAsync(rows, ct)
         };
 
         return AccountingEntryBuilder.Build(rows, input);
     }
+
+    // La cuenta del plan de un rubro del libro; los cargos individuales no tienen funcion especial en el plan: van a la cuenta de «cargos a recuperar».
+    private static LedgerCategory? RubroCategory(LedgerContext ctx, string key) =>
+        key == FinanceChartTemplate.RecoveryIndividualKey ? RecoveryAccount(ctx) : ctx.CategoryFor(key);
 
     // La tasa de IVA de cada gasto y, en las notas de credito del proveedor, la del gasto que corrigen.
     private async Task<Dictionary<(LedgerSourceType, Guid), decimal>> VatRatesAsync(IReadOnlyList<LedgerRow> rows, CancellationToken ct)

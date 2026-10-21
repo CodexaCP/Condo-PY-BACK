@@ -199,8 +199,9 @@ public static class AccountingEntryBuilder
             return;
         }
 
+        // Un cargo individual se recupera completo de la unidad (lo pagado y lo devuelto van por el mismo importe a «cargos a recuperar»): sin partir el IVA.
         var vat = 0m;
-        if (row.Direction == LedgerDirection.Out && input.VatRates.TryGetValue((row.SourceType, row.SourceId), out var rate) && rate > 0m)
+        if (!row.IsRecovery && row.Direction == LedgerDirection.Out && input.VatRates.TryGetValue((row.SourceType, row.SourceId), out var rate) && rate > 0m)
         {
             vat = VatMath.VatOf(row.Amount, rate) ?? 0m;
             if (vat != 0m)

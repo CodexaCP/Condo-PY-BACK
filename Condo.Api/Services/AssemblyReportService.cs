@@ -46,8 +46,8 @@ public class AssemblyReportService(
         var before = rows.Where(r => r.Date < begin).ToList();
 
         var accounts = BuildAccounts(ctx, before, inRange);
-        var income = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.In && !r.IsTransfer));
-        var expense = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.Out && !r.IsTransfer));
+        var income = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.In && !r.IsNonOperating));
+        var expense = Lines(ctx, inRange.Where(r => r.Direction == LedgerDirection.Out && !r.IsNonOperating));
         var totalIncome = income.Sum(l => l.Amount);
         var totalExpense = expense.Sum(l => l.Amount);
 
@@ -61,6 +61,13 @@ public class AssemblyReportService(
         if (transfers != 0m)
         {
             warnings.Add($"Las entradas y salidas de cada cuenta incluyen {transfers:N0} Gs. de transferencias entre cuentas propias: no son ingresos ni egresos y no figuran en el estado de resultados.");
+        }
+
+        var recovered = inRange.Where(r => r.IsRecovery && r.Direction == LedgerDirection.In).Sum(r => r.Amount);
+        var advanced = inRange.Where(r => r.IsRecovery && r.Direction == LedgerDirection.Out).Sum(r => r.Amount);
+        if (recovered != 0m || advanced != 0m)
+        {
+            warnings.Add($"Las entradas y salidas de cada cuenta incluyen cargos individuales a unidades: {advanced:N0} Gs. pagados a proveedores y {recovered:N0} Gs. devueltos por las unidades. Son un crédito a recuperar, no ingresos ni egresos, y no figuran en el estado de resultados.");
         }
 
         var budget = await BudgetAsync(ctx, end, ct);
