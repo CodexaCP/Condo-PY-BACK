@@ -168,3 +168,32 @@ dotnet test Condo.Tests/Condo.Tests.csproj
   6. `BuildingComparisonService`: resta por edificio dentro del rango.
   7. Una NC acreditada a propietarios **no** cambia ninguno de los reportes anteriores.
   8. `GET credit-notes` y `credit-notes/export`: filas con `Treatment` correcto para cada caso, `AllocationsCount`/`AllocatedAmount`, anuladas incluidas, `Forbid` sin acceso, 400 sin `buildingId`; el Excel abre y trae el enlace al documento.
+
+## 8. Cuentas por cobrar al proveedor (devolución o descuento) — 2026-10-21
+
+**Migración nueva para el VPS:** `20261021165658_SupplierCreditRecovery.sql` (va después de `OnlinePaymentIntents`). Correr con `-I -b` antes de desplegar el código.
+
+**Reglas:**
+- Si el gasto **todavía está por pagar** (tiene vencimiento y sin pago registrado), la NC solo baja la cuenta por pagar: no hay nada por cobrar.
+- Si el gasto **ya se pagó** (sin vencimiento cuenta como pagado desde su fecha, o con pago registrado), al registrar la NC hay que elegir **cómo se recupera**:
+  - **El proveedor devuelve el dinero:** queda «devolución pendiente». En período **publicado** los propietarios **no** reciben saldo a favor todavía; se acredita (igual que antes) cuando se marca **devuelto**.
+  - **Descuento en su próxima factura:** en período publicado los propietarios se acreditan al registrar la NC; el descuento queda pendiente por proveedor hasta que se registren los descuentos aplicados.
+- Las NC registradas antes de esta versión quedan como estaban (sin cuenta por cobrar).
+
+| # | Qué hacer | Resultado esperado |
+|---|---|---|
+| 8.1 | Registrar una NC sobre un gasto **ya pagado** sin elegir cómo se recupera. | No deja registrar: hay que elegir «devuelve el dinero» o «descuento en su próxima factura». |
+| 8.2 | Registrar una NC sobre un gasto **con vencimiento y sin pagar**. | No pide elegir; la cuenta por pagar baja al monto neto; no aparece nada por cobrar. |
+| 8.3 | Período **publicado**, gasto pagado, elegir **devolución de dinero**, ver reparto y confirmar. | La nota queda «Devolución pendiente del proveedor». Los propietarios **no** reciben saldo (revisar su saldo en la app). No aparece en el libro de movimientos. |
+| 8.4 | En esa nota, **Marcar devuelto** con fecha y referencia. | Se acredita el saldo a favor de las unidades (mismo reparto del paso anterior), la nota pasa a «Devuelto el …» y los propietarios reciben el aviso. |
+| 8.5 | Intentar marcar devuelto otra vez, o con una fecha anterior a la nota o futura. | Se rechaza. |
+| 8.6 | Período publicado, gasto pagado, elegir **descuento en la próxima factura**. | Los propietarios reciben el saldo a favor al registrar. La nota queda «Descuento pendiente: ₲ …». |
+| 8.7 | **Registrar descuento aplicado** por una parte, luego por el resto. | Baja lo pendiente; al cubrir todo pasa a «Descuento aplicado por completo». Pasarse del pendiente se rechaza. «quitar» un descuento reabre lo pendiente. |
+| 8.8 | Período **borrador**, gasto pagado, elegir devolución o descuento. | El gasto baja al neto como siempre y la nota queda por cobrar. Marcar devuelto o aplicar descuentos solo cierra la cuenta por cobrar (no acredita a nadie). |
+| 8.9 | **Anular** una NC con devolución ya recibida, o con descuentos aplicados. | Se rechaza (hay que quitar los descuentos primero). Una devolución **pendiente** sí se puede anular. |
+| 8.10 | **Finanzas (módulo) › Cuentas por proveedor.** | Por proveedor: por pagar, vencido, devolución pendiente, descuento pendiente, por cobrar y saldo neto. Tocar un proveedor filtra sus notas. |
+| 8.11 | En esa pantalla, **Marcar devuelto** y **Registrar descuento** sobre una nota. | Mismo efecto que desde el diálogo del gasto; los totales se actualizan. Las notas con muchos días pendientes se marcan. |
+| 8.12 | **Gastos y cargos › registrar gasto**, elegir o escribir un proveedor con descuento pendiente. | Aparece un aviso: «tiene un descuento acordado pendiente de ₲ …; revisá que esta factura lo traiga aplicado». No aparece al editar un gasto. |
+| 8.13 | Libro de movimientos / estado de resultados con una NC de **fondo de reserva** (sin reparto) de devolución. | Entra recién cuando se marca devuelta y con la **fecha de la devolución**; antes no cuenta. |
+
+Pruebas automáticas: `Condo.Tests/Finance/BuildingExpenseCreditNotesRecoveryTests.cs`.
