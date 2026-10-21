@@ -27,7 +27,8 @@ public class FinancePayablesService(ICondoDbContext dbContext)
     ];
 
     public async Task<PayablesPageDto> ListAsync(
-        Guid buildingId, string? status, Guid? supplierId, DateOnly? from, DateOnly? to, int page, int pageSize, DateOnly today, CancellationToken ct)
+        Guid buildingId, string? status, Guid? supplierId, DateOnly? from, DateOnly? to, int page, int pageSize, DateOnly today, CancellationToken ct,
+        string? supplierName = null)
     {
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -45,6 +46,16 @@ public class FinancePayablesService(ICondoDbContext dbContext)
         };
 
         if (supplierId.HasValue) query = query.Where(x => x.SupplierId == supplierId.Value);
+        // Por nombre (proveedores escritos a mano, sin ficha): mismo criterio que usan las cuentas por cobrar.
+        var nameKey = string.IsNullOrWhiteSpace(supplierName) ? null : BuildingExpenseCreditNoteKeys.Normalize(supplierName);
+        if (nameKey is not null)
+        {
+            var names = (await dbContext.BuildingExpenses.AsNoTracking()
+                    .Where(x => !x.IsDeleted && x.BuildingId == buildingId && x.DueDate != null)
+                    .Select(x => x.SupplierName).Distinct().ToListAsync(ct))
+                .Where(n => BuildingExpenseCreditNoteKeys.Normalize(n) == nameKey).ToList();
+            query = query.Where(x => names.Contains(x.SupplierName));
+        }
         if (from.HasValue) query = query.Where(x => x.DueDate >= from.Value);
         if (to.HasValue) query = query.Where(x => x.DueDate <= to.Value);
 

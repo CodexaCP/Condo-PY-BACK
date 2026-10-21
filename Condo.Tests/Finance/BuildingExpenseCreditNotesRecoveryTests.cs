@@ -279,4 +279,20 @@ public partial class BuildingExpenseCreditNotesTests
         Assert.Equal(860_000m, row.NetBalance);
         Assert.Equal(unpaid.Amount, row.PayableTotal);
     }
+
+    [Fact]
+    public async Task CuentasPorPagar_SePuedenFiltrarPorNombreDelProveedor()
+    {
+        Unpaid(1_000_000m);
+        var other = Unpaid(300_000m);
+        other.SupplierName = "Otra Empresa S.A.";
+        _env.T.Db.SaveChanges();
+
+        var all = await new FinancePayablesService(_env.T.Db).ListAsync(_env.Building.Id, "all", null, null, null, 1, 50, Today, default);
+        var onlyOther = await new FinancePayablesService(_env.T.Db).ListAsync(_env.Building.Id, "all", null, null, null, 1, 50, Today, default, "otra empresa s.a.");
+
+        Assert.Equal(2, all.TotalCount);
+        var row = Assert.Single(onlyOther.Items);
+        Assert.Equal("Otra Empresa S.A.", row.SupplierName);
+    }
 }

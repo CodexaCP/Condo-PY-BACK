@@ -28,6 +28,7 @@ public class FinancePayablesController(
         [FromQuery] DateOnly? to,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
+        [FromQuery] string? supplierName = null,
         CancellationToken cancellationToken = default)
     {
         var denied = await RequireModuleAsync(buildingId, write: false, cancellationToken);
@@ -48,7 +49,7 @@ public class FinancePayablesController(
             return BadRequest("La fecha desde no puede ser posterior a la fecha hasta.");
         }
 
-        return Ok(await payables.ListAsync(buildingId, normalized, supplierId, from, to, page, pageSize, FinancePeriods.Today(), cancellationToken));
+        return Ok(await payables.ListAsync(buildingId, normalized, supplierId, from, to, page, pageSize, FinancePeriods.Today(), cancellationToken, supplierName));
     }
 
     [HttpGet("summary")]
