@@ -236,7 +236,9 @@ public sealed record LedgerRow(
     Guid SourceId,
     string Description,
     string ThirdParty,
-    string Reference)
+    string Reference,
+    string SupplierRuc = "",
+    string Timbrado = "")
 {
     public decimal Signed => Direction == LedgerDirection.In ? Amount : -Amount;
 

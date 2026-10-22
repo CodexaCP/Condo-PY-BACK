@@ -199,7 +199,7 @@ public class ConfigCenterPhase6Tests
     }
 
     [Fact]
-    public void ElIvaSeRedondeaADosDecimalesYElAsientoSigueCuadrando()
+    public void ElIvaSeRedondeaAlGuaraniEnteroYElAsientoSigueCuadrando()
     {
         var id = Guid.NewGuid();
 
@@ -207,10 +207,35 @@ public class ConfigCenterPhase6Tests
             [Row(D1, BankId, "Expense.Maintenance", LedgerDirection.Out, 10_001m, LedgerSourceType.BuildingExpense, id)],
             Input(rates: (LedgerSourceType.BuildingExpense, id, 10m))).Entries);
 
-        Assert.Equal(909.18m, Line(entry, "1.4.06").Debit);
-        Assert.Equal(9_091.82m, Line(entry, "5.01.01").Debit);
+        Assert.Equal(909m, Line(entry, "1.4.06").Debit);
+        Assert.Equal(9_092m, Line(entry, "5.01.01").Debit);
         Assert.Equal(10_001m, Line(entry, "1.1.03").Credit);
         Assert.Equal(entry.Debit, entry.Credit);
+    }
+
+    [Fact]
+    public void ElAsientoGuardaElRucYElTimbradoDelComprobante()
+    {
+        var id = Guid.NewGuid();
+        var row = Row(D1, BankId, "Expense.Maintenance", LedgerDirection.Out, 110_000m, LedgerSourceType.BuildingExpense, id)
+            with { SupplierRuc = "80012345-6", Timbrado = "15012345" };
+
+        var entry = Assert.Single(AccountingEntryBuilder.Build(
+            [row], Input(rates: (LedgerSourceType.BuildingExpense, id, 10m))).Entries);
+
+        Assert.Equal("80012345-6", entry.SupplierRuc);
+        Assert.Equal("15012345", entry.Timbrado);
+    }
+
+    [Fact]
+    public void UnMovimientoSinComprobanteDejaElRucYElTimbradoVacios()
+    {
+        var entry = Assert.Single(AccountingEntryBuilder.Build(
+            [Row(D1, BankId, "Income.Ordinary", LedgerDirection.In, 500_000m, LedgerSourceType.OwnerPayment, Guid.NewGuid())],
+            Input()).Entries);
+
+        Assert.Equal(string.Empty, entry.SupplierRuc);
+        Assert.Equal(string.Empty, entry.Timbrado);
     }
 
     [Fact]

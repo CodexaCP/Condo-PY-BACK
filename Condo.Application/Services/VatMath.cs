@@ -4,7 +4,7 @@ namespace Condo.Application.Services;
 
 /// <summary>
 /// IVA de las compras. El monto del comprobante ya incluye el IVA: con 10 % el IVA es monto / 11 y con 5 % es monto / 21 (base gravada =
-/// monto - IVA). Los importes se redondean a 2 decimales.
+/// monto - IVA). El IVA se redondea al guarani entero.
 /// </summary>
 public static class VatMath
 {
@@ -20,7 +20,10 @@ public static class VatMath
         _ => null
     };
 
-    /// <summary>IVA incluido en un monto con esa tasa; 0 si es exento y null si el gasto no tiene tasa.</summary>
+    /// <summary>
+    /// IVA incluido en un monto con esa tasa; 0 si es exento y null si el gasto no tiene tasa. El guarani no tiene centavos: el IVA se redondea
+    /// al guarani entero (como el comprobante y Marangatu), no a 2 decimales.
+    /// </summary>
     public static decimal? VatOf(decimal amount, decimal? rate)
     {
         if (rate is null)
@@ -28,7 +31,7 @@ public static class VatMath
             return null;
         }
 
-        return rate.Value == 0m ? 0m : decimal.Round(amount * rate.Value / (100m + rate.Value), 2, MidpointRounding.AwayFromZero);
+        return rate.Value == 0m ? 0m : decimal.Round(amount * rate.Value / (100m + rate.Value), 0, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>Base gravada (monto sin IVA) de un monto con esa tasa; el monto completo si es exento; null si no hay tasa.</summary>

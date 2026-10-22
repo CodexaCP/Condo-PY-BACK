@@ -96,6 +96,9 @@ public class AccountingEntryDto
     public string Description { get; set; } = string.Empty;
     public string ThirdParty { get; set; } = string.Empty;
     public string Reference { get; set; } = string.Empty;
+    // Respaldo del comprobante: RUC del proveedor y timbrado de la factura (o de la nota de credito). Vacios si el movimiento no los tiene.
+    public string SupplierRuc { get; set; } = string.Empty;
+    public string Timbrado { get; set; } = string.Empty;
     public LedgerSourceType SourceType { get; set; }
     public Guid SourceId { get; set; }
     // Cuenta financiera del movimiento (parte de la identidad del asiento al asentarlo).
@@ -211,6 +214,8 @@ public class JournalEntryDto
     public string Description { get; set; } = string.Empty;
     public string ThirdParty { get; set; } = string.Empty;
     public string Reference { get; set; } = string.Empty;
+    public string SupplierRuc { get; set; } = string.Empty;
+    public string Timbrado { get; set; } = string.Empty;
     public JournalEntryKind Kind { get; set; }
     public LedgerSourceType? SourceType { get; set; }
     public Guid? SourceId { get; set; }

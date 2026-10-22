@@ -1226,6 +1226,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<JournalEntry>().Property(x => x.Description).HasMaxLength(500);
         modelBuilder.Entity<JournalEntry>().Property(x => x.ThirdParty).HasMaxLength(200);
         modelBuilder.Entity<JournalEntry>().Property(x => x.Reference).HasMaxLength(200);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.SupplierRuc).HasMaxLength(20);
+        modelBuilder.Entity<JournalEntry>().Property(x => x.Timbrado).HasMaxLength(20);
         modelBuilder.Entity<JournalEntry>().Property(x => x.ContentHash).HasMaxLength(64);
         modelBuilder.Entity<JournalEntry>().Property(x => x.TotalDebit).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<JournalEntry>().Property(x => x.TotalCredit).HasColumnType("decimal(18,2)");

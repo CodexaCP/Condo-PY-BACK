@@ -140,7 +140,9 @@ public class ConfigCenterPhase4Tests : IDisposable
     [InlineData(110_000, 10, 10_000, 100_000)]
     [InlineData(105_000, 5, 5_000, 100_000)]
     [InlineData(80_000, 0, 0, 80_000)]
-    [InlineData(1_000_000, 10, 90_909.09, 909_090.91)]
+    [InlineData(1_000_000, 10, 90_909, 909_091)]
+    [InlineData(1_000_001, 10, 90_909, 909_092)]
+    [InlineData(100_000, 5, 4_762, 95_238)]
     public void ElIvaEstaIncluidoEnElMonto(decimal total, decimal rate, decimal vat, decimal @base)
     {
         Assert.Equal(vat, VatMath.VatOf(total, rate));

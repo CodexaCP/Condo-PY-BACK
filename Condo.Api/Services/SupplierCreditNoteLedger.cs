@@ -7,7 +7,8 @@ namespace Condo.Api.Services;
 /// <summary>Una nota de credito del proveedor que los reportes restan del gasto en la fecha de la nota.</summary>
 public sealed record SupplierCreditEntry(
     Guid Id, Guid ExpenseId, Guid BuildingId, DateOnly Date, decimal Amount, string Numero, string SupplierName,
-    string ExpenseDescription, BuildingExpenseCategory Category, bool PaidByReserveFund, Guid? LedgerCategoryId);
+    string ExpenseDescription, BuildingExpenseCategory Category, bool PaidByReserveFund, Guid? LedgerCategoryId,
+    string? Timbrado = null, string? SupplierRuc = null);
 
 /// <summary>
 /// Notas de credito de proveedor que cuentan como un movimiento propio en los reportes (libro, estado de resultados, flujo, presupuesto
@@ -51,14 +52,16 @@ public static class SupplierCreditNoteLedger
                 Description = x.BuildingExpense!.Description,
                 Category = x.BuildingExpense.Category,
                 PaidByReserveFund = x.BuildingExpense.PaidByReserveFund,
-                LedgerCategoryId = x.BuildingExpense.LedgerCategoryId
+                LedgerCategoryId = x.BuildingExpense.LedgerCategoryId,
+                x.Timbrado,
+                SupplierRuc = x.BuildingExpense.Supplier != null ? x.BuildingExpense.Supplier.Ruc : null
             })
             .ToListAsync(cancellationToken);
 
         return rows
             .Select(x => new SupplierCreditEntry(
                 x.Id, x.BuildingExpenseId, x.BuildingId, x.Date, x.Amount, x.Numero, x.SupplierName, x.Description,
-                x.Category, x.PaidByReserveFund, x.LedgerCategoryId))
+                x.Category, x.PaidByReserveFund, x.LedgerCategoryId, x.Timbrado, x.SupplierRuc))
             .ToList();
     }
 }

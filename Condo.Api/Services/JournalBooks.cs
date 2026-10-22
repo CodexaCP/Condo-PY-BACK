@@ -148,6 +148,16 @@ public static class JournalBookPaginator
 {
     public const int DefaultRowsPerPage = 40;
 
+    // Tercero del asiento con el respaldo del comprobante (RUC, timbrado y numero) cuando el asiento los tiene.
+    internal static string WithSupport(JournalEntry entry)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.SupplierRuc)) parts.Add($"RUC {entry.SupplierRuc}");
+        if (!string.IsNullOrWhiteSpace(entry.Timbrado)) parts.Add($"timbrado {entry.Timbrado}");
+        if (parts.Count > 0 && !string.IsNullOrWhiteSpace(entry.Reference)) parts.Add($"comprobante {entry.Reference}");
+        return parts.Count == 0 ? entry.ThirdParty : $"{entry.ThirdParty} ({string.Join(", ", parts)})".TrimStart();
+    }
+
     public static List<BookPage> Paginate(IReadOnlyList<JournalEntry> entries, int startFolio, int rowsPerPage = DefaultRowsPerPage)
     {
         var capacity = Math.Max(rowsPerPage, 3);
@@ -176,7 +186,7 @@ public static class JournalBookPaginator
             if (used > 0 && used + blockWeight > capacity && blockWeight <= capacity) Close();
 
             BookRow Header(bool continued) => new(
-                BookRowKind.Entry, label, entry.Date, entry.Description, entry.ThirdParty, continued, string.Empty, string.Empty, 0m, 0m);
+                BookRowKind.Entry, label, entry.Date, entry.Description, WithSupport(entry), continued, string.Empty, string.Empty, 0m, 0m);
 
             var needsHeader = true;
             var continued = false;

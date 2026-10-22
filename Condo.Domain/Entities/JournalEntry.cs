@@ -23,6 +23,11 @@ public class JournalEntry : CompanyScopedEntity
     public string ThirdParty { get; set; } = string.Empty;
     public string Reference { get; set; } = string.Empty;
 
+    // Respaldo del comprobante (art. 85): RUC del proveedor y timbrado de la factura o nota de credito. Vacios en lo asentado antes de existir
+    // estos campos y en los movimientos sin comprobante. No entran en la huella: no son un cambio del movimiento.
+    public string SupplierRuc { get; set; } = string.Empty;
+    public string Timbrado { get; set; } = string.Empty;
+
     public JournalEntryKind Kind { get; set; } = JournalEntryKind.Auto;
 
     // Origen del movimiento (tipo del libro de Finanzas, id y cuenta financiera). Nulos en los asientos que no vienen de un movimiento.

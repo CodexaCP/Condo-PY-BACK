@@ -66,7 +66,7 @@ public static class AccountingEntryBuilder
         // Arma el asiento de un conjunto de renglones y lo suma a la lista, a las sumas por cuenta y a los pendientes.
         void Emit(
             Dictionary<string, LineAcc> lines, DateOnly date, string description, string thirdParty, string reference,
-            LedgerSourceType type, Guid sourceId, Guid? accountId)
+            LedgerSourceType type, Guid sourceId, Guid? accountId, string supplierRuc = "", string timbrado = "")
         {
             var dtoLines = lines.Values
                 .Where(l => l.Net != 0m)
@@ -101,6 +101,8 @@ public static class AccountingEntryBuilder
                 Description = description.Length > MaxDescriptionLength ? description[..MaxDescriptionLength] : description,
                 ThirdParty = thirdParty,
                 Reference = reference,
+                SupplierRuc = supplierRuc,
+                Timbrado = timbrado,
                 SourceType = type,
                 SourceId = sourceId,
                 SourceAccountId = accountId,
@@ -163,7 +165,10 @@ public static class AccountingEntryBuilder
                 group.Select(r => r.Reference).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
                 group.First().SourceType, group.First().SourceId,
                 // Una transferencia se identifica por la cuenta de la que sale.
-                group.Key.AccountId ?? group.FirstOrDefault(r => r.IsTransfer && r.Direction == LedgerDirection.Out)?.AccountId);
+                group.Key.AccountId ?? group.FirstOrDefault(r => r.IsTransfer && r.Direction == LedgerDirection.Out)?.AccountId,
+                // Respaldo del comprobante (art. 85): RUC del proveedor y timbrado de la factura o de la nota de credito.
+                group.Select(r => r.SupplierRuc).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty,
+                group.Select(r => r.Timbrado).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? string.Empty);
         }
 
         return new AccountingBuildResult(

@@ -3254,10 +3254,20 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<int?>("SourceType")
                         .HasColumnType("int");
 
+                    b.Property<string>("SupplierRuc")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("ThirdParty")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Timbrado")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal>("TotalCredit")
                         .HasColumnType("decimal(18,2)");
