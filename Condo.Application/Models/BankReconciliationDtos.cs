@@ -27,6 +27,9 @@ public class ReconciliationOverviewDto
 {
     public Guid BuildingId { get; set; }
     public bool CanEdit { get; set; }
+    // El edificio deja que el Encargado concilie (interruptor); solo lo cambian SuperAdmin y Administrador de empresa (CanConfigure).
+    public bool ManagerCanReconcile { get; set; }
+    public bool CanConfigure { get; set; }
     public IReadOnlyList<ReconciliationAccountDto> Accounts { get; set; } = [];
 }
 
@@ -136,6 +139,12 @@ public class ReconciliationItemRef
 public class ReconciliationItemsRequest
 {
     public List<ReconciliationItemRef> Items { get; set; } = [];
+}
+
+public class SetManagerReconcileRequest
+{
+    public Guid BuildingId { get; set; }
+    public bool Enabled { get; set; }
 }
 
 public class ReopenReconciliationRequest

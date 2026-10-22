@@ -26,6 +26,10 @@ public class FinanceSettings : CompanyScopedEntity
     // Umbral del semaforo del presupuesto vs. real, en % de desvio (1 a 100). Hasta ese desvio el renglon queda amarillo; mas alla, rojo.
     public int BudgetWarnPercent { get; set; } = 10;
 
+    // Conciliacion bancaria desde la app: con el interruptor encendido el Encargado del edificio tambien puede armar, cerrar y reabrir
+    // conciliaciones (por defecto solo SuperAdmin y Administrador de empresa; quien aprueba los pagos no concilia salvo que el edificio lo habilite).
+    public bool ManagerCanReconcile { get; set; }
+
     // Libro Diario: ultimo dia asentado. Lo anterior ya esta numerado y no se vuelve a asentar; solo avanza. Nulo = nada asentado todavia.
     public DateOnly? JournalPostedThrough { get; set; }
 

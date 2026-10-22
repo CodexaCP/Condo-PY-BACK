@@ -10,7 +10,8 @@ namespace Condo.Api.Controllers;
 /// <summary>
 /// Conciliacion bancaria manual (Finanzas): por cuenta bancaria, se tildan los movimientos del libro que aparecen en el extracto y se compara el
 /// saldo del extracto con el saldo conciliado. La ven los cuatro roles administrativos; la arman, cierran y reabren solo SuperAdmin y Administrador
-/// de empresa (control interno: quien concilia no es quien carga los movimientos). Exige la configuracion inicial de Finanzas completa. Una
+/// de empresa (control interno: quien concilia no es quien carga los movimientos), y el Encargado del edificio solo si el edificio lo habilito con
+/// el interruptor FinanceSettings.ManagerCanReconcile (lo cambian SuperAdmin y Administrador de empresa). Exige la configuracion inicial de Finanzas completa. Una
 /// conciliacion de un edificio ajeno responde 404.
 /// </summary>
 [Route("api/finance/reconciliation")]
@@ -22,12 +23,26 @@ public class FinanceReconciliationController(
     FinanceLedgerService ledgerService,
     BankReconciliationService reconciliations) : FinanceLedgerControllerBase(dbContext, accessScope, tenantContext, gate, ledgerService)
 {
-    private bool CanReconcile => Tenant.IsSuperAdmin || Tenant.IsCompanyAdmin;
+    // Quienes concilian siempre y quienes cambian el interruptor del Encargado.
+    private bool CanConfigureReconcile => Tenant.IsSuperAdmin || Tenant.IsCompanyAdmin;
+
+    private bool IsBuildingManager => string.Equals(Tenant.Role, "BuildingManager", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<bool> ManagerSwitchOnAsync(Guid buildingId, CancellationToken cancellationToken) =>
+        await Db.FinanceSettings.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == buildingId)
+            .Select(x => x.ManagerCanReconcile)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    // SuperAdmin y Administrador de empresa siempre; el Encargado solo si el edificio encendio el interruptor.
+    private async Task<bool> CanReconcileAsync(Guid buildingId, CancellationToken cancellationToken) =>
+        CanConfigureReconcile || (IsBuildingManager && await ManagerSwitchOnAsync(buildingId, cancellationToken));
 
     private ObjectResult ReconciliationForbidden() => StatusCode(StatusCodes.Status403Forbidden, new
     {
         error = "reconciliation_forbidden",
-        message = "Solo el SuperAdmin o el Administrador de empresa pueden armar, cerrar o reabrir una conciliación bancaria."
+        message = "Solo el SuperAdmin o el Administrador de empresa pueden armar, cerrar o reabrir una conciliación bancaria. " +
+                  "El Encargado puede hacerlo si el edificio lo habilita."
     });
 
     private ObjectResult ToError(int status, string? code, string? message) => StatusCode(status, new { error = code, message });
@@ -38,7 +53,45 @@ public class FinanceReconciliationController(
         var (denied, ctx) = await RequireLedgerAsync(buildingId, cancellationToken);
         if (denied is not null) return denied;
 
-        return Ok(await reconciliations.OverviewAsync(ctx!, CanReconcile, cancellationToken));
+        return Ok(await OverviewAsync(ctx!, cancellationToken));
+    }
+
+    // El resumen con el permiso del usuario y el estado del interruptor del Encargado.
+    private async Task<ReconciliationOverviewDto> OverviewAsync(LedgerContext ctx, CancellationToken cancellationToken)
+    {
+        var overview = await reconciliations.OverviewAsync(ctx, await CanReconcileAsync(ctx.BuildingId, cancellationToken), cancellationToken);
+        overview.ManagerCanReconcile = await ManagerSwitchOnAsync(ctx.BuildingId, cancellationToken);
+        overview.CanConfigure = CanConfigureReconcile;
+        return overview;
+    }
+
+    // Enciende o apaga que el Encargado del edificio pueda conciliar (apagado por defecto). Solo SuperAdmin y Administrador de empresa.
+    [HttpPut("settings")]
+    public async Task<ActionResult<ReconciliationOverviewDto>> SetManagerReconcile([FromBody] SetManagerReconcileRequest request, CancellationToken cancellationToken)
+    {
+        var (denied, ctx) = await RequireLedgerAsync(request.BuildingId, cancellationToken);
+        if (denied is not null) return denied;
+        if (!CanConfigureReconcile)
+        {
+            return ToError(StatusCodes.Status403Forbidden, "reconciliation_settings_forbidden",
+                "Solo el SuperAdmin o el Administrador de empresa pueden cambiar quién concilia en el edificio.");
+        }
+
+        var settings = await Db.FinanceSettings.FirstOrDefaultAsync(x => !x.IsDeleted && x.BuildingId == request.BuildingId, cancellationToken);
+        if (settings is null) return NotFound();
+
+        if (settings.ManagerCanReconcile != request.Enabled)
+        {
+            settings.ManagerCanReconcile = request.Enabled;
+            Audit.Add(
+                settings.CompanyId, request.BuildingId, ConfigSectionKeys.Reconciliation, request.Enabled ? "Enabled" : "Disabled",
+                request.Enabled ? "El Encargado del edificio ahora puede conciliar." : "El Encargado del edificio ya no puede conciliar.",
+                "FinanceSettings", settings.Id,
+                [new ConfigChange("managerCanReconcile", "El Encargado puede conciliar", request.Enabled ? "No" : "Sí", request.Enabled ? "Sí" : "No")]);
+            await Db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Ok(await OverviewAsync(ctx!, cancellationToken));
     }
 
     [HttpGet("history")]
@@ -58,7 +111,7 @@ public class FinanceReconciliationController(
         var (denied, ctx) = await ResolveAsync(id, write: false, cancellationToken);
         if (denied is not null) return denied;
 
-        return Map(await reconciliations.GetAsync(ctx!, id, CanReconcile, cancellationToken, includePrevious));
+        return Map(await reconciliations.GetAsync(ctx!, id, await CanReconcileAsync(ctx!.BuildingId, cancellationToken), cancellationToken, includePrevious));
     }
 
     // Excel de la conciliacion: resumen, lo conciliado en ella y todos los pendientes (sin el tope de la pantalla); con includePrevious, tambien lo de las anteriores.
@@ -68,7 +121,7 @@ public class FinanceReconciliationController(
         var (denied, ctx) = await ResolveAsync(id, write: false, cancellationToken);
         if (denied is not null) return denied;
 
-        var result = await reconciliations.GetAsync(ctx!, id, CanReconcile, cancellationToken, includePrevious: true, full: true);
+        var result = await reconciliations.GetAsync(ctx!, id, await CanReconcileAsync(ctx!.BuildingId, cancellationToken), cancellationToken, includePrevious: true, full: true);
         if (!result.Ok) return ToError(result.Status, result.Code, result.Message);
 
         var workspace = result.Value!;
@@ -83,7 +136,7 @@ public class FinanceReconciliationController(
     {
         var (denied, ctx) = await RequireLedgerAsync(request.BuildingId, cancellationToken);
         if (denied is not null) return denied;
-        if (!CanReconcile) return ReconciliationForbidden();
+        if (!await CanReconcileAsync(request.BuildingId, cancellationToken)) return ReconciliationForbidden();
 
         var companyId = await ResolveCompanyIdAsync(request.BuildingId, cancellationToken);
         if (!companyId.HasValue) return BadRequest(NoCompanyMessage);
@@ -161,7 +214,7 @@ public class FinanceReconciliationController(
 
         var (denied, ctx) = await RequireLedgerAsync(buildingId.Value, cancellationToken);
         if (denied is not null) return (denied, null);
-        if (write && !CanReconcile) return (ReconciliationForbidden(), null);
+        if (write && !await CanReconcileAsync(buildingId.Value, cancellationToken)) return (ReconciliationForbidden(), null);
 
         return (null, ctx);
     }

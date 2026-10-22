@@ -2736,6 +2736,9 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("JournalPostedThrough")
                         .HasColumnType("date");
 
+                    b.Property<bool>("ManagerCanReconcile")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("PeriodClosingEnabled")
                         .HasColumnType("bit");
 
