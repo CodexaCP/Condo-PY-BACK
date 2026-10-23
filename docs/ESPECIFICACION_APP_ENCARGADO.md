@@ -326,7 +326,7 @@ Decisión 4: los reclamos solo cambian de estado. No hay columna nueva ni migrac
 `GET /api/app/version` (anónimo)
 
 ```json
-{ "minVersionCode": 2, "latestVersionCode": 3, "apkUrl": "https://expenses.com.py/downloads/condopy.apk", "message": "Hay una versión nueva." }
+{ "minVersionCode": 2, "latestVersionCode": 3, "apkUrl": "https://expenses.com.py/downloads/expenses.apk", "message": "Hay una versión nueva." }
 ```
 
 - La app compara su `versionCode` (plugin `@capacitor/app` → `App.getInfo()`) al abrir y al volver a primer plano.
@@ -500,4 +500,4 @@ Repo `CondoPY-APP`. Compila en desarrollo y en producción. Probado en el navega
 | Etiquetas de rol corregidas (`Porter` ya no se muestra como "Encargado") | Hecho |
 | M7 Morosos, M8 Comunicado rápido, M9 Gasto rápido | Fase 2 |
 
-Para publicarlo: desplegar primero el backend (la app nueva usa `/api/manager/summary` y `/api/app/version`), subir el `versionCode` en `android/app/build.gradle`, compilar el APK de release con `environment.prod` (apunta a `https://api.expenses.com.py/api`) y copiarlo a `Condo-PY-WEB/public/downloads/condopy.apk`.
+Para publicarlo: desplegar primero el backend (la app nueva usa `/api/manager/summary` y `/api/app/version`), subir el `versionCode` en `android/app/build.gradle`, compilar el APK de release con `environment.prod` (apunta a `https://api.expenses.com.py/api`) y copiarlo a `Condo-PY-WEB/public/downloads/expenses.apk`.
