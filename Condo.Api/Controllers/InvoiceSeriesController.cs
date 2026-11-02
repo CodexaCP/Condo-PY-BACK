@@ -15,6 +15,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/invoice-series")]
+[RequiresCapability("EmitsInvoices")]
 public class InvoiceSeriesController(
     ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env) : ControllerBase
 {

@@ -16,6 +16,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/invoices")]
+[RequiresCapability("EmitsInvoices")]
 public class InvoicesController(
     ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, IWebHostEnvironment env,
     Condo.Api.Services.InvoiceDraftService draftService, Condo.Api.Services.PushDispatcher pushDispatcher) : ControllerBase

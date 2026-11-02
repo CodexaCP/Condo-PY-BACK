@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
 using Condo.Infrastructure.Persistence;
@@ -55,7 +56,7 @@ internal static class MarketplaceNotices
         }
     }
 
-    public static string Gs(decimal amount) => $"Gs. {amount:N0}";
+    public static string Gs(decimal amount) => $"{Money.Format(amount)}";
 
     public static string FormatRange(DateTime startsUtc, DateTime endsUtc)
     {

@@ -136,6 +136,14 @@ public class Building : BaseEntity
     // Configuracion
     public string? TimeZoneId { get; set; }
 
+    // Multipais. Jurisdiccion (provincia o ciudad autonoma) para las reglas que cambian por jurisdiccion; el numero de registro del
+    // administrador (por ejemplo el Registro Publico de Administradores de la CABA) que algunas jurisdicciones piden en la liquidacion;
+    // el mes en que cierra el ejercicio (lo fija el reglamento) para el plazo de rendicion de cuentas; y la cadena de aprobacion.
+    public string? Jurisdiction { get; set; }
+    public string? AdministratorRegistryNumber { get; set; }
+    public int? FiscalYearEndMonth { get; set; }
+    public SettlementApprovalMode SettlementApprovalMode { get; set; } = SettlementApprovalMode.ManagerPresidentAdmin;
+
     public Company? Company { get; set; }
     public Condominium? Condominium { get; set; }
     public ApplicationUser? PresidentUser { get; set; }

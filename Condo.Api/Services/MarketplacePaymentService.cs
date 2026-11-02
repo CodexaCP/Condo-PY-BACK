@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Data;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -248,7 +249,7 @@ public class MarketplacePaymentService(
                 {
                     await transaction.RollbackAsync(ct);
                     failure = MarketplaceResult<MarketplaceReviewItemDto>.Fail(MarketplaceError.BadRequest(
-                        $"El monto no coincide con el total esperado (Gs. {payment.ExpectedAmount:N0}). Si el comprobante no corresponde, rechazá el pago."));
+                        $"El monto no coincide con el total esperado ({Money.Format(payment.ExpectedAmount)}). Si el comprobante no corresponde, rechazá el pago."));
                     return;
                 }
 
@@ -479,7 +480,7 @@ public class MarketplacePaymentService(
     {
         var title = reservation.Listing?.Title ?? "una reserva";
         var heading = isReminder ? "Recordatorio: pago de reserva por revisar" : "Pago de reserva por revisar";
-        var body = $"{title} · Gs. {payment.ExpectedAmount:N0} · {reservation.Reference}. Confirmalo o rechazalo desde Marketplace.";
+        var body = $"{title} · {Money.Format(payment.ExpectedAmount)} · {reservation.Reference}. Confirmalo o rechazalo desde Marketplace.";
 
         foreach (var reviewerId in await ReviewerIdsAsync(reservation.CompanyId, reservation.BuildingId, ct))
         {

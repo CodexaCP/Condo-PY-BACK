@@ -505,9 +505,18 @@ public class BuildingExpensesController(
         }
 
         // IVA: la tasa pedida; sin tasa, la del rubro elegido (si tiene tratamiento definido).
+        // Las tasas validas son las de la empresa del edificio (Paraguay: 10, 5 y exento).
+        var tax = await dbContext.Buildings.AsNoTracking()
+            .Where(b => b.Id == request.BuildingId)
+            .Select(b => new { b.Company!.TaxName, b.Company.TaxGeneralRate, b.Company.TaxReducedRate })
+            .FirstOrDefaultAsync(cancellationToken);
+        var taxName = string.IsNullOrWhiteSpace(tax?.TaxName) ? "IVA" : tax.TaxName;
+        var taxGeneral = tax is null ? 10m : tax.TaxGeneralRate;
+        var taxReduced = tax is null ? 5m : tax.TaxReducedRate;
         decimal? vatRate = request.VatRate;
-        if (vatRate.HasValue && !VatMath.IsValidRate(vatRate.Value)) return ("La tasa de IVA debe ser 10, 5 o 0 (exento).", null);
-        vatRate ??= VatMath.RateOf(rubro?.VatTreatment);
+        if (vatRate.HasValue && !VatMath.IsValidRate(vatRate.Value, taxGeneral, taxReduced))
+            return ($"La tasa de {taxName} debe ser {VatMath.RatesText(taxGeneral, taxReduced)} o 0 (exento).", null);
+        vatRate ??= VatMath.RateOf(rubro?.VatTreatment, taxGeneral, taxReduced);
 
         return (null, new ExpenseExtras(
             request.SupplierId, supplierName, invoiceNumber, invoiceTimbrado,

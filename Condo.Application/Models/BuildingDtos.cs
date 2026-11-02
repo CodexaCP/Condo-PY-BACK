@@ -51,6 +51,13 @@ public abstract class BuildingProfileData
 
     // Configuracion
     public string? TimeZoneId { get; set; }
+
+    // Multipais: jurisdiccion (provincia / ciudad autonoma), numero de registro del administrador, mes de cierre del ejercicio
+    // y cadena de aprobacion de la liquidacion (null = no tocar).
+    public string? Jurisdiction { get; set; }
+    public string? AdministratorRegistryNumber { get; set; }
+    public int? FiscalYearEndMonth { get; set; }
+    public SettlementApprovalMode? SettlementApprovalMode { get; set; }
 }
 
 public class BuildingBankAccountDto

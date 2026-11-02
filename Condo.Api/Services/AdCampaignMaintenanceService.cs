@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Net;
 using Condo.Application.Abstractions;
 using Condo.Domain.Entities;
@@ -250,7 +251,7 @@ public sealed class AdCampaignMaintenanceService(
             ? $"<tr><td style=\"padding:4px 12px 4px 0;color:#6b7280\">Empresa</td><td><strong>{E(companyName)}</strong></td></tr>"
             : string.Empty;
         var amountRow = role == UserRole.SuperAdmin && campaign.MonthlyAmount is > 0
-            ? $"<tr><td style=\"padding:4px 12px 4px 0;color:#6b7280\">Monto mensual</td><td><strong>Gs. {campaign.MonthlyAmount:N0}</strong></td></tr>"
+            ? $"<tr><td style=\"padding:4px 12px 4px 0;color:#6b7280\">Monto mensual</td><td><strong>{Money.Format(campaign.MonthlyAmount.GetValueOrDefault())}</strong></td></tr>"
             : string.Empty;
 
         return $"""

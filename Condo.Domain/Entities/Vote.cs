@@ -9,6 +9,11 @@ public class Vote : BaseEntity
     public string? Description { get; set; }
     public decimal QuorumPercentage { get; set; } = 50;
     public string WeightType { get; set; } = "ByUnit";
+    // Regla de mayoria: "Simple" (la de siempre: porcentaje de quorum y mas votos) o "DoubleAbsolute" (mayoria absoluta sobre la
+    // totalidad de los propietarios, contada a la vez por unidades y por coeficiente: CCyC art. 2060).
+    public string MajorityRule { get; set; } = "Simple";
+    // Consulta informativa: el voto en la app no reemplaza al voto formal de la asamblea.
+    public bool IsInformative { get; set; }
     public string Status { get; set; } = "Draft";
     public DateTime? OpenedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }

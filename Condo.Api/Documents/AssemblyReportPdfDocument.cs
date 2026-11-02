@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Application.Services;
 using Condo.Domain.Enums;
@@ -426,5 +427,5 @@ public sealed class AssemblyReportPdfDocument(AssemblyReportDto report) : IDocum
 
     private static string Facturas(int count) => count == 1 ? "1 factura" : $"{count} facturas";
 
-    private static string Gs(decimal value) => $"Gs. {value:N0}";
+    private static string Gs(decimal value) => Condo.Application.Localization.Money.Format(value);
 }

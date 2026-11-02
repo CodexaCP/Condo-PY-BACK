@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Globalization;
 using Condo.Application.Abstractions;
 using Condo.Domain.Entities;
@@ -43,9 +44,10 @@ public sealed record ComprobanteCoverage(bool Exact, List<Comprobante> Covered, 
 public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService credits)
 {
     // El guarani no tiene decimales y el usuario declara montos enteros, pero los cargos (sobre todo la
-    // mora diaria, redondeada a 2 decimales) suman fracciones. Se acepta hasta medio guarani de diferencia,
+    // mora diaria, redondeada a 2 decimales) suman fracciones. Se acepta hasta media unidad minima de la moneda de diferencia,
     // igual que la app; al liquidar se imputa el pendiente exacto de cada linea.
-    private const decimal Tolerance = 0.5m;
+    // En una moneda sin centavos (guarani) es medio guarani; con centavos (peso) es medio centavo.
+    private static decimal Tolerance => 0.5m / (decimal)Math.Pow(10, Money.Current.Decimals);
 
     /// <summary>
     /// Comprobantes pendientes de las unidades (solo periodos publicados), del mas antiguo al mas
@@ -161,15 +163,15 @@ public class ComprobanteService(ICondoDbContext dbContext, OwnerCreditService cr
         {
             running += comprobante.Total;
             options.Add(options.Count == 0
-                ? $"Gs. {Gs(running)} (comprobante {comprobante.Label})"
-                : $"Gs. {Gs(running)} (hasta {comprobante.Label})");
+                ? $"{Money.Format(running)} (comprobante {comprobante.Label})"
+                : $"{Money.Format(running)} (hasta {comprobante.Label})");
         }
 
-        return $"El monto Gs. {Gs(amount)} no cubre la totalidad de un comprobante. " +
+        return $"El monto {Money.Format(amount)} no cubre la totalidad de un comprobante. " +
                "No se aceptan pagos parciales: el pago (sumado al saldo a favor si lo hay, aplicado automáticamente) debe cubrir exactamente " +
                string.Join(" o ", options) + ".";
     }
 
-    public static string Gs(decimal value) =>
-        value.ToString("N0", CultureInfo.InvariantCulture).Replace(",", ".");
+    /// <summary>Importe sin simbolo, con el formato de la moneda de la empresa.</summary>
+    public static string Gs(decimal value) => Money.Number(value);
 }

@@ -95,6 +95,7 @@ public sealed class LateFeeChangeNotifier(ICondoDbContext dbContext, ITenantCont
         LateFeeFrequency.Daily => "diario",
         LateFeeFrequency.Weekly => "semanal",
         LateFeeFrequency.Biweekly => "quincenal",
+        LateFeeFrequency.Monthly => "mensual",
         _ => frequency.ToString()
     };
 }

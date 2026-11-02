@@ -42,6 +42,7 @@ builder.Services.AddSingleton<Condo.Api.Services.ISecretProtector>(_ =>
     return new Condo.Api.Services.AesGcmSecretProtector(
         builder.Configuration["Payments:MasterKey"], builder.Configuration["Payments:MasterKeyId"], previous);
 });
+builder.Services.AddScoped<Condo.Api.Services.CompanyLocaleService>();
 builder.Services.AddScoped<Condo.Api.Services.ComprobanteService>();
 builder.Services.AddScoped<Condo.Api.Services.InvoiceDraftService>();
 builder.Services.AddScoped<Condo.Api.Services.OwnerPaymentSettlementService>();
@@ -147,6 +148,8 @@ app.UseAuthentication();
 // Despues de autenticar: el limite se cuenta por usuario.
 app.UseRateLimiter();
 app.UseAuthorization();
+// Despues de autorizar: la moneda de la empresa del usuario queda fijada para los documentos y avisos de la peticion.
+app.UseMiddleware<CompanyLocaleMiddleware>();
 app.UseMiddleware<PlanRestrictionMiddleware>();
 app.MapControllers();
 

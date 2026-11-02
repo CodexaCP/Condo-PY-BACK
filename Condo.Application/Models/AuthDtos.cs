@@ -19,6 +19,8 @@ public class LoginResponse
     public string Role { get; set; } = string.Empty;
     public string ScopeLabel { get; set; } = string.Empty;
     public bool MustChangePassword { get; set; }
+    // Pais, moneda, impuesto, vocabulario y capacidades de la empresa del usuario (Paraguay si no tiene empresa).
+    public CompanyLocaleDto Locale { get; set; } = new();
 }
 
 public class ChangePasswordRequest

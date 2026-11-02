@@ -9,6 +9,11 @@ public static partial class PersonRules
 {
     public const string Ruc = "RUC";
     public const string Cedula = "CedulaParaguaya";
+    public const string Dni = "DNI";
+    public const string Cuit = "CUIT";
+    public const string Cuil = "CUIL";
+    public const string CedulaVe = "CedulaVE";
+    public const string Rif = "RIF";
 
     public static string? NormalizeType(string? raw) => raw?.Trim() is { Length: > 0 } t ? t : null;
 
@@ -33,6 +38,21 @@ public static partial class PersonRules
         if (string.Equals(type, Cedula, StringComparison.OrdinalIgnoreCase))
             return CedulaRegex().IsMatch(value) ? null : $"{label} (cédula) solo puede tener números.";
 
+        // Documentos de otros paises: se valida el formato (largo y caracteres); el digito verificador se agrega cuando cada organismo lo confirme.
+        if (string.Equals(type, Dni, StringComparison.OrdinalIgnoreCase))
+            return DniRegex().IsMatch(value) ? null : $"{label} (DNI) debe tener entre 6 y 9 números (se aceptan puntos).";
+
+        if (string.Equals(type, Cuit, StringComparison.OrdinalIgnoreCase) || string.Equals(type, Cuil, StringComparison.OrdinalIgnoreCase))
+            return value.Count(char.IsDigit) == 11 && value.All(c => char.IsDigit(c) || c == '-')
+                ? null
+                : $"{label} ({type?.ToUpperInvariant()}) debe tener 11 dígitos (por ejemplo 20-12345678-3).";
+
+        if (string.Equals(type, CedulaVe, StringComparison.OrdinalIgnoreCase))
+            return CedulaVeRegex().IsMatch(value) ? null : $"{label} (cédula) debe ser V o E seguida de números (por ejemplo V-12345678).";
+
+        if (string.Equals(type, Rif, StringComparison.OrdinalIgnoreCase))
+            return RifRegex().IsMatch(value) ? null : $"{label} (RIF) debe empezar con una letra (J, G, V, E, P o C) y seguir con números (por ejemplo J-12345678-9).";
+
         return GenericDocumentRegex().IsMatch(value) ? null : $"{label} solo puede contener letras, números, puntos o guiones.";
     }
 
@@ -55,6 +75,15 @@ public static partial class PersonRules
 
     [GeneratedRegex(@"^[A-Za-z0-9.\-]+$")]
     private static partial Regex GenericDocumentRegex();
+
+    [GeneratedRegex(@"^[\d.]{6,12}$")]
+    private static partial Regex DniRegex();
+
+    [GeneratedRegex(@"^[VvEe]-?\d{5,9}$")]
+    private static partial Regex CedulaVeRegex();
+
+    [GeneratedRegex(@"^[JGVEPCjgvepc]-?\d{7,9}(-?\d)?$")]
+    private static partial Regex RifRegex();
 
     [GeneratedRegex(@"^\+?\d{6,20}$")]
     private static partial Regex FullPhoneRegex();

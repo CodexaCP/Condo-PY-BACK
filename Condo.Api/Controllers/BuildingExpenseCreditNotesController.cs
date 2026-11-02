@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -141,7 +142,7 @@ public class BuildingExpenseCreditNotesController(
         var applied = (await dbContext.BuildingExpenseCreditNoteDiscounts.AsNoTracking()
             .Where(x => !x.IsDeleted && x.CreditNoteId == note.Id).Select(x => x.Amount).ToListAsync(cancellationToken)).Sum();
         var remaining = note.Amount - applied;
-        if (amount > remaining) return BadRequest($"El descuento supera lo que falta aplicar de la nota (Gs. {remaining:N0}).");
+        if (amount > remaining) return BadRequest($"El descuento supera lo que falta aplicar de la nota ({Money.Format(remaining)}).");
 
         if (request.AppliedToExpenseId.HasValue)
         {
@@ -666,7 +667,7 @@ public class BuildingExpenseCreditNotesController(
         plan.ChargedTotal = charged.Sum(x => x.Amount);
         if (plan.ChargedTotal < amount)
         {
-            plan.Error = $"La nota (Gs. {amount:N0}) supera lo que se cobró de este gasto a las unidades (Gs. {plan.ChargedTotal:N0}).";
+            plan.Error = $"La nota ({Money.Format(amount)}) supera lo que se cobró de este gasto a las unidades ({Money.Format(plan.ChargedTotal)}).";
             return plan;
         }
 
@@ -857,13 +858,13 @@ public class BuildingExpenseCreditNotesController(
     // ── Mensajes y utilidades ─────────────────────────────────────────────────
 
     private static string DraftCapMessage(decimal expenseAmount) =>
-        $"La nota de crédito no puede igualar ni superar el monto pendiente del gasto (Gs. {expenseAmount:N0}). " +
+        $"La nota de crédito no puede igualar ni superar el monto pendiente del gasto ({Money.Format(expenseAmount)}). " +
         "Si el proveedor anuló el gasto completo, eliminá el gasto.";
 
     private static string PublishedCapMessage(decimal max) =>
         max <= 0m
             ? "Este gasto ya tiene acreditado todo su monto con notas de crédito anteriores."
-            : $"La nota supera lo que todavía se puede acreditar de este gasto (Gs. {max:N0}).";
+            : $"La nota supera lo que todavía se puede acreditar de este gasto ({Money.Format(max)}).";
 
     private static string UnitsWithoutOwnerMessage(IEnumerable<string> unitCodes) =>
         $"Asigná un propietario principal a las unidades {string.Join(", ", unitCodes)} antes de aplicar la nota de crédito " +

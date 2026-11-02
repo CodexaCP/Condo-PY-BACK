@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
 using QuestPDF.Fluent;
@@ -173,7 +174,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                 table.Header(header =>
                 {
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Concepto").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
 
                 var isOdd = true;
@@ -207,7 +208,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
             table.Header(header =>
             {
                 header.Cell().Background(ColorPrimary).Padding(5).Text("Resumen").FontColor(ColorWhite).Bold();
-                header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
             });
 
             AddSummaryRow(table, "Total cargado", receipt.TotalAmount, true);
@@ -253,7 +254,7 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
                 {
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Fecha").FontColor(ColorWhite).Bold();
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Método / Referencia").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Importe (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Importe ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
 
                 var isOdd = true;
@@ -310,5 +311,5 @@ public sealed class ReceiptPdfDocument(ExpenseReceiptDto receipt) : IDocument
         });
     }
 
-    private static string FormatCurrency(decimal value) => $"Gs. {value:N0}";
+    private static string FormatCurrency(decimal value) => Money.Format(value);
 }

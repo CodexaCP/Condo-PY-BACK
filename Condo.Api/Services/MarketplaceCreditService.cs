@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Data;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -184,7 +185,7 @@ public class MarketplaceCreditService(
                         SourceReference = reservation.Reference,
                         MarketplaceReservationId = reservation.Id,
                         Description = $"Saldo a favor generado por la reserva {reservation.Reference} del Marketplace ({reservation.Listing?.Title})" +
-                                      (deducted > 0m ? $" — se descontaron Gs. {deducted:N0} de deuda por gestión" : string.Empty)
+                                      (deducted > 0m ? $" — se descontaron {Money.Format(deducted)} de deuda por gestión" : string.Empty)
                     });
                 }
 
@@ -204,7 +205,7 @@ public class MarketplaceCreditService(
                         Amount = -amount,
                         ReservationId = reservation.Id,
                         Concept = $"Acreditado al saldo del propietario: reserva {reservation.Reference} ({reservation.Listing?.Title})" +
-                                  (deducted > 0m ? $" — neto de Gs. {deducted:N0} de deuda por gestión" : string.Empty),
+                                  (deducted > 0m ? $" — neto de {Money.Format(deducted)} de deuda por gestión" : string.Empty),
                         CreatedByUserId = null,
                         OccurredAtUtc = now
                     };
@@ -225,10 +226,10 @@ public class MarketplaceCreditService(
                 const string heading = "Saldo a favor acreditado";
                 var spaceName = reservation.Listing?.Title ?? "tu espacio";
                 var body = amount > 0m
-                    ? $"Se acreditaron Gs. {amount:N0} a tu saldo a favor por la reserva de {spaceName} del Marketplace. " +
-                      (deducted > 0m ? $"Se descontaron Gs. {deducted:N0} de tu deuda por gestión. " : string.Empty) +
+                    ? $"Se acreditaron {Money.Format(amount)} a tu saldo a favor por la reserva de {spaceName} del Marketplace. " +
+                      (deducted > 0m ? $"Se descontaron {Money.Format(deducted)} de tu deuda por gestión. " : string.Empty) +
                       "Se usa en tu próximo pago de expensas."
-                    : $"La reserva de {spaceName} del Marketplace se aplicó a tu deuda por gestión (Gs. {deducted:N0}): no se acreditó saldo.";
+                    : $"La reserva de {spaceName} del Marketplace se aplicó a tu deuda por gestión ({Money.Format(deducted)}): no se acreditó saldo.";
                 db.Notifications.Add(new Notification
                 {
                     CompanyId = reservation.CompanyId,
@@ -375,7 +376,7 @@ public class MarketplaceCreditService(
                     new { movement.Amount, reservation.Reference, Reason = cleanReason });
 
                 const string heading = "Saldo a favor revertido";
-                var body = $"Se revirtió la acreditación de Gs. {amount:N0} de la reserva {reservation.Reference}. Motivo: {cleanReason}";
+                var body = $"Se revirtió la acreditación de {Money.Format(amount)} de la reserva {reservation.Reference}. Motivo: {cleanReason}";
                 db.Notifications.Add(new Notification
                 {
                     CompanyId = reservation.CompanyId,

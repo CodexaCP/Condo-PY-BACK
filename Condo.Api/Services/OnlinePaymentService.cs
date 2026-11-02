@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Data;
 using System.Text.Json;
 using Condo.Application.Abstractions;
@@ -820,7 +821,7 @@ public class OnlinePaymentService(
         if ((await NoticeRules.BuildingsWithActiveAsync(db, [buildingId], NoticeKind.PaymentReceived, ct)).Count == 0) return;
 
         var title = "Tu pago online fue aprobado";
-        var body = $"Tu pago {payment.Reference} por Gs. {ComprobanteService.Gs(payment.DeclaredAmount)} fue aprobado. Toca para ver más detalles.";
+        var body = $"Tu pago {payment.Reference} por {Money.Format(payment.DeclaredAmount)} fue aprobado. Toca para ver más detalles.";
         db.Notifications.Add(new Notification
         {
             CompanyId = payment.CompanyId, RecipientId = payment.OwnerId, Type = NotificationType.PaymentApproved,
@@ -847,7 +848,7 @@ public class OnlinePaymentService(
             .ToListAsync(ct);
 
         var title = "Pago online para revisar";
-        var body = $"El pago online {intent.Number} de {building.Name} por Gs. {ComprobanteService.Gs(intent.Amount)} no se pudo aplicar: {intent.ReviewReason}";
+        var body = $"El pago online {intent.Number} de {building.Name} por {Money.Format(intent.Amount)} no se pudo aplicar: {intent.ReviewReason}";
         foreach (var managerId in managerIds)
         {
             db.Notifications.Add(new Notification

@@ -5,6 +5,8 @@ namespace Condo.Application.Models;
 public class ExpenseSettlementSummaryDto
 {
     public Guid? Id { get; set; }
+    // false = el edificio publica sin revision del presidente (Building.SettlementApprovalMode = ManagerAdmin).
+    public bool RequiresPresidentReview { get; set; } = true;
     public Guid ExpensePeriodId { get; set; }
     public Guid BuildingId { get; set; }
     public string ExpensePeriodName { get; set; } = string.Empty;

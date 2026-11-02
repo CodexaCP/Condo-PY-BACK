@@ -77,7 +77,15 @@ public class FinanceVatService(ICondoDbContext dbContext)
 
         rows = rows.OrderBy(r => r.Date).ThenBy(r => r.SupplierName, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.DocumentNumber).ToList();
 
-        var totals = new[] { 10m, 5m, 0m }.Select(rate =>
+        // Columnas del libro: la tasa general y la reducida de la empresa del edificio (Paraguay: 10 y 5) y exento.
+        var companyRates = await dbContext.Buildings.AsNoTracking()
+            .Where(b => b.Id == buildingId)
+            .Select(b => new { b.Company!.TaxGeneralRate, b.Company.TaxReducedRate })
+            .FirstOrDefaultAsync(ct);
+        var bookRates = companyRates is null
+            ? new[] { 10m, 5m, 0m }
+            : new[] { companyRates.TaxGeneralRate, companyRates.TaxReducedRate }.Where(r => r.HasValue).Select(r => r!.Value).Append(0m).Distinct().ToArray();
+        var totals = bookRates.Select(rate =>
         {
             var own = rows.Where(r => r.VatRate == rate).ToList();
             return new VatRateTotalsDto

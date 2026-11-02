@@ -1,5 +1,6 @@
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -40,7 +41,7 @@ public class VotesController(
             .Select(x => new
             {
                 x.Id, x.BuildingId, BuildingName = x.Building.Name,
-                x.Title, x.Description, x.QuorumPercentage, x.WeightType, x.Status,
+                x.Title, x.Description, x.QuorumPercentage, x.WeightType, x.MajorityRule, x.IsInformative, x.Status,
                 x.OpenedAtUtc, x.ClosedAtUtc, x.CreatedAtUtc,
                 CreatedByName = x.CreatedBy != null ? x.CreatedBy.FullName : string.Empty,
                 OptionCount = x.Options.Count(),
@@ -67,6 +68,7 @@ public class VotesController(
                 Id = v.Id, BuildingId = v.BuildingId, BuildingName = v.BuildingName,
                 Title = v.Title, Description = v.Description,
                 QuorumPercentage = v.QuorumPercentage, WeightType = v.WeightType,
+                MajorityRule = v.MajorityRule, IsInformative = v.IsInformative,
                 Status = v.Status, OpenedAtUtc = v.OpenedAtUtc, ClosedAtUtc = v.ClosedAtUtc,
                 CreatedByName = v.CreatedByName, CreatedAtUtc = v.CreatedAtUtc,
                 TotalUnits = totalUnits, ParticipatingUnits = v.CastCount,
@@ -110,6 +112,8 @@ public class VotesController(
             Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             QuorumPercentage = request.QuorumPercentage,
             WeightType = request.WeightType,
+            MajorityRule = request.MajorityRule ?? "Simple",
+            IsInformative = request.IsInformative ?? await DefaultInformativeAsync(request.BuildingId, cancellationToken),
             Status = "Draft",
             CreatedByUserId = tenant.UserId
         };
@@ -144,6 +148,8 @@ public class VotesController(
         vote.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
         vote.QuorumPercentage = request.QuorumPercentage;
         vote.WeightType = request.WeightType;
+        if (request.MajorityRule is not null) vote.MajorityRule = request.MajorityRule;
+        if (request.IsInformative.HasValue) vote.IsInformative = request.IsInformative.Value;
 
         // Replace options only if no casts exist yet
         if (!vote.Casts.Any())
@@ -312,6 +318,7 @@ public class VotesController(
         var totalCasts = vote.Casts.Count;
         var totalUnits = allUnits.Count;
         var quorumReached = totalUnits > 0 && (totalCasts * 100m / totalUnits) >= vote.QuorumPercentage;
+        var totalCoefficient = allUnits.Sum(x => x.Coefficient);
 
         var options = vote.Options.Select(opt =>
         {
@@ -321,7 +328,15 @@ public class VotesController(
             var pct = vote.WeightType == "ByCoefficient"
                 ? (totalWeight > 0 ? Math.Round(castWeight * 100m / totalWeight, 1) : 0)
                 : (totalCasts > 0 ? Math.Round(castCount * 100m / totalCasts, 1) : 0);
-            return new VoteOptionDto { Id = opt.Id, Label = opt.Label, DisplayOrder = opt.DisplayOrder, CastCount = castCount, CastWeight = castWeight, Percentage = pct };
+            // Mayoria absoluta sobre la totalidad: se mide contra todas las unidades y todo el coeficiente del edificio, voten o no.
+            var pctUnits = totalUnits > 0 ? Math.Round(castCount * 100m / totalUnits, 2) : 0m;
+            var pctCoefficient = totalCoefficient > 0 ? Math.Round(castWeight * 100m / totalCoefficient, 2) : 0m;
+            return new VoteOptionDto
+            {
+                Id = opt.Id, Label = opt.Label, DisplayOrder = opt.DisplayOrder, CastCount = castCount, CastWeight = castWeight, Percentage = pct,
+                PercentOfTotalUnits = pctUnits, PercentOfTotalCoefficient = pctCoefficient,
+                HasAbsoluteMajority = pctUnits > 50m && pctCoefficient > 50m
+            };
         }).ToList();
 
         var units = allUnits.Select(u =>
@@ -340,6 +355,8 @@ public class VotesController(
             Id = vote.Id, BuildingId = vote.BuildingId, BuildingName = vote.Building.Name,
             Title = vote.Title, Description = vote.Description,
             QuorumPercentage = vote.QuorumPercentage, WeightType = vote.WeightType,
+            MajorityRule = vote.MajorityRule, IsInformative = vote.IsInformative,
+            ApprovedOptionId = vote.MajorityRule == "DoubleAbsolute" ? options.FirstOrDefault(o => o.HasAbsoluteMajority)?.Id : null,
             Status = vote.Status, OpenedAtUtc = vote.OpenedAtUtc, ClosedAtUtc = vote.ClosedAtUtc,
             CreatedByName = vote.CreatedBy?.FullName ?? string.Empty,
             CreatedAtUtc = vote.CreatedAtUtc,
@@ -347,6 +364,15 @@ public class VotesController(
             QuorumReached = quorumReached,
             Options = options, Units = units
         };
+    }
+
+    // Fuera de Paraguay el voto en la app es una consulta informativa por defecto: que valga como voto formal lo decide un abogado local.
+    private async Task<bool> DefaultInformativeAsync(Guid buildingId, CancellationToken ct)
+    {
+        var companyId = await GetBuildingCompanyIdAsync(buildingId, ct);
+        if (companyId is null) return false;
+        var country = await dbContext.Companies.AsNoTracking().Where(x => x.Id == companyId.Value).Select(x => x.CountryCode).FirstOrDefaultAsync(ct);
+        return !string.Equals(country ?? CountryProfiles.Paraguay, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Guid?> GetBuildingCompanyIdAsync(Guid buildingId, CancellationToken ct)
@@ -387,6 +413,7 @@ public class VotesController(
         if (r.Title.Length > 200) return "El título no puede superar 200 caracteres.";
         if (r.QuorumPercentage < 1 || r.QuorumPercentage > 100) return "El quórum debe estar entre 1 y 100.";
         if (r.WeightType != "ByUnit" && r.WeightType != "ByCoefficient") return "Tipo de peso inválido.";
+        if (r.MajorityRule is not null && r.MajorityRule != "Simple" && r.MajorityRule != "DoubleAbsolute") return "Regla de mayoría inválida.";
         var labels = r.OptionLabels.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
         if (labels.Count < 2) return "Se necesitan al menos 2 opciones.";
         return null;

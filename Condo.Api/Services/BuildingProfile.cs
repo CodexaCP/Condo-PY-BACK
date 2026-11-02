@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
 
@@ -10,7 +11,8 @@ public static partial class BuildingProfile
 {
     public const int MaxBankAccounts = 10;
 
-    public static string? Validate(BuildingProfileData p, IReadOnlyList<BuildingBankAccountDto>? bankAccounts, string? currentRuc, bool canEditFinancial)
+    public static string? Validate(BuildingProfileData p, IReadOnlyList<BuildingBankAccountDto>? bankAccounts, string? currentRuc, bool canEditFinancial,
+        string countryCode = CountryProfiles.Paraguay)
     {
         string? error =
             Max(p.Department, 100, "El departamento") ??
@@ -27,8 +29,13 @@ public static partial class BuildingProfile
             Max(p.BylawsFileName, 200, "El nombre del reglamento") ??
             Max(p.AdministratorName, 200, "El administrador responsable") ??
             Max(p.EmergencyContactName, 200, "El contacto de emergencia") ??
-            Max(p.TimeZoneId, 60, "La zona horaria");
+            Max(p.TimeZoneId, 60, "La zona horaria") ??
+            Max(p.Jurisdiction, 100, "La jurisdicción") ??
+            Max(p.AdministratorRegistryNumber, 50, "El número de registro del administrador");
         if (error is not null) return error;
+
+        if (p.FiscalYearEndMonth is < 1 or > 12) return "El mes de cierre del ejercicio debe estar entre 1 y 12.";
+        if (p.SettlementApprovalMode.HasValue && !Enum.IsDefined(p.SettlementApprovalMode.Value)) return "La cadena de aprobación de la liquidación no es válida.";
 
         if (p.YearBuilt is { } year && (year < 1800 || year > DateTime.UtcNow.Year + 5))
             return "El año de construcción no es válido.";
@@ -67,8 +74,8 @@ public static partial class BuildingProfile
 
         // El RUC se valida solo si lo cambian: no se bloquea guardar otros datos por un RUC viejo ya cargado.
         var ruc = TrimOrNull(p.Ruc);
-        if (ruc is not null && !string.Equals(ruc, TrimOrNull(currentRuc), StringComparison.Ordinal) && !IsValidRuc(ruc))
-            return "El RUC no es válido: usá el formato 80012345-0 con su dígito verificador correcto.";
+        if (ruc is not null && !string.Equals(ruc, TrimOrNull(currentRuc), StringComparison.Ordinal) && !IsValidTaxId(ruc, countryCode))
+            return TaxIdError(countryCode);
 
         var invoiceEmail = TrimOrNull(p.InvoiceEmail);
         if (invoiceEmail is not null && !EmailRegex().IsMatch(invoiceEmail))
@@ -97,6 +104,28 @@ public static partial class BuildingProfile
         }
 
         return null;
+    }
+
+    // Identificador fiscal del edificio segun el pais de su empresa. Paraguay conserva su validacion con digito verificador. Argentina (CUIT)
+    // se valida por formato (11 digitos, con o sin guiones) y no por digito verificador hasta confirmarlo con ARCA; los demas paises, solo
+    // por caracteres permitidos.
+    public static bool IsValidTaxId(string value, string countryCode)
+    {
+        var v = value.Trim();
+        if (string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase)) return IsValidRuc(v);
+        if (string.Equals(countryCode, CountryProfiles.Argentina, StringComparison.OrdinalIgnoreCase))
+            return v.Count(char.IsDigit) == 11 && v.All(c => char.IsDigit(c) || c == '-');
+        return GenericTaxIdRegex().IsMatch(v);
+    }
+
+    public static string TaxIdError(string countryCode)
+    {
+        var label = CountryProfiles.FindOrDefault(countryCode).TaxIdLabel;
+        return string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase)
+            ? "El RUC no es válido: usá el formato 80012345-0 con su dígito verificador correcto."
+            : string.Equals(countryCode, CountryProfiles.Argentina, StringComparison.OrdinalIgnoreCase)
+                ? $"El {label} no es válido: debe tener 11 dígitos (por ejemplo 30-12345678-9)."
+                : $"El {label} no es válido: solo letras, números, puntos y guiones.";
     }
 
     // Formato 80012345-0 (base de 5 a 9 digitos, guion y digito verificador).
@@ -153,6 +182,10 @@ public static partial class BuildingProfile
         e.EmergencyContactPhone = NormalizePhone(p.EmergencyContactPhone);
 
         e.TimeZoneId = TrimOrNull(p.TimeZoneId);
+        e.Jurisdiction = TrimOrNull(p.Jurisdiction);
+        e.AdministratorRegistryNumber = TrimOrNull(p.AdministratorRegistryNumber);
+        e.FiscalYearEndMonth = p.FiscalYearEndMonth;
+        if (p.SettlementApprovalMode.HasValue) e.SettlementApprovalMode = p.SettlementApprovalMode.Value;
 
         if (!canEditFinancial) return;
 
@@ -244,6 +277,10 @@ public static partial class BuildingProfile
         target.GraceDays = e.GraceDays;
         target.PaymentInstructions = e.PaymentInstructions;
         target.TimeZoneId = e.TimeZoneId;
+        target.Jurisdiction = e.Jurisdiction;
+        target.AdministratorRegistryNumber = e.AdministratorRegistryNumber;
+        target.FiscalYearEndMonth = e.FiscalYearEndMonth;
+        target.SettlementApprovalMode = e.SettlementApprovalMode;
     }
 
     public static BuildingBankAccountDto ToDto(BuildingBankAccount a) => new()
@@ -271,6 +308,9 @@ public static partial class BuildingProfile
 
     [GeneratedRegex(@"^(\d{5,9})-(\d)$")]
     private static partial Regex RucRegex();
+
+    [GeneratedRegex(@"^[A-Za-z0-9.\-]{3,20}$")]
+    private static partial Regex GenericTaxIdRegex();
 
     [GeneratedRegex(@"^\+?\d{6,20}$")]
     private static partial Regex PhoneRegex();

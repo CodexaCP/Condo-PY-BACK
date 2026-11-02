@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Api.Documents;
 using Condo.Api.Services;
 using Condo.Application.Abstractions;
@@ -630,7 +631,8 @@ public class ExpensePeriodsController(
             return BadRequest($"Este periodo tiene {legacyManualCharges} cargo(s) manual(es) anterior(es) (legacy) que no vienen de la liquidación. Elimínelos desde Gastos y cargos › Cargos antes de aprobar: los cargos ahora se generan solo desde los gastos.");
         }
 
-        if (period.Building?.PresidentUserId is null)
+        var requiresPresident = period.Building?.SettlementApprovalMode != SettlementApprovalMode.ManagerAdmin;
+        if (requiresPresident && period.Building?.PresidentUserId is null)
         {
             return BadRequest("Este edificio no tiene un presidente de consorcio asignado. Asigná uno desde la ficha del propietario correspondiente antes de aprobar la liquidación.");
         }
@@ -677,6 +679,13 @@ public class ExpensePeriodsController(
         settlement.PresidentRejectedAtUtc = null;
         settlement.PresidentRejectedByUserId = null;
         period.Status = ExpensePeriodStatus.Closed;
+
+        if (!requiresPresident)
+        {
+            // Sin revision del presidente: la liquidacion queda lista para que el Administrador de empresa la publique.
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Ok(await BuildSettlementSummaryAsync(period, cancellationToken));
+        }
 
         var pendingReviewTitle = "Liquidación pendiente de tu revisión";
         var pendingReviewBody = $"Se emitió un nuevo período de expensas ({period.Name}) para {period.Building.Name} y se encuentra pendiente de tu revisión como presidente del consorcio.";
@@ -930,7 +939,7 @@ public class ExpensePeriodsController(
                               "Cuando él la apruebe, el Administrador de empresa podrá publicarla.");
         }
 
-        if (!settlement.PresidentApprovedByUserId.HasValue)
+        if (period.Building?.SettlementApprovalMode != SettlementApprovalMode.ManagerAdmin && !settlement.PresidentApprovedByUserId.HasValue)
         {
             return Prohibited("No se puede publicar: la liquidación todavía no fue aprobada por el presidente del consorcio.");
         }
@@ -1457,6 +1466,20 @@ public class ExpensePeriodsController(
             ? TemplateImageReader.Read(env.WebRootPath, period.Building.SettlementTemplateUrl)
             : null;
 
+        using var moneyScope = await MoneyScope.ForCompanyAsync(dbContext, period.CompanyId, cancellationToken);
+        // Fuera de Paraguay la liquidacion lleva el vocabulario del pais y, si estan cargados, el registro del administrador y la jurisdiccion.
+        var countryCode = await dbContext.Companies.AsNoTracking().Where(x => x.Id == period.CompanyId)
+            .Select(x => x.CountryCode).FirstOrDefaultAsync(cancellationToken) ?? CountryProfiles.Paraguay;
+        string? documentTitle = null;
+        if (!string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase))
+            documentTitle = CountryProfiles.FindOrDefault(countryCode).Glossary.GetValueOrDefault("liquidacion");
+        var administratorLine = string.Join(" · ", new[]
+        {
+            string.IsNullOrWhiteSpace(period.Building?.AdministratorName) ? null : $"Administrador: {period.Building!.AdministratorName}",
+            string.IsNullOrWhiteSpace(period.Building?.AdministratorRegistryNumber) ? null : $"Registro N.º {period.Building!.AdministratorRegistryNumber}",
+            string.IsNullOrWhiteSpace(period.Building?.Jurisdiction) ? null : period.Building!.Jurisdiction
+        }.Where(x => x is not null));
+
         var document = new SettlementPdfDocument(
             summary,
             period.StartDate.ToString("dd/MM/yyyy"),
@@ -1468,7 +1491,9 @@ public class ExpensePeriodsController(
             standardTemplate: settlementTemplate is null,
             backgroundImage: settlementTemplate,
             fieldPositionsJson: period.Building?.SettlementFieldPositionsJson,
-            hideFrame: period.Building?.SettlementHideFrame ?? true);
+            hideFrame: period.Building?.SettlementHideFrame ?? true,
+            documentTitle: documentTitle,
+            administratorLine: string.IsNullOrWhiteSpace(administratorLine) || string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase) ? null : administratorLine);
 
         var pdfBytes = document.GeneratePdf();
         var fileName = $"liquidacion_{summary.ExpensePeriodName.Replace(" ", "_")}_{summary.BuildingName.Replace(" ", "_")}.pdf";
@@ -1741,6 +1766,7 @@ public class ExpensePeriodsController(
             RejectedByUserName = settlement.RejectedByUserId.HasValue
                 ? userNames.GetValueOrDefault(settlement.RejectedByUserId.Value, string.Empty)
                 : string.Empty,
+            RequiresPresidentReview = period.Building?.SettlementApprovalMode != SettlementApprovalMode.ManagerAdmin,
             PresidentUserId = period.Building?.PresidentUserId,
             PresidentUserName = period.Building?.PresidentUserId.HasValue == true
                 ? userNames.GetValueOrDefault(period.Building.PresidentUserId!.Value, string.Empty)

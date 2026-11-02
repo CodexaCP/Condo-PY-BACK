@@ -20,6 +20,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/payment-connections")]
+[RequiresCapability("OnlinePayments")]
 public class PaymentConnectionsController(
     ICondoDbContext dbContext, ITenantContext tenantContext, IAccessScopeService accessScope,
     ISecretProtector protector, IConfiguration configuration, ILogger<PaymentConnectionsController> logger) : ControllerBase

@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Application.Services;
 using Condo.Domain.Enums;
@@ -25,7 +26,10 @@ public sealed class SettlementPdfDocument(
     bool standardTemplate = true,
     byte[]? backgroundImage = null,
     string? fieldPositionsJson = null,
-    bool hideFrame = true) : IDocument
+    bool hideFrame = true,
+    // Multipais: titulo con el vocabulario del pais (null = el de siempre) y linea del administrador (nombre, registro, jurisdiccion).
+    string? documentTitle = null,
+    string? administratorLine = null) : IDocument
 {
     // Width: ancho del bloque; RowHeight: alto de cada fila del cuerpo (solo en la key "filas"); Hidden: no
     // dibujar el bloque (el papel ya lo trae impreso).
@@ -760,7 +764,7 @@ public sealed class SettlementPdfDocument(
                 IsReserveFund = c.Category == "ReserveFund"
             })).ToList();
 
-    private static string FormatNumber(decimal value) => value.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"));
+    private static string FormatNumber(decimal value) => Money.Number(value);
 
     // Ancho de los bloques: el estandar, recortado para que nunca se salgan de la hoja si se arrastran a la derecha.
     private static float BlockWidthAt(float x, float width = BlockWidth) => Math.Max(40f, Math.Min(width, PageWidth - x - 4));
@@ -774,7 +778,7 @@ public sealed class SettlementPdfDocument(
                 row.RelativeItem().Column(c =>
                 {
                     c.Item().Text("EXPENSES").FontSize(16).Bold().FontColor(p.Primary);
-                    c.Item().Text("Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
+                    c.Item().Text(documentTitle ?? "Liquidacion de Expensas").FontSize(11).FontColor(p.Accent);
                 });
                 row.ConstantItem(200).AlignRight().Column(c =>
                 {
@@ -788,6 +792,9 @@ public sealed class SettlementPdfDocument(
                 row.RelativeItem().Text($"Vigencia: {periodStartDate} al {periodEndDate}").FontColor(p.Gray);
                 row.RelativeItem().AlignRight().Text($"Vencimiento: {periodDueDate}").FontColor(p.Gray);
             });
+
+            if (!string.IsNullOrWhiteSpace(administratorLine))
+                col.Item().PaddingTop(2).Text(administratorLine).FontColor(p.Gray).FontSize(8.5f);
 
             col.Item().PaddingTop(8).LineHorizontal(1.5f).LineColor(p.Primary);
         });
@@ -825,7 +832,7 @@ public sealed class SettlementPdfDocument(
                     header.Cell().Background(p.HeaderFill).Padding(5)
                         .Text("Concepto").FontColor(p.HeaderText).Bold();
                     header.Cell().Background(p.HeaderFill).Padding(5)
-                        .AlignRight().Text("Monto (Gs.)").FontColor(p.HeaderText).Bold();
+                        .AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(p.HeaderText).Bold();
                 });
 
                 AddSummaryRow(table, "Total gastos del edificio", summary.TotalBuildingExpenses, false);
@@ -909,7 +916,7 @@ public sealed class SettlementPdfDocument(
                 table.Header(header =>
                 {
                     header.Cell().Background(p.HeaderFill).Padding(4).Text("Concepto").FontColor(p.HeaderText).Bold();
-                    header.Cell().Background(p.HeaderFill).Padding(4).AlignRight().Text("Monto (Gs.)").FontColor(p.HeaderText).Bold();
+                    header.Cell().Background(p.HeaderFill).Padding(4).AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(p.HeaderText).Bold();
                 });
 
                 var itemAlt = true;
@@ -1006,5 +1013,5 @@ public sealed class SettlementPdfDocument(
         });
     }
 
-    private static string FormatCurrency(decimal value) => $"Gs. {value:N0}";
+    private static string FormatCurrency(decimal value) => Money.Format(value);
 }

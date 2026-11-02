@@ -100,7 +100,7 @@ public class BuildingConfigPoliciesController(
     private static string? ValidateLateFee(UpdateLateFeePolicyRequest request)
     {
         if (request.RatePercentage is < 0m or > 100m) return "La tasa de interés por mora debe estar entre 0 y 100.";
-        if (request.RatePercentage is > 0m && !request.Frequency.HasValue) return "Definí el incremento de la mora (diario, semanal o quincenal).";
+        if (request.RatePercentage is > 0m && !request.Frequency.HasValue) return "Definí el incremento de la mora (diario, semanal, quincenal o mensual).";
         if (request.Frequency.HasValue && !Enum.IsDefined(request.Frequency.Value)) return "El incremento de la mora no es válido.";
         if (request.GraceDays is < 0 or > 365) return "Los días de gracia deben estar entre 0 y 365.";
         if (request.CapPercentage is < 0m or > MaxCapPercentage) return $"El tope de la mora debe estar entre 0 y {MaxCapPercentage:0}.";

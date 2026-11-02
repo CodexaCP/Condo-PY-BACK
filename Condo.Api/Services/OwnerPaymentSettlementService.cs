@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Abstractions;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -247,7 +248,7 @@ public class OwnerPaymentSettlementService(ICondoDbContext dbContext, OwnerCredi
                 var take = Math.Min(remaining, comprobante.Total);
                 credits.ConsumeLots(lots, take, ownerPayment.OwnerId, companyId, CreditApplyMode.OnPaymentApproval,
                     paymentRecord.Id, null, $"Aplicado automáticamente al comprobante {comprobante.Label}.");
-                paymentRecord.Notes += $" Incluye Gs. {ComprobanteService.Gs(take)} de saldo a favor.";
+                paymentRecord.Notes += $" Incluye {Money.Format(take)} de saldo a favor.";
                 remaining -= take;
             }
 

@@ -99,6 +99,13 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Company>().Property(x => x.ContactPhonePrefix).HasMaxLength(10);
         modelBuilder.Entity<Company>().Property(x => x.ContactPhone).HasMaxLength(30);
         modelBuilder.Entity<Company>().Property(x => x.ContactEmail).HasMaxLength(160);
+        // Multipais: las empresas existentes quedan en Paraguay (guaranies, IVA 10 / 5).
+        modelBuilder.Entity<Company>().Property(x => x.CountryCode).HasMaxLength(2).HasDefaultValue("PY").ValueGeneratedNever();
+        modelBuilder.Entity<Company>().Property(x => x.CurrencyCode).HasMaxLength(3).HasDefaultValue("PYG").ValueGeneratedNever();
+        modelBuilder.Entity<Company>().Property(x => x.LocaleCode).HasMaxLength(10).HasDefaultValue("es-PY").ValueGeneratedNever();
+        modelBuilder.Entity<Company>().Property(x => x.TaxName).HasMaxLength(30).HasDefaultValue("IVA").ValueGeneratedNever();
+        modelBuilder.Entity<Company>().Property(x => x.TaxGeneralRate).HasColumnType("decimal(5,2)").HasDefaultValue(10m).ValueGeneratedNever();
+        modelBuilder.Entity<Company>().Property(x => x.TaxReducedRate).HasColumnType("decimal(5,2)").HasDefaultValue(5m).ValueGeneratedNever();
 
         // ── ApplicationUser ────────────────────────────────────────────────────
         modelBuilder.Entity<ApplicationUser>()
@@ -203,6 +210,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.ReserveUsePolicy).HasConversion<string>().HasMaxLength(40).HasDefaultValue(ReserveUsePolicy.FreeUse).ValueGeneratedNever();
         modelBuilder.Entity<FinanceSettings>().Property(x => x.BudgetWarnPercent).HasDefaultValue(10).ValueGeneratedNever();
         modelBuilder.Entity<Building>().Property(x => x.ReserveUseThreshold).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Building>().Property(x => x.Jurisdiction).HasMaxLength(100);
+        modelBuilder.Entity<Building>().Property(x => x.AdministratorRegistryNumber).HasMaxLength(50);
+        modelBuilder.Entity<Building>().Property(x => x.SettlementApprovalMode).HasConversion<string>().HasMaxLength(30)
+            .HasDefaultValue(SettlementApprovalMode.ManagerPresidentAdmin).ValueGeneratedNever();
         modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateUrl).HasMaxLength(500);
         modelBuilder.Entity<Building>().Property(x => x.InvoiceTemplateFileName).HasMaxLength(200);
         modelBuilder.Entity<Building>().Property(x => x.CreditNoteTemplateUrl).HasMaxLength(500);
@@ -722,6 +733,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Vote>().Property(x => x.Title).HasMaxLength(200);
         modelBuilder.Entity<Vote>().Property(x => x.Description).HasMaxLength(1000);
         modelBuilder.Entity<Vote>().Property(x => x.WeightType).HasMaxLength(20);
+        modelBuilder.Entity<Vote>().Property(x => x.MajorityRule).HasMaxLength(20).HasDefaultValue("Simple").ValueGeneratedNever();
         modelBuilder.Entity<Vote>().Property(x => x.Status).HasMaxLength(20);
         modelBuilder.Entity<VoteOption>().Property(x => x.Label).HasMaxLength(200);
         modelBuilder.Entity<Vote>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });

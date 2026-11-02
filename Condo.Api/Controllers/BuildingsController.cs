@@ -1,5 +1,6 @@
 using Condo.Api.Documents;
 using Condo.Api.Services;
+using Condo.Application.Localization;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -118,7 +119,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("El modo de facturación es obligatorio.");
         }
 
-        var validationError = ValidateRequest(request, currentRuc: null, canEditFinancial: true);
+        var validationError = ValidateRequest(request, currentRuc: null, canEditFinancial: true,
+            countryCode: await CountryOfAsync(request.CompanyId ?? tenantContext.CompanyId, cancellationToken));
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -255,7 +257,8 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return BadRequest("El modo de facturación es obligatorio.");
         }
 
-        var validationError = ValidateRequest(request, entity.Ruc, canEditFinancial: !isBuildingManager);
+        var validationError = ValidateRequest(request, entity.Ruc, canEditFinancial: !isBuildingManager,
+            countryCode: await CountryOfAsync(entity.CompanyId, cancellationToken));
         if (validationError is not null)
         {
             return BadRequest(validationError);
@@ -435,7 +438,17 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    private static string? ValidateRequest(BuildingUpsertRequest request, string? currentRuc, bool canEditFinancial)
+    // Pais de la empresa del edificio (Paraguay si no tiene empresa): decide como se valida el identificador fiscal.
+    private async Task<string> CountryOfAsync(Guid? companyId, CancellationToken cancellationToken)
+    {
+        if (companyId is null) return CountryProfiles.Paraguay;
+        return await dbContext.Companies.AsNoTracking()
+            .Where(x => x.Id == companyId.Value)
+            .Select(x => x.CountryCode)
+            .FirstOrDefaultAsync(cancellationToken) ?? CountryProfiles.Paraguay;
+    }
+
+    private static string? ValidateRequest(BuildingUpsertRequest request, string? currentRuc, bool canEditFinancial, string countryCode)
     {
         if (string.IsNullOrWhiteSpace(request.Name.Trim()))
         {
@@ -475,7 +488,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
 
         if (request.LateFeeRatePercentage is > 0m && !request.LateFeeFrequency.HasValue)
         {
-            return "Definí el incremento de la mora (diario, semanal o quincenal).";
+            return "Definí el incremento de la mora (diario, semanal, quincenal o mensual).";
         }
 
         if (request.UseStandardTemplates == false &&
@@ -486,7 +499,7 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             return "Adjuntá los 3 modelos (factura, nota de crédito y liquidación) o marcá \"Usar modelos estándar de Expenses\".";
         }
 
-        return BuildingProfile.Validate(request, request.BankAccounts, currentRuc, canEditFinancial);
+        return BuildingProfile.Validate(request, request.BankAccounts, currentRuc, canEditFinancial, countryCode);
     }
 
     // Con modelos estandar no se guardan adjuntos: si el edificio vuelve al estandar se limpian los propios.

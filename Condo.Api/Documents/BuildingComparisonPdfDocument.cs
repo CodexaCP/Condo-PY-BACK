@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -134,5 +135,5 @@ public sealed class BuildingComparisonPdfDocument(BuildingComparisonReportDto re
         });
     }
 
-    private static string FormatGs(decimal value) => $"Gs. {value:N0}";
+    private static string FormatGs(decimal value) => Money.Format(value);
 }

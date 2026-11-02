@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Abstractions;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -8,7 +9,7 @@ namespace Condo.Api.Services;
 public sealed record LateFeeRunResult(int ChargesCreated, int UnitsNotified);
 
 /// <summary>
-/// Mora automatica: para cada edificio con tasa configurada genera un recargo por cada intervalo (diario, semanal o quincenal) transcurrido
+/// Mora automatica: para cada edificio con tasa configurada genera un recargo por cada intervalo (diario, semanal, quincenal o mensual) transcurrido
 /// desde el corte de mora del periodo. Interes simple: cada intervalo suma tasa % de la base adeudada (sin capitalizar recargos previos).
 /// Respeta la politica del edificio: que cargos entran en la base (reserva, extraordinario, individual), la mora minima por intervalo, el
 /// tope acumulado por unidad y periodo, y las unidades exoneradas. Deja de acumular cuando la unidad salda su deuda del periodo; un pago
@@ -29,6 +30,8 @@ public sealed class LateFeeAccrualRunner(ICondoDbContext dbContext, PushDispatch
         var notified = 0;
         foreach (var building in buildings)
         {
+            // Los textos de la mora salen en la moneda de la empresa del edificio.
+            using var moneyScope = await MoneyScope.ForCompanyAsync(dbContext, building.CompanyId ?? Guid.Empty, ct);
             var (c, n) = await RunBuildingAsync(building, today, ct);
             created += c;
             notified += n;
@@ -44,6 +47,7 @@ public sealed class LateFeeAccrualRunner(ICondoDbContext dbContext, PushDispatch
             LateFeeFrequency.Daily => 1,
             LateFeeFrequency.Weekly => 7,
             LateFeeFrequency.Biweekly => 15,
+            LateFeeFrequency.Monthly => 30,
             _ => 0
         };
         if (intervalDays == 0) return (0, 0);
@@ -149,9 +153,9 @@ public sealed class LateFeeAccrualRunner(ICondoDbContext dbContext, PushDispatch
                         AutoLateFeeIntervalIndex = index,
                         Concept = $"Mora {rate:0.##}% ({LateFeeFrequencyLabel(building.LateFeeFrequency.Value)}) #{index} — {period.Name}",
                         Amount = amount,
-                        Notes = $"Mora automática: {rate:0.##}% sobre expensa original de {baseAmount:N0}. Intervalo {index} desde {threshold:yyyy-MM-dd}."
-                                + (minApplied && !capApplied ? $" Se aplicó la mora mínima de {building.LateFeeMinAmount!.Value:N0}." : string.Empty)
-                                + (capApplied ? $" Llegó al tope de {building.LateFeeCapPercentage!.Value:0.##}% ({capAmount!.Value:N0})." : string.Empty)
+                        Notes = $"Mora automática: {rate:0.##}% sobre expensa original de {Money.Number(baseAmount)}. Intervalo {index} desde {threshold:yyyy-MM-dd}."
+                                + (minApplied && !capApplied ? $" Se aplicó la mora mínima de {Money.Number(building.LateFeeMinAmount!.Value)}." : string.Empty)
+                                + (capApplied ? $" Llegó al tope de {building.LateFeeCapPercentage!.Value:0.##}% ({Money.Number(capAmount!.Value)})." : string.Empty)
                     });
                     alreadyLate += amount;
 
@@ -231,6 +235,7 @@ public sealed class LateFeeAccrualRunner(ICondoDbContext dbContext, PushDispatch
         LateFeeFrequency.Daily => "diario",
         LateFeeFrequency.Weekly => "semanal",
         LateFeeFrequency.Biweekly => "quincenal",
+        LateFeeFrequency.Monthly => "mensual",
         _ => frequency.ToString()
     };
 }

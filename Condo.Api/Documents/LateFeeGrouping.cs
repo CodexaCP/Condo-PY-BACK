@@ -58,6 +58,7 @@ public static class LateFeeGrouping
         "diario" => count == 1 ? "día" : "días",
         "semanal" => count == 1 ? "semana" : "semanas",
         "quincenal" => count == 1 ? "quincena" : "quincenas",
+        "mensual" => count == 1 ? "mes" : "meses",
         _ => count == 1 ? "intervalo" : "intervalos"
     };
 }

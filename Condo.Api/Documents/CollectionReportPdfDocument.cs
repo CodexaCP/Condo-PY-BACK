@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -282,5 +283,5 @@ public sealed class CollectionReportPdfDocument(CollectionReportDto report, stri
             || s.AdjustmentChargedAmount > 0;
     }
 
-    private static string FormatGs(decimal value) => $"Gs. {value:N0}";
+    private static string FormatGs(decimal value) => Money.Format(value);
 }

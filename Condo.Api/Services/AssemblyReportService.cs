@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Application.Services;
@@ -60,14 +61,14 @@ public class AssemblyReportService(
         var transfers = inRange.Where(r => r.IsTransfer && r.Direction == LedgerDirection.In).Sum(r => r.Amount);
         if (transfers != 0m)
         {
-            warnings.Add($"Las entradas y salidas de cada cuenta incluyen {transfers:N0} Gs. de transferencias entre cuentas propias: no son ingresos ni egresos y no figuran en el estado de resultados.");
+            warnings.Add($"Las entradas y salidas de cada cuenta incluyen {Money.Format(transfers)} de transferencias entre cuentas propias: no son ingresos ni egresos y no figuran en el estado de resultados.");
         }
 
         var recovered = inRange.Where(r => r.IsRecovery && r.Direction == LedgerDirection.In).Sum(r => r.Amount);
         var advanced = inRange.Where(r => r.IsRecovery && r.Direction == LedgerDirection.Out).Sum(r => r.Amount);
         if (recovered != 0m || advanced != 0m)
         {
-            warnings.Add($"Las entradas y salidas de cada cuenta incluyen cargos individuales a unidades: {advanced:N0} Gs. pagados a proveedores y {recovered:N0} Gs. devueltos por las unidades. Son un crédito a recuperar, no ingresos ni egresos, y no figuran en el estado de resultados.");
+            warnings.Add($"Las entradas y salidas de cada cuenta incluyen cargos individuales a unidades: {Money.Format(advanced)} pagados a proveedores y {Money.Format(recovered)} devueltos por las unidades. Son un crédito a recuperar, no ingresos ni egresos, y no figuran en el estado de resultados.");
         }
 
         var budget = await BudgetAsync(ctx, end, ct);

@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -138,7 +139,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
                 {
                     h.Cell().Background(ColorPrimary).Padding(5).Text("Unidad").FontColor(ColorWhite).Bold();
                     h.Cell().Background(ColorPrimary).Padding(5).Text("Edificio").FontColor(ColorWhite).Bold();
-                    h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto asignado (Gs.)").FontColor(ColorWhite).Bold();
+                    h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Monto asignado ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
                 var odd = true;
                 foreach (var u in data.Units)
@@ -171,7 +172,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
                     h.Cell().Background(ColorPrimary).Padding(5).Text("Unidad").FontColor(ColorWhite).Bold();
                     h.Cell().Background(ColorPrimary).Padding(5).Text("Período").FontColor(ColorWhite).Bold();
                     h.Cell().Background(ColorPrimary).Padding(5).Text("Concepto").FontColor(ColorWhite).Bold();
-                    h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Imputado (Gs.)").FontColor(ColorWhite).Bold();
+                    h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Imputado ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
                 var odd = true;
                 foreach (var s in data.Settlements)
@@ -201,7 +202,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
             table.Header(h =>
             {
                 h.Cell().Background(ColorPrimary).Padding(5).Text("Resumen").FontColor(ColorWhite).Bold();
-                h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                h.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
             });
 
             AddSummaryRow(table, "Monto declarado", data.DeclaredAmount, false);
@@ -254,7 +255,7 @@ public sealed class OwnerPaymentReceiptPdfDocument(OwnerPaymentReceiptData data)
         });
     }
 
-    private static string FormatGs(decimal value) => $"Gs. {value:N0}";
+    private static string FormatGs(decimal value) => Money.Format(value);
 
     private static string StatusLabel(string status) => status switch
     {

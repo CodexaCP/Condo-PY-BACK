@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Net;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -355,8 +356,9 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
         AmountOver90 = overdueItems.Where(x => x.AgingBucket == "+90").Sum(x => x.Balance)
     };
 
+    // El guarani se escribe con su simbolo (₲), como siempre; las demas monedas con el suyo.
     private static string FormatGs(decimal value) =>
-        "₲ " + value.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("es-PY"));
+        Money.Current.Code == "PYG" ? "₲ " + Money.Number(value) : Money.Format(value);
 
     private static string ComputeAgingBucket(int daysOverdue) => daysOverdue switch
     {

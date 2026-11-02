@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
 using QuestPDF.Fluent;
@@ -117,7 +118,7 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
                 {
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Concepto").FontColor(ColorWhite).Bold();
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Tipo").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Imputado (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Imputado ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
 
                 var isOdd = true;
@@ -150,7 +151,7 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
                 table.Header(header =>
                 {
                     header.Cell().Background(ColorPrimary).Padding(5).Text("Resumen").FontColor(ColorWhite).Bold();
-                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text("Monto (Gs.)").FontColor(ColorWhite).Bold();
+                    header.Cell().Background(ColorPrimary).Padding(5).AlignRight().Text($"Monto ({Money.Current.Symbol})").FontColor(ColorWhite).Bold();
                 });
 
                 if (payment.Allocations.Count > 0)
@@ -204,7 +205,7 @@ public sealed class PaymentReceiptPdfDocument(PaymentDto payment) : IDocument
         });
     }
 
-    private static string FormatCurrency(decimal value) => $"Gs. {value:N0}";
+    private static string FormatCurrency(decimal value) => Money.Format(value);
 
     private static string MethodLabel(PaymentMethod method) => method switch
     {

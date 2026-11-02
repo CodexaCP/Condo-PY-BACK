@@ -14,6 +14,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/online-payments")]
+[RequiresCapability("OnlinePayments")]
 public class OnlinePaymentsController(
     OnlinePaymentService service, ITenantContext tenantContext, IAccessScopeService accessScope, OnlinePaymentSettings settings) : ControllerBase
 {

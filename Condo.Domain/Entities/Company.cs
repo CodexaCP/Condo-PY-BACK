@@ -12,6 +12,16 @@ public class Company : BaseEntity
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
 
+    // Pais de la empresa: de aqui salen la moneda de todos sus documentos, el idioma regional y los tipos de documento. Las empresas
+    // existentes quedan en Paraguay. La moneda no se cambia una vez que la empresa tiene movimientos.
+    public string CountryCode { get; set; } = "PY";
+    public string CurrencyCode { get; set; } = "PYG";
+    public string LocaleCode { get; set; } = "es-PY";
+    // Impuesto de la empresa (IVA u otro) tal como se fija al crearla. Tasa general, reducida (opcional) y exento (0 siempre).
+    public string TaxName { get; set; } = "IVA";
+    public decimal? TaxGeneralRate { get; set; } = 10m;
+    public decimal? TaxReducedRate { get; set; } = 5m;
+
     public ICollection<ApplicationUser> Users { get; set; } = new List<ApplicationUser>();
     public ICollection<Condominium> Condominiums { get; set; } = new List<Condominium>();
     public ICollection<Building> Buildings { get; set; } = new List<Building>();

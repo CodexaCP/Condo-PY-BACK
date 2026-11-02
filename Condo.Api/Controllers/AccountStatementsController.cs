@@ -1,6 +1,7 @@
 using Condo.Api.Services;
 using Condo.Api.Documents;
 using Condo.Application.Abstractions;
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -171,10 +172,111 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
         }
 
         var buildingName = unit.Building?.Name ?? string.Empty;
+        using var moneyScope = await MoneyScope.ForCompanyAsync(dbContext, unit.CompanyId, cancellationToken);
         var document = new AccountStatementPdfDocument(unit.Code, buildingName, statements);
         var bytes = document.GeneratePdf();
         var fileName = $"estado-cuenta_{unit.Code}_{DateTime.Now:yyyyMMdd}.pdf";
         return File(bytes, "application/pdf", fileName);
+    }
+
+    // Certificado de deudas y creditos de la unidad (JSON). Lo expide el personal de la administracion a pedido de un interesado; los
+    // propietarios y residentes no lo generan por su cuenta.
+    [HttpGet("units/{unitId:guid}/debt-certificate")]
+    public async Task<ActionResult<DebtCertificateDto>> GetDebtCertificate(Guid unitId, CancellationToken cancellationToken)
+    {
+        if (IsEndUser) return Forbid();
+
+        var unit = await dbContext.Units.AsNoTracking().Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == unitId, cancellationToken);
+        if (unit is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) return Forbid();
+
+        return Ok(await BuildDebtCertificateAsync(unit, cancellationToken));
+    }
+
+    [HttpGet("units/{unitId:guid}/debt-certificate-pdf")]
+    public async Task<IActionResult> DownloadDebtCertificatePdf(Guid unitId, CancellationToken cancellationToken)
+    {
+        if (IsEndUser) return Forbid();
+
+        var unit = await dbContext.Units.AsNoTracking().Include(x => x.Building)
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == unitId, cancellationToken);
+        if (unit is null) return NotFound();
+        if (!await accessScope.CanAccessBuildingAsync(unit.BuildingId, cancellationToken)) return Forbid();
+
+        var certificate = await BuildDebtCertificateAsync(unit, cancellationToken);
+        var company = await dbContext.Companies.AsNoTracking().FirstOrDefaultAsync(x => x.Id == unit.CompanyId, cancellationToken);
+        var profile = CountryProfiles.FindOrDefault(company?.CountryCode);
+        var currency = Currencies.FindOrDefault(company?.CurrencyCode ?? profile.DefaultCurrencyCode);
+
+        var bytes = new DebtCertificatePdfDocument(certificate, currency, profile.Glossary).GeneratePdf();
+        return File(bytes, "application/pdf", $"certificado-deudas_{unit.Code}_{DateTime.Now:yyyyMMdd}.pdf");
+    }
+
+    private async Task<DebtCertificateDto> BuildDebtCertificateAsync(Unit unit, CancellationToken cancellationToken)
+    {
+        var building = unit.Building!;
+        var company = await dbContext.Companies.AsNoTracking().FirstOrDefaultAsync(x => x.Id == unit.CompanyId, cancellationToken);
+
+        var periods = await dbContext.ExpensePeriods.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.BuildingId == unit.BuildingId && x.Status != ExpensePeriodStatus.Draft)
+            .OrderBy(x => x.Year).ThenBy(x => x.Month)
+            .Select(x => new { x.Id, x.Name, x.DueDate })
+            .ToListAsync(cancellationToken);
+
+        var periodIds = periods.Select(x => x.Id).ToList();
+        var charged = await dbContext.ExpenseCharges.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unit.Id && periodIds.Contains(x.ExpensePeriodId))
+            .GroupBy(x => x.ExpensePeriodId)
+            .Select(g => new { PeriodId = g.Key, Total = g.Sum(c => c.Amount) })
+            .ToDictionaryAsync(x => x.PeriodId, x => x.Total, cancellationToken);
+        var paid = await dbContext.Payments.AsNoTracking()
+            .Where(x => !x.IsDeleted && !x.IsReversed && x.UnitId == unit.Id && periodIds.Contains(x.ExpensePeriodId))
+            .GroupBy(x => x.ExpensePeriodId)
+            .Select(g => new { PeriodId = g.Key, Total = g.Sum(p => p.Amount) })
+            .ToDictionaryAsync(x => x.PeriodId, x => x.Total, cancellationToken);
+
+        var lines = periods
+            .Select(p => new DebtCertificateLineDto
+            {
+                PeriodName = p.Name,
+                DueDate = p.DueDate,
+                Charged = charged.GetValueOrDefault(p.Id),
+                Paid = paid.GetValueOrDefault(p.Id),
+                Balance = charged.GetValueOrDefault(p.Id) - paid.GetValueOrDefault(p.Id)
+            })
+            .Where(x => x.Balance > 0m)
+            .ToList();
+
+        var owners = await dbContext.UnitOwners.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unit.Id && x.EndDate == null && x.Owner != null)
+            .OrderByDescending(x => x.IsPrimary)
+            .Select(x => new { x.OwnerId, x.Owner!.FullName })
+            .ToListAsync(cancellationToken);
+        var ownerIds = owners.Select(x => x.OwnerId).ToList();
+        var credit = await dbContext.OwnerCredits.AsNoTracking()
+            .Where(x => !x.IsDeleted && ownerIds.Contains(x.OwnerId))
+            .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+
+        return new DebtCertificateDto
+        {
+            UnitId = unit.Id,
+            UnitCode = unit.Code,
+            BuildingName = building.Name,
+            BuildingAddress = building.Address,
+            Jurisdiction = building.Jurisdiction,
+            BuildingTaxId = building.Ruc,
+            BuildingLegalName = building.LegalName,
+            CompanyName = company?.Name ?? string.Empty,
+            AdministratorName = building.AdministratorName,
+            AdministratorRegistryNumber = building.AdministratorRegistryNumber,
+            Owners = owners.Select(x => x.FullName).Distinct().ToList(),
+            IssuedAtUtc = DateTime.UtcNow,
+            CurrencyCode = company?.CurrencyCode ?? "PYG",
+            Lines = lines,
+            TotalDebt = lines.Sum(x => x.Balance),
+            OwnerCreditBalance = credit
+        };
     }
 
     [HttpGet("units/{unitId:guid}/periods/{expensePeriodId:guid}")]
@@ -476,6 +578,7 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             Balance = totalAmount - totalPaid
         };
 
+        using var moneyScope = await MoneyScope.ForCompanyAsync(dbContext, unit.CompanyId, cancellationToken);
         var document = new ReceiptPdfDocument(receipt);
         var pdfBytes = document.GeneratePdf();
         var fileName = $"comprobante_{unit.Code}_{period.Name.Replace(" ", "_")}.pdf";

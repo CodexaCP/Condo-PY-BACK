@@ -15,6 +15,7 @@ namespace Condo.Api.Controllers;
 /// modulo Finanzas disponible; no exige la configuracion inicial porque no depende del libro de caja.
 /// </summary>
 [Route("api/finance/vat")]
+[RequiresCapability("PurchaseTaxBook")]
 public class FinanceVatController(
     ICondoDbContext dbContext,
     IAccessScopeService accessScope,

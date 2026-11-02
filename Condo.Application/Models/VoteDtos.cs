@@ -9,6 +9,12 @@ public class VoteDto
     public string? Description { get; set; }
     public decimal QuorumPercentage { get; set; }
     public string WeightType { get; set; } = "ByUnit";
+    // "Simple" o "DoubleAbsolute" (mayoria absoluta sobre la totalidad, por unidades y por coeficiente a la vez).
+    public string MajorityRule { get; set; } = "Simple";
+    // Consulta informativa: el voto en la app no reemplaza al voto formal de la asamblea.
+    public bool IsInformative { get; set; }
+    // Con DoubleAbsolute: la opcion que supera el 50 % de las unidades Y el 50 % del coeficiente totales; null si ninguna.
+    public Guid? ApprovedOptionId { get; set; }
     public string Status { get; set; } = "Draft";
     public DateTime? OpenedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }
@@ -29,6 +35,10 @@ public class VoteOptionDto
     public int CastCount { get; set; }
     public decimal CastWeight { get; set; }
     public decimal Percentage { get; set; }
+    // Porcentaje sobre la TOTALIDAD de unidades y de coeficiente del edificio (no solo sobre quienes votaron).
+    public decimal PercentOfTotalUnits { get; set; }
+    public decimal PercentOfTotalCoefficient { get; set; }
+    public bool HasAbsoluteMajority { get; set; }
 }
 
 public class VoteUnitSummaryDto
@@ -49,6 +59,9 @@ public class VoteUpsertRequest
     public string? Description { get; set; }
     public decimal QuorumPercentage { get; set; } = 50;
     public string WeightType { get; set; } = "ByUnit";
+    public string? MajorityRule { get; set; }
+    // null = segun el pais de la empresa: informativa fuera de Paraguay hasta que un abogado confirme su validez.
+    public bool? IsInformative { get; set; }
     public List<string> OptionLabels { get; set; } = [];
 }
 

@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Domain.Enums;
 using QuestPDF.Fluent;
@@ -185,5 +186,5 @@ public sealed class AccountStatementPdfDocument(
         });
     }
 
-    private static string FormatGs(decimal value) => $"Gs. {value:N0}";
+    private static string FormatGs(decimal value) => Money.Format(value);
 }

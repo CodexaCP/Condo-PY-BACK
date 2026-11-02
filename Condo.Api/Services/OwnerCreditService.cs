@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+using Condo.Application.Localization;
+using System.Globalization;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Domain.Entities;
@@ -465,11 +466,11 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
         var sources = slices
             .GroupBy(x => x.Reference)
             .Select(g => g.Key is null
-                ? $"saldo a favor anterior (Gs. {FormatGs(g.Sum(x => x.Amount))})"
+                ? $"saldo a favor anterior ({Money.Current.Symbol} {FormatGs(g.Sum(x => x.Amount))})"
                 : g.Key.StartsWith("MP-", StringComparison.Ordinal)
                     // Saldo que viene de una reserva del Marketplace (su numero de operacion empieza con MP-).
-                    ? $"reserva del Marketplace {g.Key} (Gs. {FormatGs(g.Sum(x => x.Amount))})"
-                    : $"comprobante de pago {g.Key} (Gs. {FormatGs(g.Sum(x => x.Amount))})")
+                    ? $"reserva del Marketplace {g.Key} ({Money.Current.Symbol} {FormatGs(g.Sum(x => x.Amount))})"
+                    : $"comprobante de pago {g.Key} ({Money.Current.Symbol} {FormatGs(g.Sum(x => x.Amount))})")
             .ToList();
 
         var origin = sources.Count == 0 ? "Saldo a favor" : "Saldo a favor de " + string.Join(" y ", sources);
@@ -486,5 +487,5 @@ public async Task<(List<ExpenseCharge> Charges, Dictionary<Guid, decimal> Pendin
         return $"{origin} {how}.";
     }
 
-    private static string FormatGs(decimal value) => value.ToString("N0", CultureInfo.InvariantCulture).Replace(",", ".");
+    private static string FormatGs(decimal value) => Money.Number(value);
 }

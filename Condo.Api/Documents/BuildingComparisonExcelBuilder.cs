@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using ClosedXML.Excel;
 using Condo.Application.Models;
 
@@ -5,7 +6,7 @@ namespace Condo.Api.Documents;
 
 public static class BuildingComparisonExcelBuilder
 {
-    private const string CurrencyFormat = "#,##0 \"Gs.\"";
+    private static string CurrencyFormat => (Money.Current.Decimals == 0 ? "#,##0" : "#,##0." + new string('0', Money.Current.Decimals)) + " \"" + Money.Current.Symbol + "\"";
 
     public static byte[] Build(BuildingComparisonReportDto report)
     {

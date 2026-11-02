@@ -766,6 +766,10 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<string>("AdministratorRegistryNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<bool>("AdsEnabled")
                         .HasColumnType("bit");
 
@@ -862,6 +866,9 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<int?>("FiscalYearEndMonth")
+                        .HasColumnType("int");
+
                     b.Property<int?>("FloorsCount")
                         .HasColumnType("int");
 
@@ -896,6 +903,10 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
+
+                    b.Property<string>("Jurisdiction")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<bool>("LateFeeAppliesToExtraordinary")
                         .HasColumnType("bit")
@@ -1011,6 +1022,12 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<string>("Ruc")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("SettlementApprovalMode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasDefaultValue("ManagerPresidentAdmin");
 
                     b.Property<string>("SettlementFieldPositionsJson")
                         .HasColumnType("nvarchar(max)");
@@ -1879,8 +1896,20 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
 
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)")
+                        .HasDefaultValue("PY");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)")
+                        .HasDefaultValue("PYG");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
@@ -1892,6 +1921,12 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("LocaleCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)")
+                        .HasDefaultValue("es-PY");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1901,6 +1936,20 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal?>("TaxGeneralRate")
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(10m);
+
+                    b.Property<string>("TaxName")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasDefaultValue("IVA");
+
+                    b.Property<decimal?>("TaxReducedRate")
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(5m);
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
@@ -5728,6 +5777,15 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
+
+                    b.Property<bool>("IsInformative")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MajorityRule")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Simple");
 
                     b.Property<DateTime?>("OpenedAtUtc")
                         .HasColumnType("datetime2");

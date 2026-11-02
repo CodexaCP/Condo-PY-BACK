@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Linq.Expressions;
 using System.Text.Json;
 using Condo.Api.Documents;
@@ -21,6 +22,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/credit-notes")]
+[RequiresCapability("EmitsInvoices")]
 public class CreditNotesController(
     ICondoDbContext dbContext, IAccessScopeService accessScope, ITenantContext tenantContext, OwnerCreditService credits,
     PushDispatcher pushDispatcher) : ControllerBase
@@ -339,7 +341,7 @@ public class CreditNotesController(
                 TimestampUtc = DateTime.UtcNow,
                 DatosAntesJson = JsonSerializer.Serialize(beforeSnapshot),
                 DatosDespuesJson = JsonSerializer.Serialize(new { tracked.Status, tracked.ApprovedAtUtc, tracked.Numero, tracked.FiscalNumero }),
-                Detalle = $"Nota de crédito aprobada y numerada como {tracked.FiscalNumero} (timbrado {tracked.FiscalTimbrado}) por Gs. {tracked.Amount:N0}."
+                Detalle = $"Nota de crédito aprobada y numerada como {tracked.FiscalNumero} (timbrado {tracked.FiscalTimbrado}) por {Money.Format(tracked.Amount)}."
             });
 
             await AddCreditNoteApprovedNotificationAsync(tracked, cancellationToken);
@@ -649,7 +651,7 @@ public class CreditNotesController(
 
         var adjustable = charge.Amount - alreadyAdjusted;
         if (amount > adjustable)
-            return ($"El cargo \"{charge.Concept}\" solo admite un ajuste de hasta Gs. {adjustable:N0} (ya tiene Gs. {alreadyAdjusted:N0} ajustados).", adjustable);
+            return ($"El cargo \"{charge.Concept}\" solo admite un ajuste de hasta {Money.Format(adjustable)} (ya tiene {Money.Format(alreadyAdjusted)} ajustados).", adjustable);
 
         return (null, adjustable);
     }
@@ -739,7 +741,7 @@ public class CreditNotesController(
         if (recipientId is null) return;
 
         const string title = "Se aprobó una nota de crédito";
-        var body = $"Se aprobó un ajuste de Gs. {creditNote.Amount:N0} sobre tu comprobante {invoice.NumeroFormateado ?? string.Empty}. Toca para ver más detalles.";
+        var body = $"Se aprobó un ajuste de {Money.Format(creditNote.Amount)} sobre tu comprobante {invoice.NumeroFormateado ?? string.Empty}. Toca para ver más detalles.";
 
         dbContext.Notifications.Add(new Notification
         {

@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Data;
 using System.Globalization;
 using Condo.Application.Abstractions;
@@ -434,5 +435,5 @@ public class FinanceTransferService(
         };
     }
 
-    private static string Gs(decimal amount) => $"Gs. {amount.ToString("N0", CultureInfo.GetCultureInfo("es-PY"))}";
+    private static string Gs(decimal amount) => Money.Format(amount);
 }

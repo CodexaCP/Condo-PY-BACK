@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
 using Condo.Api.Documents;
@@ -882,7 +883,7 @@ public class OwnerPaymentsController(
         ownerPayment.ResolvedAt = now;
 
         var title = "Registramos tu pago";
-        var body = $"Se registró tu pago {ownerPayment.Reference} por Gs. {ComprobanteService.Gs(request.Amount)}. Toca para ver más detalles.";
+        var body = $"Se registró tu pago {ownerPayment.Reference} por {Money.Format(request.Amount)}. Toca para ver más detalles.";
         // El aviso de pago recibido se puede apagar por edificio (Centro de configuracion); encendido es el comportamiento de siempre.
         var notifyRegistered = await PaymentReceivedNoticeActiveAsync(ownerPayment, ct);
         if (notifyRegistered)
@@ -1095,6 +1096,7 @@ public class OwnerPaymentsController(
             RemainingCredit: credit?.Amount ?? 0
         );
 
+        using var moneyScope = await MoneyScope.ForCompanyAsync(dbContext, payment.CompanyId, ct);
         var doc      = new OwnerPaymentReceiptPdfDocument(data);
         var pdfBytes = doc.GeneratePdf();
         var fileName = $"comprobante_{payment.Reference}_{payment.PaymentDate:yyyyMMdd}.pdf";

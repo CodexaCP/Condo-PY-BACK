@@ -101,7 +101,8 @@ public class AuthController(
             ScopeLabel = user.Role == Condo.Domain.Enums.UserRole.SuperAdmin
                 ? "Vision global de plataforma"
                 : user.Company?.Name ?? "Empresa administradora",
-            MustChangePassword = user.MustChangePassword
+            MustChangePassword = user.MustChangePassword,
+            Locale = CompanyLocaleDto.From(user.Company)
         });
     }
 

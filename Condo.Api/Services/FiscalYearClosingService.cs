@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -160,7 +161,7 @@ public class FiscalYearClosingService(
 
         await journal.AssignNumbersAsync(ctx, rows, companyId, now, ct);
         Audit.Add(companyId, ctx.BuildingId, ConfigSectionKeys.Accounting, "Closed",
-            $"Libro Diario: se cerró el ejercicio {fiscalYear} ({preview.Result:N0} Gs. de {(total < 0 ? "superávit" : total > 0 ? "déficit" : "resultado cero")}).",
+            $"Libro Diario: se cerró el ejercicio {fiscalYear} ({Money.Format(preview.Result)} de {(total < 0 ? "superávit" : total > 0 ? "déficit" : "resultado cero")}).",
             "JournalEntry", null, [new ConfigChange("fiscalYear", "Ejercicio cerrado", null, fiscalYear.ToString(CultureInfo.InvariantCulture))]);
 
         try

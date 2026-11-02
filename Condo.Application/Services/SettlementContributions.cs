@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 namespace Condo.Application.Services;
 
 /// <summary>
@@ -32,5 +33,6 @@ public static class SettlementContributions
         decimal reserveCategoryExpenses, decimal reserveContribution, decimal reserveFundIncomes, decimal paidByReserveFund) =>
         reserveCategoryExpenses + reserveContribution + reserveFundIncomes - paidByReserveFund;
 
-    private static decimal RoundGuarani(decimal value) => decimal.Round(value, 0, MidpointRounding.AwayFromZero);
+    // Redondeo a la unidad minima de la moneda de la empresa (guarani entero, o centavo si la moneda lo tiene).
+    private static decimal RoundGuarani(decimal value) => Money.Round(value);
 }

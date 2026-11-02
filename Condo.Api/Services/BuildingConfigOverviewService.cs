@@ -1,3 +1,4 @@
+using Condo.Application.Localization;
 using System.Globalization;
 using Condo.Application.Abstractions;
 using Condo.Application.Models;
@@ -165,7 +166,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                     : b.LateFeePolicyConfirmed ? "No cobra mora" : null),
                 Item("Días de gracia", b.GraceDays?.ToString(CultureInfo.InvariantCulture)),
                 Item("Tope de la mora", b.LateFeeCapPercentage is > 0m ? $"{b.LateFeeCapPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} % de la base" : "Sin tope"),
-                Item("Mora mínima por intervalo", b.LateFeeMinAmount is > 0m ? $"Gs. {b.LateFeeMinAmount.Value.ToString("N0", CultureInfo.InvariantCulture)}" : "Sin mínimo"),
+                Item("Mora mínima por intervalo", b.LateFeeMinAmount is > 0m ? Money.Format(b.LateFeeMinAmount.Value) : "Sin mínimo"),
                 Item("Unidades exoneradas", exemptUnits.ToString(CultureInfo.InvariantCulture))
             ],
             LinkKind = "self",
@@ -204,7 +205,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
                 Item("Aporte al fondo de reserva", b.ReserveFundPercentage is > 0m ? $"{b.ReserveFundPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null),
                 Item("Aporte extraordinario", b.ExtraordinaryPercentage is > 0m ? $"{b.ExtraordinaryPercentage.Value.ToString("0.##", CultureInfo.InvariantCulture)} %" : null),
                 Item("Uso del fondo de reserva", ReserveUsePolicyLabel(b.ReserveUsePolicy)
-                    + (b.ReserveUseThreshold is > 0m ? $" desde Gs. {b.ReserveUseThreshold.Value.ToString("N0", CultureInfo.InvariantCulture)}" : string.Empty))
+                    + (b.ReserveUseThreshold is > 0m ? $" desde {Money.Format(b.ReserveUseThreshold.Value)}" : string.Empty))
             ],
             LinkKind = "self",
             LinkTab = ConfigSectionKeys.Funds
@@ -648,6 +649,7 @@ public class BuildingConfigOverviewService(ICondoDbContext dbContext, FinanceMod
         LateFeeFrequency.Daily => "Diaria",
         LateFeeFrequency.Weekly => "Semanal",
         LateFeeFrequency.Biweekly => "Quincenal",
+        LateFeeFrequency.Monthly => "Mensual",
         _ => null
     };
 }
