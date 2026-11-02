@@ -96,6 +96,9 @@ public class ApkUpdateTests : IDisposable
         var user = t.AddUser(company);
         foreach (var token in tokens)
             t.Db.DeviceTokens.Add(new DeviceToken { CompanyId = company.Id, UserId = user.Id, Token = token });
+        // Un token del navegador y uno dado de baja: no deben recibir el aviso del APK.
+        t.Db.DeviceTokens.Add(new DeviceToken { CompanyId = company.Id, UserId = user.Id, Token = "tok-web", Platform = "web" });
+        t.Db.DeviceTokens.Add(new DeviceToken { CompanyId = company.Id, UserId = user.Id, Token = "tok-baja", IsActive = false });
         t.Db.SaveChanges();
     }
 

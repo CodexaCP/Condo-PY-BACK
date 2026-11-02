@@ -8,14 +8,17 @@ public class PushDispatcher(ICondoDbContext dbContext, IPushNotificationSender s
     public Task NotifyUserAsync(Guid recipientId, string title, string body, string? entityType, Guid? entityId, CancellationToken ct, string? notificationType = null)
         => NotifyUsersAsync(new[] { recipientId }, title, body, entityType, entityId, ct, notificationType);
 
-    /// <summary>Un aviso a todos los celulares registrados (cada token una sola vez); devuelve a cuantos se les envio.</summary>
+    /// <summary>
+    /// Un aviso a todos los celulares Android registrados (cada token una sola vez); devuelve a cuantos se les envio. Los tokens del navegador
+    /// (plataforma "web") quedan fuera: el aviso habla del APK, que solo existe en Android.
+    /// </summary>
     public async Task<int> NotifyAllDevicesAsync(string title, string body, string notificationType, CancellationToken ct)
     {
         try
         {
             var tokens = await dbContext.DeviceTokens
                 .AsNoTracking()
-                .Where(x => !x.IsDeleted && x.IsActive)
+                .Where(x => !x.IsDeleted && x.IsActive && x.Platform == "android")
                 .Select(x => x.Token)
                 .Distinct()
                 .ToListAsync(ct);
