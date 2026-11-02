@@ -8,6 +8,33 @@ public class PushDispatcher(ICondoDbContext dbContext, IPushNotificationSender s
     public Task NotifyUserAsync(Guid recipientId, string title, string body, string? entityType, Guid? entityId, CancellationToken ct, string? notificationType = null)
         => NotifyUsersAsync(new[] { recipientId }, title, body, entityType, entityId, ct, notificationType);
 
+    /// <summary>Un aviso a todos los celulares registrados (cada token una sola vez); devuelve a cuantos se les envio.</summary>
+    public async Task<int> NotifyAllDevicesAsync(string title, string body, string notificationType, CancellationToken ct)
+    {
+        try
+        {
+            var tokens = await dbContext.DeviceTokens
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted && x.IsActive)
+                .Select(x => x.Token)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var data = new Dictionary<string, string> { ["type"] = notificationType };
+            foreach (var token in tokens)
+            {
+                await sender.SendAsync(token, title, body, data, ct);
+            }
+
+            return tokens.Count;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error enviando push notification a todos los dispositivos.");
+            return 0;
+        }
+    }
+
     public async Task NotifyUsersAsync(IEnumerable<Guid> recipientIds, string title, string body, string? entityType, Guid? entityId, CancellationToken ct, string? notificationType = null)
     {
         try

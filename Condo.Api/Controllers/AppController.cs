@@ -12,7 +12,7 @@ namespace Condo.Api.Controllers;
 [ApiController]
 [AllowAnonymous]
 [Route("api/app")]
-public class AppController(IConfiguration configuration) : ControllerBase
+public class AppController(IConfiguration configuration, Condo.Api.Services.ApkInfoService apk) : ControllerBase
 {
     [HttpGet("version")]
     public ActionResult<AppVersionDto> GetVersion()
@@ -22,7 +22,8 @@ public class AppController(IConfiguration configuration) : ControllerBase
         return Ok(new AppVersionDto
         {
             MinVersionCode = configuration.GetValue("App:MinVersionCode", 1),
-            LatestVersionCode = configuration.GetValue("App:LatestVersionCode", 1),
+            // La version mas nueva es la mayor entre lo configurado y el versionCode del APK que el sitio publica: al subir un APK nuevo no hace falta tocar nada.
+            LatestVersionCode = Math.Max(configuration.GetValue("App:LatestVersionCode", 1), apk.Get()?.VersionCode ?? 0),
             ApkUrl = configuration["App:ApkUrl"] ?? "https://expenses.com.py/downloads/expenses.apk",
             Message = string.IsNullOrWhiteSpace(message) ? null : message
         });

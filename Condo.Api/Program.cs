@@ -93,6 +93,10 @@ builder.Services.AddHostedService<OverdueAmenityReservationEnforcementService>()
 builder.Services.AddHostedService<MarketplaceMaintenanceService>();
 builder.Services.AddHostedService<PaymentIntentMaintenanceService>();
 builder.Services.AddHostedService<AdCampaignMaintenanceService>();
+// APK nuevo publicado en el sitio: lo detecta y avisa por push a los celulares con la app instalada.
+builder.Services.AddSingleton<ApkInfoService>();
+builder.Services.AddSingleton<ApkUpdateAnnouncer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ApkUpdateAnnouncer>());
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
