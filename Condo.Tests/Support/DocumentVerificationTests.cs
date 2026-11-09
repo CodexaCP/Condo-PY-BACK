@@ -146,6 +146,39 @@ public class DocumentVerificationTests
     }
 
     [Fact]
+    public async Task WhatsApp_goes_to_the_active_building_manager_before_the_building_number()
+    {
+        var (db, service, period) = Setup();
+        using var _ = db;
+        var building = await db.Db.Buildings.SingleAsync();
+        building.WhatsAppPhone = "+595981000000";
+        var company = await db.Db.Companies.SingleAsync();
+        // Un encargado sin telefono no tapa al siguiente; el 0 inicial del numero local se descarta.
+        var noPhone = db.AddUser(company, UserRole.BuildingManager, "SinTelefono");
+        var manager = db.AddUser(company, UserRole.BuildingManager, "Encargado");
+        manager.PhonePrefix = "+595";
+        manager.Phone = "0971 222 333";
+        var inactive = db.AddUser(company, UserRole.BuildingManager, "Inactivo");
+        inactive.WhatsAppPhone = "+595999999999";
+        foreach (var u in new[] { noPhone, manager, inactive })
+            db.Db.UserBuildingAccesses.Add(new UserBuildingAccess { CompanyId = company.Id, ApplicationUserId = u.Id, BuildingId = building.Id, IsActive = u != inactive });
+        await db.Db.SaveChangesAsync();
+
+        var url = await service.IssueSettlementAsync(period, Summary(period), null, default);
+        var result = await service.LookupAsync(TokenOf(url), default);
+
+        Assert.StartsWith("https://wa.me/595971222333?text=", result.WhatsAppUrl);
+        Assert.Equal("manager", result.WhatsAppContact);
+
+        // Sin encargados con acceso activo, vuelve al WhatsApp del edificio.
+        foreach (var access in db.Db.UserBuildingAccesses) access.IsActive = false;
+        await db.Db.SaveChangesAsync();
+        var fallback = await service.LookupAsync(TokenOf(url), default);
+        Assert.StartsWith("https://wa.me/595981000000?text=", fallback.WhatsAppUrl);
+        Assert.Equal("administration", fallback.WhatsAppContact);
+    }
+
+    [Fact]
     public async Task Draft_and_replaced_documents_do_not_expose_the_buttons_data()
     {
         var (db, service, period) = Setup();

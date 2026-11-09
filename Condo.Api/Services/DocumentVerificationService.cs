@@ -31,6 +31,8 @@ public sealed class DocumentVerificationResult
     public string? DueDate { get; set; }
     // Enlace de WhatsApp con el mensaje armado (el telefono del edificio, si lo tiene cargado).
     public string? WhatsAppUrl { get; set; }
+    // A quien llega ese WhatsApp: manager = el encargado del edificio; administration = el telefono del edificio o del administrador.
+    public string? WhatsAppContact { get; set; }
     public string? AppDownloadUrl { get; set; }
     // Cuentas para transferir: solo si el edificio activo el interruptor "mostrar en el QR" (apagado por defecto).
     public List<DocumentVerificationBankAccount> BankAccounts { get; set; } = new();
@@ -183,11 +185,25 @@ public partial class DocumentVerificationService(ICondoDbContext dbContext, ICon
         result.AppDownloadUrl = string.IsNullOrWhiteSpace(apk) ? null : apk;
         if (building is null) return;
 
-        var digits = PhoneDigits(building.WhatsAppPhone) ?? PhoneDigits(building.AdministratorPhone);
+        // El contacto es el encargado del edificio (el usuario BuildingManager con acceso activo a este edificio); si no tiene telefono o no hay
+        // encargado, el WhatsApp del edificio y, por ultimo, el telefono del administrador.
+        var managers = await dbContext.UserBuildingAccesses.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == row.BuildingId && x.CompanyId == row.CompanyId
+                        && x.ApplicationUser != null && !x.ApplicationUser.IsDeleted && x.ApplicationUser.IsActive
+                        && x.ApplicationUser.Role == UserRole.BuildingManager)
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => new { x.ApplicationUser!.WhatsAppPhone, x.ApplicationUser.PhonePrefix, x.ApplicationUser.Phone })
+            .ToListAsync(ct);
+        var managerDigits = managers
+            .Select(m => PhoneDigits(m.WhatsAppPhone) ?? PhoneDigits(m.PhonePrefix, m.Phone))
+            .FirstOrDefault(d => d is not null);
+
+        var digits = managerDigits ?? PhoneDigits(building.WhatsAppPhone) ?? PhoneDigits(building.AdministratorPhone);
         if (digits is not null)
         {
             var text = $"Hola, tengo una consulta sobre la liquidación de expensas de {row.PeriodName} del edificio {row.BuildingName}.";
             result.WhatsAppUrl = $"https://wa.me/{digits}?text={Uri.EscapeDataString(text)}";
+            result.WhatsAppContact = managerDigits is not null ? "manager" : "administration";
         }
 
         if (building.QrShowBankAccounts)
@@ -206,6 +222,15 @@ public partial class DocumentVerificationService(ICondoDbContext dbContext, ICon
                 })
                 .ToListAsync(ct);
         }
+    }
+
+    // Telefono guardado en dos partes (prefijo del pais y numero local): se une y se saca el 0 inicial del numero local. Sin prefijo no se
+    // puede saber el pais, asi que no se usa.
+    private static string? PhoneDigits(string? prefix, string? phone)
+    {
+        var prefixDigits = new string((prefix ?? string.Empty).Where(char.IsDigit).ToArray());
+        var local = new string((phone ?? string.Empty).Where(char.IsDigit).ToArray()).TrimStart('0');
+        return prefixDigits.Length == 0 || local.Length == 0 ? null : PhoneDigits(prefixDigits + local);
     }
 
     // Los telefonos del edificio se guardan completos con el prefijo del pais (+595981123456): wa.me los quiere solo con digitos.

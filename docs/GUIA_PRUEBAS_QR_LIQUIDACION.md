@@ -36,7 +36,7 @@ La página que abre el QR trae, debajo de los datos, estos botones. Se muestran 
 | Botón | Qué hace | Cuándo aparece |
 |-------|----------|----------------|
 | 🔐 Ver mi estado de cuenta | Despliega: «Abrí la app Expenses e ingresá con tu usuario» (más descarga de la app) y, para la administración, «Ingresar en la web» | Siempre |
-| 💬 Hablar con la administración | Abre WhatsApp con el mensaje armado («Hola, tengo una consulta sobre la liquidación de expensas de Octubre 2026 del edificio Torre Sol») | Si el edificio tiene cargado el WhatsApp (o, si no, el teléfono del administrador) |
+| 💬 Hablar con el encargado del edificio | Abre WhatsApp con el mensaje armado («Hola, tengo una consulta sobre la liquidación de expensas de Octubre 2026 del edificio Torre Sol») al **encargado del edificio**: el usuario con rol Encargado de edificio y acceso activo a ese edificio (usa su WhatsApp o, si no, su prefijo + teléfono). Si hay varios, el primero asignado que tenga teléfono | Si hay un encargado con teléfono. Si no, el botón dice «Hablar con la administración» y usa el WhatsApp del edificio o, por último, el teléfono del administrador |
 | 🏦 Datos para transferir | Banco, tipo, N.º de cuenta, titular, documento y alias, con botón Copiar | Solo si el edificio activó el interruptor **y** tiene cuentas activas |
 | 📱 Descargar la app | Baja el APK | Si está configurado `App:ApkUrl` (ya lo está) |
 | 📅 Agregar el vencimiento a mi calendario | Baja un archivo `.ics` de todo el día en la fecha de vencimiento, con aviso a las 9:00 del día anterior | Siempre que el período tenga vencimiento |
@@ -46,6 +46,7 @@ El interruptor de las cuentas está en **Edificios → editar → Contabilidad y
 | # | Qué hacer | Resultado esperado |
 |---|-----------|--------------------|
 | 13 | Escanear el QR de una liquidación publicada de un edificio con WhatsApp cargado | Aparece «Hablar con la administración» y abre WhatsApp con el mensaje |
+| 13b | Edificio con un encargado asignado (Usuarios → Encargado de edificio, con teléfono) | El botón dice «Hablar con el encargado del edificio» y abre WhatsApp con el número del encargado |
 | 14 | Mismo edificio, interruptor de cuentas **apagado** | No aparece «Datos para transferir» |
 | 15 | Encender el interruptor, guardar, recargar la página del QR | Aparece «Datos para transferir» con las cuentas activas y se pueden copiar |
 | 16 | Tocar «Agregar el vencimiento a mi calendario» | Baja `vencimiento-AAAA-MM-DD.ics`; al abrirlo crea un evento de todo el día |
