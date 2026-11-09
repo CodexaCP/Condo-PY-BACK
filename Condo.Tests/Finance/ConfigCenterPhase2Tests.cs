@@ -56,7 +56,7 @@ public class ConfigCenterPhase2Tests : IDisposable
     private RecurringBuildingExpensesController Recurring() => new(_env.T.Db, _env.Access, Rubros());
 
     private ExpensePeriodsController Periods() => new(
-        _env.T.Db, _env.Access, _env.Tenant, new ExpenseSettlementDistributionService(_env.T.Db), new StubWebHostEnvironment(Path.GetTempPath()),
+        _env.T.Db, _env.Access, _env.Tenant, new ExpenseSettlementDistributionService(_env.T.Db), new StubWebHostEnvironment(Path.GetTempPath()), new DocumentVerificationService(_env.T.Db, new ConfigurationBuilder().Build()),
         new OwnerCreditService(_env.T.Db), new PushDispatcher(_env.T.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance),
         NullLogger<ExpensePeriodsController>.Instance);
 

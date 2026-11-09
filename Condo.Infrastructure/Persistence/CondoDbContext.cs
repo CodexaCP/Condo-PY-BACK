@@ -68,6 +68,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<PaymentIntentItem> PaymentIntentItems => Set<PaymentIntentItem>();
     public DbSet<PaymentAttempt> PaymentAttempts => Set<PaymentAttempt>();
     public DbSet<PaymentEvent> PaymentEvents => Set<PaymentEvent>();
+    public DbSet<DocumentVerification> DocumentVerifications => Set<DocumentVerification>();
     public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>();
     public DbSet<BankReconciledMovement> BankReconciledMovements => Set<BankReconciledMovement>();
     public DbSet<LedgerAccountRole> LedgerAccountRoles => Set<LedgerAccountRole>();
@@ -1450,6 +1451,22 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<PaymentEvent>()
             .HasOne(x => x.Attempt).WithMany()
             .HasForeignKey(x => x.AttemptId).OnDelete(DeleteBehavior.Restrict);
+
+        // QR de verificacion de documentos (liquidacion): el token del papel es unico; un documento tiene a lo sumo una version vigente por contenido.
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.Token).HasMaxLength(32);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.DocumentType).HasMaxLength(30);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.ContentHash).HasMaxLength(64);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.Title).HasMaxLength(200);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.BuildingName).HasMaxLength(200);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.AdministratorName).HasMaxLength(200);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.PeriodName).HasMaxLength(100);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.RevokedReason).HasMaxLength(300);
+        modelBuilder.Entity<DocumentVerification>().Property(x => x.TotalAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<DocumentVerification>().HasIndex(x => x.Token).IsUnique();
+        modelBuilder.Entity<DocumentVerification>().HasIndex(x => new { x.DocumentType, x.DocumentId, x.ContentHash });
+        modelBuilder.Entity<DocumentVerification>()
+            .HasOne(x => x.Company).WithMany()
+            .HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
 
         // Un cobro produce como maximo un pago de propietario.
         modelBuilder.Entity<OwnerPayment>().HasIndex(x => x.PaymentIntentId).IsUnique().HasFilter("[PaymentIntentId] IS NOT NULL");

@@ -22,6 +22,7 @@ public class ExpensePeriodsController(
     ITenantContext tenantContext,
     IExpenseSettlementDistributionService distributionService,
     IWebHostEnvironment env,
+    DocumentVerificationService documentVerification,
     OwnerCreditService ownerCredits,
     PushDispatcher pushDispatcher,
     ILogger<ExpensePeriodsController> logger) : ControllerBase
@@ -1480,6 +1481,9 @@ public class ExpensePeriodsController(
             string.IsNullOrWhiteSpace(period.Building?.Jurisdiction) ? null : period.Building!.Jurisdiction
         }.Where(x => x is not null));
 
+        // QR de verificacion: se emite al descargar (tambien en las liquidaciones que ya existian) y se reutiliza mientras el contenido no cambie.
+        var verificationUrl = await documentVerification.IssueSettlementAsync(period, summary, period.Building?.AdministratorName, cancellationToken);
+
         var document = new SettlementPdfDocument(
             summary,
             period.StartDate.ToString("dd/MM/yyyy"),
@@ -1493,7 +1497,8 @@ public class ExpensePeriodsController(
             fieldPositionsJson: period.Building?.SettlementFieldPositionsJson,
             hideFrame: period.Building?.SettlementHideFrame ?? true,
             documentTitle: documentTitle,
-            administratorLine: string.IsNullOrWhiteSpace(administratorLine) || string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase) ? null : administratorLine);
+            administratorLine: string.IsNullOrWhiteSpace(administratorLine) || string.Equals(countryCode, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase) ? null : administratorLine,
+            verificationUrl: verificationUrl);
 
         var pdfBytes = document.GeneratePdf();
         var fileName = $"liquidacion_{summary.ExpensePeriodName.Replace(" ", "_")}_{summary.BuildingName.Replace(" ", "_")}.pdf";

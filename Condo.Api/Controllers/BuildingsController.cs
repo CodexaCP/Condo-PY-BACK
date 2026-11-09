@@ -651,7 +651,9 @@ public partial class BuildingsController(ICondoDbContext dbContext, IAccessScope
             standardTemplate: false,
             backgroundImage: template,
             fieldPositionsJson: building.SettlementFieldPositionsJson,
-            hideFrame: building.SettlementHideFrame);
+            hideFrame: building.SettlementHideFrame,
+            // QR de muestra para calibrar su posicion (no existe en la base: la pagina dice que no se encontro).
+            verificationUrl: "https://expenses.com.py/v/EjemploCalibracion0000");
 
         return File(document.GeneratePdf(), "application/pdf", $"calibracion_liquidacion_{building.Code}.pdf");
     }

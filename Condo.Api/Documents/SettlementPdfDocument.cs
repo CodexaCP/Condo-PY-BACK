@@ -1,3 +1,4 @@
+using Condo.Api.Services;
 using Condo.Application.Localization;
 using Condo.Application.Models;
 using Condo.Application.Services;
@@ -29,7 +30,9 @@ public sealed class SettlementPdfDocument(
     bool hideFrame = true,
     // Multipais: titulo con el vocabulario del pais (null = el de siempre) y linea del administrador (nombre, registro, jurisdiccion).
     string? documentTitle = null,
-    string? administratorLine = null) : IDocument
+    string? administratorLine = null,
+    // QR de verificacion (direccion publica del documento). Null = sin QR. En el papel propio es el bloque "qr" (oculto por defecto).
+    string? verificationUrl = null) : IDocument
 {
     // Width: ancho del bloque; RowHeight: alto de cada fila del cuerpo (solo en la key "filas"); Hidden: no
     // dibujar el bloque (el papel ya lo trae impreso).
@@ -189,6 +192,10 @@ public sealed class SettlementPdfDocument(
         ["firmaAutorizadoNombre"] = new(215, 700, 8, 175, 'C'),
         ["firmaAutorizadoCargo"] = new(215, 711, 8, 175, 'C'),
         ["firmaVerificacion"] = new(420, 655, 8, 110),
+
+        // QR de verificacion (solo en la ultima hoja). Width = lado del cuadrado. Arranca oculto: el papel propio ya tiene su
+        // diseno y el QR se muestra y se ubica desde la calibracion, donde haya lugar libre.
+        ["qr"] = new(490, 740, 7, 55, HiddenByDefault: true),
 
     };
 
@@ -704,6 +711,22 @@ public sealed class SettlementPdfDocument(
         // edificio (solo la imagen). Si todavia no firmo nadie en ese lugar, queda vacio.
         PaperSignature(fg, "firmaAutorizado", president, withNameAndTitle: true);
         PaperSignature(fg, "firmaVerificacion", approver, withNameAndTitle: false);
+
+        if (isLastPage) PaperQr(fg);
+    }
+
+    // QR de verificacion sobre el papel propio: cuadrado de lado Width en su posicion, con la direccion corta debajo por si no se puede escanear.
+    private void PaperQr(LayersDescriptor fg)
+    {
+        if (verificationUrl is null || IsHidden("qr")) return;
+
+        var place = Place("qr");
+        var side = Math.Max(24f, place.Width);
+        fg.Layer().TranslateX(place.X).TranslateY(place.Top).Width(side).Column(col =>
+        {
+            col.Item().Width(side).Height(side).Svg(QrCodeImage.Svg(verificationUrl));
+            col.Item().Width(Math.Max(side, 70f)).Text(QrCodeImage.ShortText(verificationUrl)).FontSize(Math.Min(place.Size, 6f)).FontColor(p.Gray);
+        });
     }
 
     // Un dato suelto en su posicion. Los que tienen ancho se alinean segun su Align (montos a la derecha,
@@ -754,15 +777,28 @@ public sealed class SettlementPdfDocument(
 
     // Gastos linea por linea; si no vinieron (p. ej. una liquidacion sin detalle) se arman con los totales
     // por categoria.
-    private IReadOnlyList<SettlementExpenseLineDto> ExpenseRows() =>
-        summary.ExpenseLines.Count > 0
-            ? summary.ExpenseLines
-            : summary.CategoryTotals.SelectMany(c => c.Items.Select(i => new SettlementExpenseLineDto
+    private IReadOnlyList<SettlementExpenseLineDto> ExpenseRows() => RowsOf(summary);
+
+    private static IReadOnlyList<SettlementExpenseLineDto> RowsOf(ExpenseSettlementSummaryDto source) =>
+        source.ExpenseLines.Count > 0
+            ? source.ExpenseLines
+            : source.CategoryTotals.SelectMany(c => c.Items.Select(i => new SettlementExpenseLineDto
             {
                 Description = i.Description,
                 Amount = i.Amount,
                 IsReserveFund = c.Category == "ReserveFund"
             })).ToList();
+
+    // Total general que imprime la planilla (sub total + aporte extraordinario), con el mismo calculo que los totales del papel.
+    // Lo usa el QR de verificacion para mostrar la misma cifra que el documento. Necesita las lineas de gasto y los porcentajes ya cargados.
+    public static decimal PrintedGrandTotal(ExpenseSettlementSummaryDto source)
+    {
+        var commonTotal = RowsOf(source).Where(x => !InReserveColumn(x)).Sum(x => x.Amount);
+        var calc = SettlementContributions.Compute(
+            commonTotal, source.IncomeTreatment == IncomeTreatment.CreditToOwners ? source.TotalBuildingIncomes : 0m,
+            source.ReservePercentage, source.ExtraordinaryPercentage);
+        return calc.SubTotal + calc.ExtraordinaryContribution;
+    }
 
     private static string FormatNumber(decimal value) => Money.Number(value);
 
@@ -1004,6 +1040,21 @@ public sealed class SettlementPdfDocument(
                     t.Span(standardTemplate ? $" · {stamp} UTC" : $"Generado el {stamp} UTC").FontColor(p.Gray);
                 }
             });
+
+            // QR de verificacion: escanearlo confirma que el documento es autentico y esta vigente.
+            if (verificationUrl is not null)
+            {
+                row.ConstantItem(190).AlignRight().Row(qr =>
+                {
+                    qr.RelativeItem().AlignRight().AlignMiddle().Column(c =>
+                    {
+                        c.Item().AlignRight().Text("Verificá este documento").FontSize(7).Bold().FontColor(p.Primary);
+                        c.Item().AlignRight().Text(QrCodeImage.ShortText(verificationUrl)).FontSize(6).FontColor(p.Gray);
+                    });
+                    qr.ConstantItem(6);
+                    qr.ConstantItem(44).Height(44).Svg(QrCodeImage.Svg(verificationUrl));
+                });
+            }
             row.ConstantItem(80).AlignRight().Text(t =>
             {
                 t.CurrentPageNumber().FontColor(p.Gray);

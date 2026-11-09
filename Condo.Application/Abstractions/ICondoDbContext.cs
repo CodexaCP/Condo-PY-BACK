@@ -69,6 +69,7 @@ public interface ICondoDbContext
     DbSet<PaymentIntentItem> PaymentIntentItems { get; }
     DbSet<PaymentAttempt> PaymentAttempts { get; }
     DbSet<PaymentEvent> PaymentEvents { get; }
+    DbSet<DocumentVerification> DocumentVerifications { get; }
     DbSet<BankReconciliation> BankReconciliations { get; }
     DbSet<BankReconciledMovement> BankReconciledMovements { get; }
     DbSet<LedgerAccountRole> LedgerAccountRoles { get; }

@@ -30,6 +30,9 @@ public static class MarketplaceRateLimiting
     public const int HeavyReadsPerMinute = 20;
     public const string WebhookPathPrefix = "/api/payment-webhooks";
     public const int WebhooksPerMinute = 300;
+    // Verificacion publica de documentos (el QR del papel): anonima, sin sesion. Detras del proxy todos comparten IP, asi que el tope es por ruta y generoso.
+    public const string PublicVerifyPathPrefix = "/api/public/verify";
+    public const int PublicVerifiesPerMinute = 300;
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
     private const int SegmentsPerWindow = 6;
 
@@ -76,6 +79,18 @@ public static class MarketplaceRateLimiting
             return RateLimitPartition.GetSlidingWindowLimiter($"webhook:{context.Request.Path.Value?.ToLowerInvariant()}", _ => new SlidingWindowRateLimiterOptions
             {
                 PermitLimit = WebhooksPerMinute,
+                Window = Window,
+                SegmentsPerWindow = SegmentsPerWindow,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+        }
+
+        if (context.Request.Path.StartsWithSegments(PublicVerifyPathPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return RateLimitPartition.GetSlidingWindowLimiter("public-verify", _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = PublicVerifiesPerMinute,
                 Window = Window,
                 SegmentsPerWindow = SegmentsPerWindow,
                 QueueLimit = 0,
