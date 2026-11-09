@@ -724,7 +724,8 @@ public sealed class SettlementPdfDocument(
         var side = Math.Max(24f, place.Width);
         fg.Layer().TranslateX(place.X).TranslateY(place.Top).Width(side).Column(col =>
         {
-            col.Item().Width(side).Height(side).Svg(QrCodeImage.Svg(verificationUrl));
+            // Margen de 1 modulo (no los 4 del estandar): sobre el papel propio el espacio es poco y el QR sale mas grande en el mismo cuadro.
+            col.Item().Width(side).Height(side).Svg(QrCodeImage.Svg(verificationUrl, quietModules: 1));
             col.Item().Width(Math.Max(side, 70f)).Text(QrCodeImage.ShortText(verificationUrl)).FontSize(Math.Min(place.Size, 6f)).FontColor(p.Gray);
         });
     }
