@@ -1007,6 +1007,9 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<bool>("QrShowBankAccounts")
+                        .HasColumnType("bit");
+
                     b.Property<decimal?>("ReserveFundPercentage")
                         .HasColumnType("decimal(5,2)");
 

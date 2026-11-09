@@ -21,6 +21,8 @@ public abstract class BuildingProfileData
     public string? LogoUrl { get; set; }
     public string? WhatsAppPhone { get; set; }
     public string? OfficeHours { get; set; }
+    // Datos para transferir en la pagina publica del QR (null = no tocar). Solo lo cambia quien edita los datos financieros.
+    public bool? QrShowBankAccounts { get; set; }
 
     // Legal y registral
     public string? FincaNumber { get; set; }

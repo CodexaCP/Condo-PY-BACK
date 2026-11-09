@@ -199,6 +199,7 @@ public static partial class BuildingProfile
         e.DefaultDueDay = p.DefaultDueDay;
         e.GraceDays = p.GraceDays;
         e.PaymentInstructions = TrimOrNull(p.PaymentInstructions);
+        if (p.QrShowBankAccounts.HasValue) e.QrShowBankAccounts = p.QrShowBankAccounts.Value;
     }
 
     // La lista enviada reemplaza a las cuentas guardadas: las que traen Id se actualizan, las nuevas se agregan y las que
@@ -276,6 +277,7 @@ public static partial class BuildingProfile
         target.DefaultDueDay = e.DefaultDueDay;
         target.GraceDays = e.GraceDays;
         target.PaymentInstructions = e.PaymentInstructions;
+        target.QrShowBankAccounts = e.QrShowBankAccounts;
         target.TimeZoneId = e.TimeZoneId;
         target.Jurisdiction = e.Jurisdiction;
         target.AdministratorRegistryNumber = e.AdministratorRegistryNumber;

@@ -104,6 +104,8 @@ public class Building : BaseEntity
     // Telefonos guardados completos, con el prefijo del pais (ej. +595981123456).
     public string? WhatsAppPhone { get; set; }
     public string? OfficeHours { get; set; }
+    // Muestra las cuentas bancarias de cobro en la pagina publica a la que lleva el QR de la liquidacion (datos para transferir). Apagado por defecto.
+    public bool QrShowBankAccounts { get; set; }
 
     // Legal y registral
     public string? FincaNumber { get; set; }

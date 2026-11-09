@@ -9,7 +9,9 @@ Fecha: 2026-11-09 · Diseño: `docs/PROPUESTA_QR_LIQUIDACION.md`
 - Mientras la liquidación no cambie, el mismo papel y el mismo QR valen siempre. Si se recalcula o se publica, el QR del papel anterior pasa a decir «reemplazado».
 
 ## Antes de probar (VPS)
-1. Correr la migración `Condo.Infrastructure/Persistence/Migrations/20261109141541_DocumentVerification.sql` (tabla nueva, no toca datos).
+1. Correr, en este orden, las dos migraciones de `Condo.Infrastructure/Persistence/Migrations/`:
+   - `20261109141541_DocumentVerification.sql` (tabla nueva)
+   - `20261109150521_BuildingQrShowBankAccounts.sql` (una columna nueva en Edificios, apagada por defecto)
 2. Desplegar el backend y el web.
 
 ## Casos de prueba
@@ -28,8 +30,32 @@ Fecha: 2026-11-09 · Diseño: `docs/PROPUESTA_QR_LIQUIDACION.md`
 | 11 | Calibración del papel → sección «QR» → destildar «No dibujar», moverlo y ajustar el ancho (lado) | El PDF de calibración muestra el QR en esa posición; luego las liquidaciones lo traen ahí |
 | 12 | Desde la app del propietario, descargar la liquidación publicada | También lleva QR (usa el mismo endpoint) |
 
+## Botones de la página del QR (solo en un documento vigente)
+La página que abre el QR trae, debajo de los datos, estos botones. Se muestran solo si el documento es «auténtico y vigente»; en borrador, reemplazado o anulado no aparece ninguno.
+
+| Botón | Qué hace | Cuándo aparece |
+|-------|----------|----------------|
+| 🔐 Ver mi estado de cuenta | Despliega: «Abrí la app Expenses e ingresá con tu usuario» (más descarga de la app) y, para la administración, «Ingresar en la web» | Siempre |
+| 💬 Hablar con la administración | Abre WhatsApp con el mensaje armado («Hola, tengo una consulta sobre la liquidación de expensas de Octubre 2026 del edificio Torre Sol») | Si el edificio tiene cargado el WhatsApp (o, si no, el teléfono del administrador) |
+| 🏦 Datos para transferir | Banco, tipo, N.º de cuenta, titular, documento y alias, con botón Copiar | Solo si el edificio activó el interruptor **y** tiene cuentas activas |
+| 📱 Descargar la app | Baja el APK | Si está configurado `App:ApkUrl` (ya lo está) |
+| 📅 Agregar el vencimiento a mi calendario | Baja un archivo `.ics` de todo el día en la fecha de vencimiento, con aviso a las 9:00 del día anterior | Siempre que el período tenga vencimiento |
+
+El interruptor de las cuentas está en **Edificios → editar → Contabilidad y pagos → «Cuentas bancarias de cobro»**: «Mostrar estas cuentas como Datos para transferir…». Apagado por defecto, lo cambia quien edita los datos financieros (no el encargado).
+
+| # | Qué hacer | Resultado esperado |
+|---|-----------|--------------------|
+| 13 | Escanear el QR de una liquidación publicada de un edificio con WhatsApp cargado | Aparece «Hablar con la administración» y abre WhatsApp con el mensaje |
+| 14 | Mismo edificio, interruptor de cuentas **apagado** | No aparece «Datos para transferir» |
+| 15 | Encender el interruptor, guardar, recargar la página del QR | Aparece «Datos para transferir» con las cuentas activas y se pueden copiar |
+| 16 | Tocar «Agregar el vencimiento a mi calendario» | Baja `vencimiento-AAAA-MM-DD.ics`; al abrirlo crea un evento de todo el día |
+| 17 | Tocar «Ver mi estado de cuenta» | Se despliega el texto de la app; «Ingresar en la web» pide login y, al entrar, vuelve a Estado de cuenta |
+| 18 | Probar el QR de un borrador o de un papel reemplazado | Sin botones |
+
 ## Cosas a tener presentes
+- **Propietarios y la web:** los propietarios no usan la web (la web les niega el acceso), usan la app. Por eso «Ver mi estado de cuenta» les indica abrir la app. Abrir la app directamente desde el QR necesita enlaces profundos en la APP y recompilar el APK: no está hecho.
+- El login de la web ahora vuelve a donde ibas (`?returnUrl=`): sirve para este botón y también cuando se vence la sesión. Solo acepta rutas internas.
 - El QR de las liquidaciones **ya impresas o colgadas** no existe: solo aparece al volver a descargar el PDF.
 - No hay botón para anular un código a mano todavía (la columna existe en la tabla); si el período se elimina, la página dice «ya no está disponible».
 - El límite de consultas públicas es por ruta (300 por minuto en total), porque detrás del proxy todos comparten IP.
-- Pendiente (no hecho): QR en el certificado de deudas y el recibo, y el interruptor por edificio del documento de diseño.
+- Pendiente (no hecho): QR en el certificado de deudas y el recibo, un interruptor por edificio para apagar el QR completo (hoy solo está el de las cuentas) y abrir la app directo desde el QR.

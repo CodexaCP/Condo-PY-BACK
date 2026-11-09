@@ -112,6 +112,64 @@ public class DocumentVerificationTests
         Assert.Equal("revoked", (await service.LookupAsync(TokenOf(url), default)).Status);
     }
 
+    [Fact]
+    public async Task Valid_document_carries_the_buttons_data_and_bank_accounts_only_when_the_switch_is_on()
+    {
+        var (db, service, period) = Setup();
+        using var _ = db;
+        var building = await db.Db.Buildings.SingleAsync();
+        building.WhatsAppPhone = "+595981123456";
+        db.Db.BuildingBankAccounts.Add(new BuildingBankAccount
+        {
+            CompanyId = period.CompanyId, BuildingId = building.Id, BankName = "Banco Demo", AccountNumber = "123-456",
+            HolderName = "Consorcio Torre Sol", Alias = "torresol"
+        });
+        period.DueDate = new DateOnly(2026, 11, 15);
+        await db.Db.SaveChangesAsync();
+
+        var url = await service.IssueSettlementAsync(period, Summary(period), null, default);
+        var off = await service.LookupAsync(TokenOf(url), default);
+
+        Assert.Equal("valid", off.Status);
+        Assert.Equal("2026-11-15", off.DueDate);
+        Assert.StartsWith("https://wa.me/595981123456?text=", off.WhatsAppUrl);
+        Assert.Contains("Octubre%202026", off.WhatsAppUrl);
+        Assert.Empty(off.BankAccounts); // apagado por defecto
+
+        building.QrShowBankAccounts = true;
+        await db.Db.SaveChangesAsync();
+        var on = await service.LookupAsync(TokenOf(url), default);
+
+        var account = Assert.Single(on.BankAccounts);
+        Assert.Equal("Banco Demo", account.BankName);
+        Assert.Equal("torresol", account.Alias);
+    }
+
+    [Fact]
+    public async Task Draft_and_replaced_documents_do_not_expose_the_buttons_data()
+    {
+        var (db, service, period) = Setup();
+        using var _ = db;
+        var building = await db.Db.Buildings.SingleAsync();
+        building.WhatsAppPhone = "+595981123456";
+        building.QrShowBankAccounts = true;
+        period.Status = ExpensePeriodStatus.Draft;
+        await db.Db.SaveChangesAsync();
+
+        var draftUrl = await service.IssueSettlementAsync(period, Summary(period), null, default);
+        var draft = await service.LookupAsync(TokenOf(draftUrl), default);
+        Assert.Equal("draft", draft.Status);
+        Assert.Null(draft.WhatsAppUrl);
+        Assert.Empty(draft.BankAccounts);
+
+        period.Status = ExpensePeriodStatus.Published;
+        await service.IssueSettlementAsync(period, Summary(period), null, default);
+        var replaced = await service.LookupAsync(TokenOf(draftUrl), default);
+        Assert.Equal("superseded", replaced.Status);
+        Assert.Null(replaced.WhatsAppUrl);
+        Assert.Empty(replaced.BankAccounts);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

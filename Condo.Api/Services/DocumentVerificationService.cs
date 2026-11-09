@@ -25,6 +25,26 @@ public sealed class DocumentVerificationResult
     public string? TotalFormatted { get; set; }
     public DateTime? IssuedAtUtc { get; set; }
     public DateTime? ReplacedAtUtc { get; set; }
+
+    // Botones de la pagina publica. Solo se completan en un documento vigente y solo con datos que ya son publicos del edificio.
+    // Vencimiento del periodo (yyyy-MM-dd), para el recordatorio de calendario.
+    public string? DueDate { get; set; }
+    // Enlace de WhatsApp con el mensaje armado (el telefono del edificio, si lo tiene cargado).
+    public string? WhatsAppUrl { get; set; }
+    public string? AppDownloadUrl { get; set; }
+    // Cuentas para transferir: solo si el edificio activo el interruptor "mostrar en el QR" (apagado por defecto).
+    public List<DocumentVerificationBankAccount> BankAccounts { get; set; } = new();
+}
+
+public sealed class DocumentVerificationBankAccount
+{
+    public string BankName { get; set; } = string.Empty;
+    // Checking | Savings
+    public string AccountType { get; set; } = string.Empty;
+    public string AccountNumber { get; set; } = string.Empty;
+    public string HolderName { get; set; } = string.Empty;
+    public string? HolderDocument { get; set; }
+    public string? Alias { get; set; }
 }
 
 /// <summary>
@@ -141,7 +161,58 @@ public partial class DocumentVerificationService(ICondoDbContext dbContext, ICon
         }
 
         result.Status = row.IsPublished ? "valid" : "draft";
+        if (result.Status == "valid") await FillActionsAsync(result, row, ct);
         return result;
+    }
+
+    // Datos de los botones (WhatsApp, vencimiento, app, transferencia). Se leen en vivo del edificio: si cambia el telefono o la cuenta, el QR
+    // impreso muestra lo nuevo. Nunca incluye datos de unidades ni de personas.
+    private async Task FillActionsAsync(DocumentVerificationResult result, DocumentVerification row, CancellationToken ct)
+    {
+        var due = await dbContext.ExpensePeriods.AsNoTracking()
+            .Where(x => x.Id == row.DocumentId && x.CompanyId == row.CompanyId)
+            .Select(x => (DateOnly?)x.DueDate).FirstOrDefaultAsync(ct);
+        result.DueDate = due?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var building = await dbContext.Buildings.AsNoTracking()
+            .Where(x => x.Id == row.BuildingId && x.CompanyId == row.CompanyId && !x.IsDeleted)
+            .Select(x => new { x.WhatsAppPhone, x.AdministratorPhone, x.QrShowBankAccounts })
+            .FirstOrDefaultAsync(ct);
+
+        var apk = configuration["App:ApkUrl"];
+        result.AppDownloadUrl = string.IsNullOrWhiteSpace(apk) ? null : apk;
+        if (building is null) return;
+
+        var digits = PhoneDigits(building.WhatsAppPhone) ?? PhoneDigits(building.AdministratorPhone);
+        if (digits is not null)
+        {
+            var text = $"Hola, tengo una consulta sobre la liquidación de expensas de {row.PeriodName} del edificio {row.BuildingName}.";
+            result.WhatsAppUrl = $"https://wa.me/{digits}?text={Uri.EscapeDataString(text)}";
+        }
+
+        if (building.QrShowBankAccounts)
+        {
+            result.BankAccounts = await dbContext.BuildingBankAccounts.AsNoTracking()
+                .Where(x => x.BuildingId == row.BuildingId && x.CompanyId == row.CompanyId && !x.IsDeleted && x.IsActive)
+                .OrderBy(x => x.BankName)
+                .Select(x => new DocumentVerificationBankAccount
+                {
+                    BankName = x.BankName,
+                    AccountType = x.AccountType.ToString(),
+                    AccountNumber = x.AccountNumber,
+                    HolderName = x.HolderName,
+                    HolderDocument = x.HolderDocument,
+                    Alias = x.Alias
+                })
+                .ToListAsync(ct);
+        }
+    }
+
+    // Los telefonos del edificio se guardan completos con el prefijo del pais (+595981123456): wa.me los quiere solo con digitos.
+    private static string? PhoneDigits(string? phone)
+    {
+        var digits = new string((phone ?? string.Empty).Where(char.IsDigit).ToArray());
+        return digits.Length is >= 8 and <= 15 ? digits : null;
     }
 
     // Contenido que identifica una emision: si cambia cualquiera de estos datos, el papel anterior deja de ser la version vigente.
