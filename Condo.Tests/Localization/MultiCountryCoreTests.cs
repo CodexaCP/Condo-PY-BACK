@@ -290,12 +290,12 @@ public class MultiCountryCoreTests
         t.Db.SaveChanges();
 
         var tenant = new FakeTenantContext { Role = "SuperAdmin", CompanyId = company.Id };
-        var controller = new VotesController(t.Db, new FakeAccessScope(tenant), tenant,
+        var service = new VoteService(t.Db, new FakeAccessScope(tenant), tenant,
             new PushDispatcher(t.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance));
 
         async Task<VoteDto> RunAsync(int votesForA)
         {
-            var vote = new Vote { BuildingId = building.Id, Title = "Obra", MajorityRule = "DoubleAbsolute", WeightType = "ByCoefficient", Status = "Open" };
+            var vote = new Vote { BuildingId = building.Id, Title = "Obra", MajorityRule = VoteMajorityRule.DoubleAbsolute, WeightType = VoteWeightType.ByCoefficient, Status = VoteStatus.Open };
             var a = new VoteOption { Label = "Si", DisplayOrder = 0 };
             var b = new VoteOption { Label = "No", DisplayOrder = 1 };
             vote.Options.Add(a);
@@ -306,8 +306,9 @@ public class MultiCountryCoreTests
                 t.Db.VoteCasts.Add(new VoteCast { VoteId = vote.Id, VoteOptionId = a.Id, UnitId = units[i].Id, CoefficientWeight = 0.25m });
             await t.Db.SaveChangesAsync();
 
-            var result = await controller.GetById(vote.Id, CancellationToken.None);
-            return Assert.IsType<VoteDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+            var result = await service.GetAsync(vote.Id, CancellationToken.None);
+            Assert.True(result.Ok);
+            return result.Value!;
         }
 
         var tres = await RunAsync(3);
@@ -322,8 +323,9 @@ public class MultiCountryCoreTests
     }
 
     [Fact]
-    public async Task Una_votacion_nueva_es_informativa_fuera_de_paraguay_y_formal_en_paraguay()
+    public async Task Una_votacion_nueva_es_informativa_por_defecto_tambien_en_paraguay()
     {
+        // Decision de Tony (2026-11-11): informativa por defecto en todos los paises hasta validar con un abogado.
         using var t = new TestDb();
         var py = t.AddCompany("PY");
         var ar = t.AddCompany("AR");
@@ -335,16 +337,22 @@ public class MultiCountryCoreTests
 
         var admin = t.AddUser(py, UserRole.CompanyAdmin, "Admin");
         var tenant = new FakeTenantContext { Role = "SuperAdmin", UserId = admin.Id };
-        var controller = new VotesController(t.Db, new FakeAccessScope(tenant), tenant,
-            new PushDispatcher(t.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance));
+        var controller = new VotesController(new VoteService(t.Db, new FakeAccessScope(tenant), tenant,
+            new PushDispatcher(t.Db, new NoopPushSender(), NullLogger<PushDispatcher>.Instance)));
 
         VoteUpsertRequest Req(Guid buildingId) => new() { BuildingId = buildingId, Title = "Consulta", OptionLabels = ["Si", "No"] };
 
         var votePy = Assert.IsType<VoteDto>(Assert.IsType<CreatedAtActionResult>((await controller.Create(Req(buildingPy.Id), CancellationToken.None)).Result).Value);
         var voteAr = Assert.IsType<VoteDto>(Assert.IsType<CreatedAtActionResult>((await controller.Create(Req(buildingAr.Id), CancellationToken.None)).Result).Value);
 
-        Assert.False(votePy.IsInformative);
+        Assert.True(votePy.IsInformative);
         Assert.True(voteAr.IsInformative);
         Assert.Equal("Simple", votePy.MajorityRule);
+
+        // Si se pide formal de forma explicita, queda formal.
+        var formal = Req(buildingPy.Id);
+        formal.IsInformative = false;
+        var voteFormal = Assert.IsType<VoteDto>(Assert.IsType<CreatedAtActionResult>((await controller.Create(formal, CancellationToken.None)).Result).Value);
+        Assert.False(voteFormal.IsInformative);
     }
 }

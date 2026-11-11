@@ -1,421 +1,80 @@
 using Condo.Api.Services;
-using Condo.Application.Abstractions;
-using Condo.Application.Localization;
 using Condo.Application.Models;
-using Condo.Domain.Entities;
-using Condo.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Condo.Api.Controllers;
 
+// Votaciones del edificio, vistas por el personal. La logica (estados, permisos por accion, historial, resultado congelado y
+// concurrencia) vive en VoteService.
 [ApiController]
-[Authorize]
+[Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
 [Route("api/votes")]
-public class VotesController(
-    ICondoDbContext dbContext,
-    IAccessScopeService accessScope,
-    ITenantContext tenant,
-    PushDispatcher pushDispatcher) : ControllerBase
+public class VotesController(VoteService votes) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<VoteDto>>> GetAll(
-        [FromQuery] Guid? buildingId,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<VoteDto>>> GetAll([FromQuery] Guid? buildingId, CancellationToken cancellationToken)
     {
-        var accessibleIds = await accessScope.GetAccessibleBuildingIdsAsync(cancellationToken);
-
-        if (buildingId.HasValue && !accessScope.IsSuperAdmin && !accessibleIds.Contains(buildingId.Value))
-            return Forbid();
-
-        var query = dbContext.Votes.AsNoTracking().Where(x => !x.IsDeleted);
-
-        if (buildingId.HasValue)
-            query = query.Where(x => x.BuildingId == buildingId.Value);
-        else if (!accessScope.IsSuperAdmin)
-            query = query.Where(x => accessibleIds.Contains(x.BuildingId));
-
-        var votes = await query
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(x => new
-            {
-                x.Id, x.BuildingId, BuildingName = x.Building.Name,
-                x.Title, x.Description, x.QuorumPercentage, x.WeightType, x.MajorityRule, x.IsInformative, x.Status,
-                x.OpenedAtUtc, x.ClosedAtUtc, x.CreatedAtUtc,
-                CreatedByName = x.CreatedBy != null ? x.CreatedBy.FullName : string.Empty,
-                OptionCount = x.Options.Count(),
-                CastCount = x.Casts.Count()
-            })
-            .ToListAsync(cancellationToken);
-
-        var buildingIds = votes.Select(x => x.BuildingId).Distinct().ToList();
-        var unitCounts = await dbContext.Units
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.IsActive && buildingIds.Contains(x.BuildingId))
-            .GroupBy(x => x.BuildingId)
-            .Select(g => new { BuildingId = g.Key, Count = g.Count() })
-            .ToListAsync(cancellationToken);
-
-        var unitCountMap = unitCounts.ToDictionary(x => x.BuildingId, x => x.Count);
-
-        return Ok(votes.Select(v =>
-        {
-            var totalUnits = unitCountMap.GetValueOrDefault(v.BuildingId, 0);
-            var quorumReached = totalUnits > 0 && (v.CastCount * 100m / totalUnits) >= v.QuorumPercentage;
-            return new VoteDto
-            {
-                Id = v.Id, BuildingId = v.BuildingId, BuildingName = v.BuildingName,
-                Title = v.Title, Description = v.Description,
-                QuorumPercentage = v.QuorumPercentage, WeightType = v.WeightType,
-                MajorityRule = v.MajorityRule, IsInformative = v.IsInformative,
-                Status = v.Status, OpenedAtUtc = v.OpenedAtUtc, ClosedAtUtc = v.ClosedAtUtc,
-                CreatedByName = v.CreatedByName, CreatedAtUtc = v.CreatedAtUtc,
-                TotalUnits = totalUnits, ParticipatingUnits = v.CastCount,
-                QuorumReached = quorumReached
-            };
-        }).ToList());
+        var result = await votes.ListAsync(buildingId, cancellationToken);
+        return result.Ok ? Ok(result.Value) : ToError(result.Error!);
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<VoteDto>> GetById(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<VoteDto>> GetById(Guid id, CancellationToken cancellationToken) =>
+        ToAction(await votes.GetAsync(id, cancellationToken));
+
+    // Historial de votos de la votacion (o de una unidad): cada voto, cambio y quita, con quien y por que canal.
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<IReadOnlyList<VoteCastEventDto>>> GetHistory(Guid id, [FromQuery] Guid? unitId, CancellationToken cancellationToken)
     {
-        var vote = await dbContext.Votes
-            .AsNoTracking()
-            .Include(x => x.Building)
-            .Include(x => x.Options.OrderBy(o => o.DisplayOrder))
-            .Include(x => x.Casts).ThenInclude(c => c.Unit)
-            .Include(x => x.Casts).ThenInclude(c => c.Option)
-            .Include(x => x.CreatedBy)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-
-        if (vote is null) return NotFound();
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        return Ok(await BuildDetailDto(vote, cancellationToken));
+        var result = await votes.GetHistoryAsync(id, unitId, cancellationToken);
+        return result.Ok ? Ok(result.Value) : ToError(result.Error!);
     }
 
     [HttpPost]
     public async Task<ActionResult<VoteDto>> Create([FromBody] VoteUpsertRequest request, CancellationToken cancellationToken)
     {
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(request.BuildingId, cancellationToken))
-            return Forbid();
-
-        var error = Validate(request);
-        if (error is not null) return BadRequest(error);
-
-        var vote = new Vote
-        {
-            BuildingId = request.BuildingId,
-            Title = request.Title.Trim(),
-            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
-            QuorumPercentage = request.QuorumPercentage,
-            WeightType = request.WeightType,
-            MajorityRule = request.MajorityRule ?? "Simple",
-            IsInformative = request.IsInformative ?? await DefaultInformativeAsync(request.BuildingId, cancellationToken),
-            Status = "Draft",
-            CreatedByUserId = tenant.UserId
-        };
-
-        for (int i = 0; i < request.OptionLabels.Count; i++)
-            vote.Options.Add(new VoteOption { Label = request.OptionLabels[i].Trim(), DisplayOrder = i });
-
-        dbContext.Votes.Add(vote);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return CreatedAtAction(nameof(GetById), new { id = vote.Id },
-            await LoadDetailDto(vote.Id, cancellationToken));
+        var result = await votes.CreateAsync(request, cancellationToken);
+        return result.Ok ? CreatedAtAction(nameof(GetById), new { id = result.Value!.Id }, result.Value) : ToError(result.Error!);
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<VoteDto>> Update(Guid id, [FromBody] VoteUpsertRequest request, CancellationToken cancellationToken)
-    {
-        var vote = await dbContext.Votes
-            .Include(x => x.Options)
-            .Include(x => x.Casts)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-
-        if (vote is null) return NotFound();
-        if (vote.Status != "Draft") return BadRequest("Solo se pueden editar votaciones en estado Borrador.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        var error = Validate(request);
-        if (error is not null) return BadRequest(error);
-
-        vote.Title = request.Title.Trim();
-        vote.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
-        vote.QuorumPercentage = request.QuorumPercentage;
-        vote.WeightType = request.WeightType;
-        if (request.MajorityRule is not null) vote.MajorityRule = request.MajorityRule;
-        if (request.IsInformative.HasValue) vote.IsInformative = request.IsInformative.Value;
-
-        // Replace options only if no casts exist yet
-        if (!vote.Casts.Any())
-        {
-            dbContext.VoteOptions.RemoveRange(vote.Options);
-            vote.Options.Clear();
-            for (int i = 0; i < request.OptionLabels.Count; i++)
-                vote.Options.Add(new VoteOption { VoteId = vote.Id, Label = request.OptionLabels[i].Trim(), DisplayOrder = i });
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(await LoadDetailDto(vote.Id, cancellationToken));
-    }
+    public async Task<ActionResult<VoteDto>> Update(Guid id, [FromBody] VoteUpsertRequest request, CancellationToken cancellationToken) =>
+        ToAction(await votes.UpdateAsync(id, request, cancellationToken));
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var vote = await dbContext.Votes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-        if (vote is null) return NotFound();
-        if (vote.Status != "Draft") return BadRequest("Solo se pueden eliminar votaciones en estado Borrador.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        vote.IsDeleted = true;
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return NoContent();
+        var result = await votes.DeleteAsync(id, cancellationToken);
+        return result.Ok ? NoContent() : ToError(result.Error!);
     }
 
     [HttpPost("{id:guid}/open")]
-    public async Task<ActionResult<VoteDto>> Open(Guid id, CancellationToken cancellationToken)
-    {
-        var vote = await dbContext.Votes.Include(x => x.Options)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-
-        if (vote is null) return NotFound();
-        if (vote.Status != "Draft") return BadRequest("La votación ya fue abierta o cerrada.");
-        if (vote.Options.Count < 2) return BadRequest("Se necesitan al menos 2 opciones para abrir la votación.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        vote.Status = "Open";
-        vote.OpenedAtUtc = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var companyId = await GetBuildingCompanyIdAsync(vote.BuildingId, cancellationToken);
-        if (companyId.HasValue)
-        {
-            var recipientIds = await GetBuildingUserIdsAsync(vote.BuildingId, cancellationToken);
-            const string voteOpenedTitle = "Nueva votación abierta";
-
-            foreach (var rid in recipientIds)
-            {
-                dbContext.Notifications.Add(new Notification
-                {
-                    CompanyId = companyId.Value,
-                    RecipientId = rid,
-                    Type = NotificationType.VoteOpened,
-                    Title = voteOpenedTitle,
-                    Body = vote.Title,
-                    EntityType = "Vote",
-                    EntityId = vote.Id
-                });
-            }
-            if (recipientIds.Count > 0)
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-                await pushDispatcher.NotifyUsersAsync(recipientIds, voteOpenedTitle, vote.Title, "Vote", vote.Id, cancellationToken);
-            }
-        }
-
-        return Ok(await LoadDetailDto(vote.Id, cancellationToken));
-    }
+    public async Task<ActionResult<VoteDto>> Open(Guid id, CancellationToken cancellationToken) =>
+        ToAction(await votes.OpenAsync(id, cancellationToken));
 
     [HttpPost("{id:guid}/close")]
-    public async Task<ActionResult<VoteDto>> Close(Guid id, CancellationToken cancellationToken)
-    {
-        var vote = await dbContext.Votes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-        if (vote is null) return NotFound();
-        if (vote.Status != "Open") return BadRequest("La votación no está abierta.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
+    public async Task<ActionResult<VoteDto>> Close(Guid id, CancellationToken cancellationToken) =>
+        ToAction(await votes.CloseAsync(id, cancellationToken));
 
-        vote.Status = "Closed";
-        vote.ClosedAtUtc = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(await LoadDetailDto(vote.Id, cancellationToken));
-    }
+    [HttpPost("{id:guid}/cancel")]
+    public async Task<ActionResult<VoteDto>> Cancel(Guid id, [FromBody] VoteCancelRequest request, CancellationToken cancellationToken) =>
+        ToAction(await votes.CancelAsync(id, request, cancellationToken));
 
     [HttpPost("{id:guid}/cast")]
-    public async Task<ActionResult<VoteDto>> Cast(Guid id, [FromBody] VoteCastRequest request, CancellationToken cancellationToken)
-    {
-        var vote = await dbContext.Votes.Include(x => x.Options).Include(x => x.Casts)
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-
-        if (vote is null) return NotFound();
-        if (vote.Status != "Open") return BadRequest("La votación no está abierta.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        var option = vote.Options.FirstOrDefault(x => x.Id == request.VoteOptionId);
-        if (option is null) return BadRequest("Opción inválida.");
-
-        var unit = await dbContext.Units.AsNoTracking()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == request.UnitId && x.BuildingId == vote.BuildingId, cancellationToken);
-        if (unit is null) return BadRequest("La unidad no pertenece al edificio de esta votación.");
-
-        var existing = vote.Casts.FirstOrDefault(x => x.UnitId == request.UnitId);
-        if (existing is not null)
-            dbContext.VoteCasts.Remove(existing);
-
-        dbContext.VoteCasts.Add(new VoteCast
-        {
-            VoteId = vote.Id,
-            VoteOptionId = request.VoteOptionId,
-            UnitId = request.UnitId,
-            CoefficientWeight = unit.Coefficient,
-            CastAtUtc = DateTime.UtcNow,
-            CastByUserId = tenant.UserId
-        });
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(await LoadDetailDto(vote.Id, cancellationToken));
-    }
+    public async Task<ActionResult<VoteDto>> Cast(Guid id, [FromBody] VoteCastRequest request, CancellationToken cancellationToken) =>
+        ToAction(await votes.CastAsync(id, request, cancellationToken));
 
     [HttpDelete("{id:guid}/casts/{castId:guid}")]
-    public async Task<ActionResult<VoteDto>> RemoveCast(Guid id, Guid castId, CancellationToken cancellationToken)
+    public async Task<ActionResult<VoteDto>> RemoveCast(Guid id, Guid castId, CancellationToken cancellationToken) =>
+        ToAction(await votes.RemoveCastAsync(id, castId, cancellationToken));
+
+    private ActionResult<VoteDto> ToAction(VoteResult<VoteDto> result) => result.Ok ? Ok(result.Value) : ToError(result.Error!);
+
+    // Texto plano en 400/403/409 (lo que lee el web con extractApiErrorMessage); 404 sin cuerpo.
+    private ActionResult ToError(VoteError error) => error.StatusCode switch
     {
-        var vote = await dbContext.Votes.FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, cancellationToken);
-        if (vote is null) return NotFound();
-        if (vote.Status != "Open") return BadRequest("Solo se pueden eliminar votos de una votación abierta.");
-        if (!accessScope.IsSuperAdmin && !await accessScope.CanAccessBuildingAsync(vote.BuildingId, cancellationToken))
-            return Forbid();
-
-        var cast = await dbContext.VoteCasts.FirstOrDefaultAsync(x => x.Id == castId && x.VoteId == id, cancellationToken);
-        if (cast is null) return NotFound();
-
-        dbContext.VoteCasts.Remove(cast);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(await LoadDetailDto(vote.Id, cancellationToken));
-    }
-
-    private async Task<VoteDto> LoadDetailDto(Guid id, CancellationToken ct)
-    {
-        var vote = await dbContext.Votes
-            .AsNoTracking()
-            .Include(x => x.Building)
-            .Include(x => x.Options.OrderBy(o => o.DisplayOrder))
-            .Include(x => x.Casts).ThenInclude(c => c.Unit)
-            .Include(x => x.Casts).ThenInclude(c => c.Option)
-            .Include(x => x.CreatedBy)
-            .FirstAsync(x => x.Id == id, ct);
-
-        return await BuildDetailDto(vote, ct);
-    }
-
-    private async Task<VoteDto> BuildDetailDto(Vote vote, CancellationToken ct)
-    {
-        var allUnits = await dbContext.Units
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.IsActive && x.BuildingId == vote.BuildingId)
-            .OrderBy(x => x.Code)
-            .ToListAsync(ct);
-
-        var castByUnit = vote.Casts.ToDictionary(x => x.UnitId);
-        var totalWeight = vote.Casts.Sum(x => x.CoefficientWeight);
-        var totalCasts = vote.Casts.Count;
-        var totalUnits = allUnits.Count;
-        var quorumReached = totalUnits > 0 && (totalCasts * 100m / totalUnits) >= vote.QuorumPercentage;
-        var totalCoefficient = allUnits.Sum(x => x.Coefficient);
-
-        var options = vote.Options.Select(opt =>
-        {
-            var optCasts = vote.Casts.Where(c => c.VoteOptionId == opt.Id).ToList();
-            var castCount = optCasts.Count;
-            var castWeight = optCasts.Sum(c => c.CoefficientWeight);
-            var pct = vote.WeightType == "ByCoefficient"
-                ? (totalWeight > 0 ? Math.Round(castWeight * 100m / totalWeight, 1) : 0)
-                : (totalCasts > 0 ? Math.Round(castCount * 100m / totalCasts, 1) : 0);
-            // Mayoria absoluta sobre la totalidad: se mide contra todas las unidades y todo el coeficiente del edificio, voten o no.
-            var pctUnits = totalUnits > 0 ? Math.Round(castCount * 100m / totalUnits, 2) : 0m;
-            var pctCoefficient = totalCoefficient > 0 ? Math.Round(castWeight * 100m / totalCoefficient, 2) : 0m;
-            return new VoteOptionDto
-            {
-                Id = opt.Id, Label = opt.Label, DisplayOrder = opt.DisplayOrder, CastCount = castCount, CastWeight = castWeight, Percentage = pct,
-                PercentOfTotalUnits = pctUnits, PercentOfTotalCoefficient = pctCoefficient,
-                HasAbsoluteMajority = pctUnits > 50m && pctCoefficient > 50m
-            };
-        }).ToList();
-
-        var units = allUnits.Select(u =>
-        {
-            castByUnit.TryGetValue(u.Id, out var cast);
-            return new VoteUnitSummaryDto
-            {
-                UnitId = u.Id, UnitCode = u.Code, Coefficient = u.Coefficient,
-                CastId = cast?.Id, VotedOptionId = cast?.VoteOptionId,
-                VotedOptionLabel = cast?.Option?.Label, CastAtUtc = cast?.CastAtUtc
-            };
-        }).ToList();
-
-        return new VoteDto
-        {
-            Id = vote.Id, BuildingId = vote.BuildingId, BuildingName = vote.Building.Name,
-            Title = vote.Title, Description = vote.Description,
-            QuorumPercentage = vote.QuorumPercentage, WeightType = vote.WeightType,
-            MajorityRule = vote.MajorityRule, IsInformative = vote.IsInformative,
-            ApprovedOptionId = vote.MajorityRule == "DoubleAbsolute" ? options.FirstOrDefault(o => o.HasAbsoluteMajority)?.Id : null,
-            Status = vote.Status, OpenedAtUtc = vote.OpenedAtUtc, ClosedAtUtc = vote.ClosedAtUtc,
-            CreatedByName = vote.CreatedBy?.FullName ?? string.Empty,
-            CreatedAtUtc = vote.CreatedAtUtc,
-            TotalUnits = totalUnits, ParticipatingUnits = totalCasts,
-            QuorumReached = quorumReached,
-            Options = options, Units = units
-        };
-    }
-
-    // Fuera de Paraguay el voto en la app es una consulta informativa por defecto: que valga como voto formal lo decide un abogado local.
-    private async Task<bool> DefaultInformativeAsync(Guid buildingId, CancellationToken ct)
-    {
-        var companyId = await GetBuildingCompanyIdAsync(buildingId, ct);
-        if (companyId is null) return false;
-        var country = await dbContext.Companies.AsNoTracking().Where(x => x.Id == companyId.Value).Select(x => x.CountryCode).FirstOrDefaultAsync(ct);
-        return !string.Equals(country ?? CountryProfiles.Paraguay, CountryProfiles.Paraguay, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private async Task<Guid?> GetBuildingCompanyIdAsync(Guid buildingId, CancellationToken ct)
-    {
-        var row = await dbContext.Buildings
-            .AsNoTracking()
-            .Include(x => x.Condominium)
-            .Where(x => !x.IsDeleted && x.Id == buildingId)
-            .Select(x => new { x.CompanyId, CondCompanyId = x.Condominium != null ? x.Condominium.CompanyId : null })
-            .FirstOrDefaultAsync(ct);
-
-        return row?.CompanyId ?? row?.CondCompanyId;
-    }
-
-    private async Task<List<Guid>> GetBuildingUserIdsAsync(Guid buildingId, CancellationToken ct)
-    {
-        var ownerIds = await dbContext.UnitOwners
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId)
-            .Select(x => x.OwnerId)
-            .ToListAsync(ct);
-
-        var residentUserIds = await dbContext.UnitResidents
-            .AsNoTracking()
-            .Where(x => !x.IsDeleted && x.EndDate == null
-                     && x.Unit != null && !x.Unit.IsDeleted && x.Unit.BuildingId == buildingId
-                     && x.Resident != null && !x.Resident.IsDeleted && x.Resident.ApplicationUserId != null)
-            .Select(x => x.Resident!.ApplicationUserId!.Value)
-            .Distinct()
-            .ToListAsync(ct);
-
-        return ownerIds.Concat(residentUserIds).Distinct().ToList();
-    }
-
-    private static string? Validate(VoteUpsertRequest r)
-    {
-        if (string.IsNullOrWhiteSpace(r.Title)) return "El título es obligatorio.";
-        if (r.Title.Length > 200) return "El título no puede superar 200 caracteres.";
-        if (r.QuorumPercentage < 1 || r.QuorumPercentage > 100) return "El quórum debe estar entre 1 y 100.";
-        if (r.WeightType != "ByUnit" && r.WeightType != "ByCoefficient") return "Tipo de peso inválido.";
-        if (r.MajorityRule is not null && r.MajorityRule != "Simple" && r.MajorityRule != "DoubleAbsolute") return "Regla de mayoría inválida.";
-        var labels = r.OptionLabels.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-        if (labels.Count < 2) return "Se necesitan al menos 2 opciones.";
-        return null;
-    }
+        StatusCodes.Status404NotFound => NotFound(),
+        _ => StatusCode(error.StatusCode, error.Message)
+    };
 }

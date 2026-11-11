@@ -33,6 +33,7 @@ builder.Services.AddScoped<IBuildingComparisonService, BuildingComparisonService
 builder.Services.AddScoped<IOwnerResidencySyncService, OwnerResidencySyncService>();
 builder.Services.AddScoped<Condo.Api.Services.OwnerCreditService>();
 builder.Services.AddScoped<Condo.Api.Services.DocumentVerificationService>();
+builder.Services.AddScoped<Condo.Api.Services.VoteService>();
 // Cifrado de las claves de los comercios de pago. La clave maestra va FUERA de la base y del repositorio: variable de entorno del servicio
 // (Payments__MasterKey, 32 bytes en base64). Sin ella el modulo de pagos avisa y no guarda ninguna clave privada.
 builder.Services.AddSingleton<Condo.Api.Services.ISecretProtector>(_ =>

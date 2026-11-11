@@ -557,6 +557,7 @@ public partial class UnitsController(ICondoDbContext dbContext, IAccessScopeServ
         await Check("notas de crédito de proveedor", dbContext.BuildingExpenseCreditNoteAllocations.AnyAsync(x => x.UnitId == id, cancellationToken));
         await Check("reclamos", dbContext.Claims.AnyAsync(x => x.UnitId == id, cancellationToken));
         await Check("votos", dbContext.VoteCasts.AnyAsync(x => x.UnitId == id, cancellationToken));
+        await Check("historial de votos", dbContext.VoteCastEvents.AnyAsync(x => x.UnitId == id, cancellationToken));
         await Check("publicaciones del Marketplace", dbContext.MarketplaceListings.AnyAsync(x => x.UnitId == id, cancellationToken));
         await Check("reservas del Marketplace", dbContext.MarketplaceReservations.AnyAsync(x => x.UnitId == id, cancellationToken));
         await Check("notas de cambio de propietario", dbContext.MarketplaceHandoverNotes.AnyAsync(x => x.UnitId == id, cancellationToken));

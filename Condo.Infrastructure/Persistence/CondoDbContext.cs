@@ -34,6 +34,7 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
     public DbSet<Vote> Votes => Set<Vote>();
     public DbSet<VoteOption> VoteOptions => Set<VoteOption>();
     public DbSet<VoteCast> VoteCasts => Set<VoteCast>();
+    public DbSet<VoteCastEvent> VoteCastEvents => Set<VoteCastEvent>();
     public DbSet<OwnerPayment> OwnerPayments => Set<OwnerPayment>();
     public DbSet<OwnerPaymentUnit> OwnerPaymentUnits => Set<OwnerPaymentUnit>();
     public DbSet<OwnerCredit> OwnerCredits => Set<OwnerCredit>();
@@ -733,9 +734,28 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Vote>().Property(x => x.QuorumPercentage).HasColumnType("decimal(5,2)");
         modelBuilder.Entity<Vote>().Property(x => x.Title).HasMaxLength(200);
         modelBuilder.Entity<Vote>().Property(x => x.Description).HasMaxLength(1000);
-        modelBuilder.Entity<Vote>().Property(x => x.WeightType).HasMaxLength(20);
-        modelBuilder.Entity<Vote>().Property(x => x.MajorityRule).HasMaxLength(20).HasDefaultValue("Simple").ValueGeneratedNever();
-        modelBuilder.Entity<Vote>().Property(x => x.Status).HasMaxLength(20);
+        // Enums guardados como texto: los valores ya guardados ("ByUnit", "Simple", "Draft"...) son los nombres de los enums.
+        modelBuilder.Entity<Vote>().Property(x => x.WeightType).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Vote>().Property(x => x.MajorityRule).HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(VoteMajorityRule.Simple).ValueGeneratedNever();
+        modelBuilder.Entity<Vote>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<Vote>().Property(x => x.ResultHash).HasMaxLength(64);
+        modelBuilder.Entity<Vote>().Property(x => x.ResultTotalCoefficient).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<Vote>().Property(x => x.ResultParticipatingCoefficient).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<Vote>().Property(x => x.CancelReason).HasMaxLength(500);
+        if (Database.IsSqlServer())
+        {
+            modelBuilder.Entity<Vote>().Property(x => x.RowVersion).IsRowVersion();
+        }
+        modelBuilder.Entity<Vote>()
+            .HasOne(x => x.ClosedBy).WithMany()
+            .HasForeignKey(x => x.ClosedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Vote>()
+            .HasOne<ApplicationUser>().WithMany()
+            .HasForeignKey(x => x.OpenedByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Vote>()
+            .HasOne<ApplicationUser>().WithMany()
+            .HasForeignKey(x => x.CancelledByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<VoteOption>().Property(x => x.Label).HasMaxLength(200);
         modelBuilder.Entity<Vote>().HasIndex(x => new { x.BuildingId, x.CreatedAtUtc });
         modelBuilder.Entity<Vote>()
@@ -750,6 +770,8 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
             .HasForeignKey(x => x.VoteId).OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<VoteCast>().Property(x => x.CoefficientWeight).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<VoteCast>().Property(x => x.Source).HasConversion<string>().HasMaxLength(20)
+            .HasDefaultValue(VoteCastSource.Staff).ValueGeneratedNever();
         modelBuilder.Entity<VoteCast>().HasIndex(x => new { x.VoteId, x.UnitId }).IsUnique();
         modelBuilder.Entity<VoteCast>()
             .HasOne(x => x.Vote).WithMany(x => x.Casts)
@@ -763,6 +785,30 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<VoteCast>()
             .HasOne(x => x.CastBy).WithMany()
             .HasForeignKey(x => x.CastByUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+
+        // Historial de votos: solo insercion (ver PrepareChangesForSave).
+        modelBuilder.Entity<VoteCastEvent>().Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<VoteCastEvent>().Property(x => x.Source).HasConversion<string>().HasMaxLength(20);
+        modelBuilder.Entity<VoteCastEvent>().Property(x => x.CoefficientWeight).HasColumnType("decimal(18,6)");
+        modelBuilder.Entity<VoteCastEvent>().HasIndex(x => new { x.VoteId, x.UnitId, x.OccurredAtUtc });
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.Vote).WithMany()
+            .HasForeignKey(x => x.VoteId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.Unit).WithMany()
+            .HasForeignKey(x => x.UnitId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.PreviousOption).WithMany()
+            .HasForeignKey(x => x.PreviousOptionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.NewOption).WithMany()
+            .HasForeignKey(x => x.NewOptionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.ActingUser).WithMany()
+            .HasForeignKey(x => x.ActingUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<VoteCastEvent>()
+            .HasOne(x => x.OwnerUser).WithMany()
+            .HasForeignKey(x => x.OwnerUserId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
 
         // ── OwnerPayment ───────────────────────────────────────────────────────
         modelBuilder.Entity<OwnerPayment>().Property(x => x.DeclaredAmount).HasColumnType("decimal(18,2)");
@@ -1585,6 +1631,12 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         if (ChangeTracker.Entries<PaymentEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Los eventos de cobros online no se pueden modificar ni eliminar.");
+        }
+
+        // El historial de votos tambien: el voto vigente cambia, la constancia de cada cambio no.
+        if (ChangeTracker.Entries<VoteCastEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("El historial de votos no se puede modificar ni eliminar.");
         }
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())

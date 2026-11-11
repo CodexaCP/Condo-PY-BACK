@@ -5855,8 +5855,21 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("BuildingId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CancelledByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ClosedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
@@ -5883,8 +5896,36 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("OpenedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("OpenedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("QuorumPercentage")
                         .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("ResultHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("ResultParticipatingCoefficient")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<int?>("ResultParticipatingUnits")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("ResultTotalCoefficient")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<int?>("ResultTotalUnits")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -5906,7 +5947,13 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CancelledByUserId");
+
+                    b.HasIndex("ClosedByUserId");
+
                     b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OpenedByUserId");
 
                     b.HasIndex("BuildingId", "CreatedAtUtc");
 
@@ -5927,6 +5974,12 @@ namespace Condo.Infrastructure.Persistence.Migrations
 
                     b.Property<decimal>("CoefficientWeight")
                         .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Staff");
 
                     b.Property<Guid>("UnitId")
                         .HasColumnType("uniqueidentifier");
@@ -5949,6 +6002,63 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("VoteCasts");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.VoteCastEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActingUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("CoefficientWeight")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("NewOptionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PreviousOptionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("UnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("VoteId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActingUserId");
+
+                    b.HasIndex("NewOptionId");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("PreviousOptionId");
+
+                    b.HasIndex("UnitId");
+
+                    b.HasIndex("VoteId", "UnitId", "OccurredAtUtc");
+
+                    b.ToTable("VoteCastEvents");
                 });
 
             modelBuilder.Entity("Condo.Domain.Entities.VoteOption", b =>
@@ -8100,12 +8210,29 @@ namespace Condo.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Condo.Domain.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CancelledByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Condo.Domain.Entities.ApplicationUser", "CreatedBy")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Condo.Domain.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("OpenedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Building");
+
+                    b.Navigation("ClosedBy");
 
                     b.Navigation("CreatedBy");
                 });
@@ -8138,6 +8265,53 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Navigation("CastBy");
 
                     b.Navigation("Option");
+
+                    b.Navigation("Unit");
+
+                    b.Navigation("Vote");
+                });
+
+            modelBuilder.Entity("Condo.Domain.Entities.VoteCastEvent", b =>
+                {
+                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "ActingUser")
+                        .WithMany()
+                        .HasForeignKey("ActingUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.VoteOption", "NewOption")
+                        .WithMany()
+                        .HasForeignKey("NewOptionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.ApplicationUser", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.VoteOption", "PreviousOption")
+                        .WithMany()
+                        .HasForeignKey("PreviousOptionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Condo.Domain.Entities.Unit", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Condo.Domain.Entities.Vote", "Vote")
+                        .WithMany()
+                        .HasForeignKey("VoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActingUser");
+
+                    b.Navigation("NewOption");
+
+                    b.Navigation("OwnerUser");
+
+                    b.Navigation("PreviousOption");
 
                     b.Navigation("Unit");
 

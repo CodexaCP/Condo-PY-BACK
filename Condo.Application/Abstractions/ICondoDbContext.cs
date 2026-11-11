@@ -35,6 +35,7 @@ public interface ICondoDbContext
     DbSet<Vote> Votes { get; }
     DbSet<VoteOption> VoteOptions { get; }
     DbSet<VoteCast> VoteCasts { get; }
+    DbSet<VoteCastEvent> VoteCastEvents { get; }
     DbSet<OwnerPayment> OwnerPayments { get; }
     DbSet<OwnerPaymentUnit> OwnerPaymentUnits { get; }
     DbSet<OwnerCredit> OwnerCredits { get; }
