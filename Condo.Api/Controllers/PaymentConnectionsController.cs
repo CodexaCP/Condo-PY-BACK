@@ -94,7 +94,7 @@ public class PaymentConnectionsController(
         if (!company.HasValue) return BadRequest("Indicá la empresa.");
 
         var canEdit = CanEdit;
-        var connections = await QueryConnections(company.Value).OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var connections = await QueryConnections(company.Value).AsNoTracking().OrderBy(x => x.Name).ToListAsync(cancellationToken);
 
         // Quien no edita ve solo las conexiones con algun edificio de su alcance, y solo esos edificios.
         HashSet<Guid>? scope = null;
