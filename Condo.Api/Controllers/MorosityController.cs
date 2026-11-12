@@ -62,6 +62,55 @@ public class MorosityController(ICondoDbContext dbContext, IAccessScopeService a
         });
     }
 
+    /// <summary>Una fila por unidad con deuda vencida; opcionalmente solo las cuyo comprobante más viejo venció en la fecha dada o antes.</summary>
+    [HttpGet("units")]
+    [Authorize(Roles = "SuperAdmin,CompanyAdmin,CompanyOperator,BuildingManager")]
+    public async Task<ActionResult<IReadOnlyList<MorosityUnitDto>>> GetUnits(
+        [FromQuery] Guid? buildingId, [FromQuery] DateOnly? dueOnOrBefore, CancellationToken cancellationToken = default)
+    {
+        var dataset = await BuildOverdueItemsAsync(buildingId, null, null, null, cancellationToken);
+        if (dataset is null)
+        {
+            return Forbid();
+        }
+
+        var rows = dataset.OverdueItems
+            .GroupBy(x => x.UnitId)
+            .Select(g =>
+            {
+                var oldest = g.MinBy(x => x.DueDate)!;
+                var newest = g.MaxBy(x => x.DueDate)!;
+                return new MorosityUnitDto
+                {
+                    UnitId = oldest.UnitId,
+                    UnitCode = oldest.UnitCode,
+                    BuildingId = oldest.BuildingId,
+                    BuildingName = oldest.BuildingName,
+                    ResponsibleName = newest.ResponsibleName,
+                    ResponsiblePhone = newest.ResponsiblePhone,
+                    OwnerName = newest.OwnerName,
+                    OwnerPhone = newest.OwnerPhone,
+                    OldestDueDate = oldest.DueDate,
+                    DaysOverdue = oldest.DaysOverdue,
+                    OverduePeriods = g.Count(),
+                    TotalBalance = g.Sum(x => x.Balance)
+                };
+            });
+
+        if (dueOnOrBefore.HasValue)
+        {
+            rows = rows.Where(x => x.OldestDueDate <= dueOnOrBefore.Value);
+        }
+
+        var list = rows
+            .OrderByDescending(x => x.DaysOverdue)
+            .ThenByDescending(x => x.TotalBalance)
+            .ThenBy(x => x.BuildingName)
+            .ThenBy(x => x.UnitCode)
+            .ToList();
+        return Ok((IReadOnlyList<MorosityUnitDto>)list);
+    }
+
     [HttpPost("send-reminders")]
     public async Task<ActionResult<MorosityReminderResultDto>> SendReminders(
         [FromQuery] Guid? buildingId,

@@ -2290,7 +2290,7 @@ public class ExpensePeriodsController(
             Notes = entity.Notes
         };
 
-    private static string ResolveName(int year, int month) => $"{year:D4}-{month:D2}";
+    internal static string ResolveName(int year, int month) => $"{year:D4}-{month:D2}";
 
     private async Task<bool> UserHasUnitInBuildingAsync(Guid buildingId, CancellationToken cancellationToken)
     {
