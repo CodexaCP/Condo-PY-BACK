@@ -91,15 +91,25 @@ public class CreditNotesController(
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        // Ajustado y pagado de TODOS los cargos en dos consultas (antes eran dos por cargo). Se suma en memoria para no depender de la
+        // suma decimal del proveedor SQL.
+        var chargeIds = charges.Select(c => c.Id).ToList();
+        var adjustedRows = await dbContext.CreditNoteLines.AsNoTracking()
+            .Where(l => !l.IsDeleted && chargeIds.Contains(l.ExpenseChargeId) && l.CreditNote!.Status == CreditNoteStatus.Approved)
+            .Select(l => new { l.ExpenseChargeId, l.Amount })
+            .ToListAsync(cancellationToken);
+        var adjustedByCharge = adjustedRows.GroupBy(x => x.ExpenseChargeId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+        var paidRows = await dbContext.PaymentAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && chargeIds.Contains(a.ExpenseChargeId) && a.Payment != null && !a.Payment.IsReversed)
+            .Select(a => new { a.ExpenseChargeId, a.AllocatedAmount })
+            .ToListAsync(cancellationToken);
+        var paidByCharge = paidRows.GroupBy(x => x.ExpenseChargeId).ToDictionary(g => g.Key, g => g.Sum(x => x.AllocatedAmount));
+
         var result = new List<AdjustableChargeDto>();
         foreach (var charge in charges)
         {
-            var alreadyAdjusted = await dbContext.CreditNoteLines.AsNoTracking()
-                .Where(l => !l.IsDeleted && l.ExpenseChargeId == charge.Id && l.CreditNote!.Status == CreditNoteStatus.Approved)
-                .SumAsync(l => (decimal?)l.Amount, cancellationToken) ?? 0m;
-            var alreadyPaid = await dbContext.PaymentAllocations.AsNoTracking()
-                .Where(a => !a.IsDeleted && a.ExpenseChargeId == charge.Id && a.Payment != null && !a.Payment.IsReversed)
-                .SumAsync(a => (decimal?)a.AllocatedAmount, cancellationToken) ?? 0m;
+            var alreadyAdjusted = adjustedByCharge.GetValueOrDefault(charge.Id);
+            var alreadyPaid = paidByCharge.GetValueOrDefault(charge.Id);
 
             result.Add(new AdjustableChargeDto
             {

@@ -41,6 +41,26 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             cancellationToken);
     }
 
+    // Total de cargos de la unidad por periodo en UNA consulta (antes era una por periodo). Los importes se traen y se suman en memoria
+    // (los cargos de una unidad son pocos) para no depender de la suma decimal del proveedor SQL.
+    private async Task<Dictionary<Guid, decimal>> SumChargesByPeriodAsync(
+        Guid unitId, IEnumerable<AccountStatementPeriodDto> statements, CancellationToken cancellationToken)
+    {
+        var periodIds = statements.Where(x => x.Status != ExpensePeriodStatus.Draft).Select(x => x.ExpensePeriodId).ToList();
+        if (periodIds.Count == 0)
+        {
+            return new Dictionary<Guid, decimal>();
+        }
+
+        var rows = await dbContext.ExpenseCharges
+            .AsNoTracking()
+            .Where(x => !x.IsDeleted && x.UnitId == unitId && periodIds.Contains(x.ExpensePeriodId))
+            .Select(x => new { x.ExpensePeriodId, x.Amount })
+            .ToListAsync(cancellationToken);
+
+        return rows.GroupBy(x => x.ExpensePeriodId).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+    }
+
     [HttpGet("units/{unitId:guid}")]
     public async Task<ActionResult<IReadOnlyList<AccountStatementPeriodDto>>> GetUnitStatements(Guid unitId, CancellationToken cancellationToken)
     {
@@ -81,14 +101,12 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             })
             .ToListAsync(cancellationToken);
 
+        var chargesByPeriod = await SumChargesByPeriodAsync(unitId, statements, cancellationToken);
         foreach (var statement in statements)
         {
             if (statement.Status != ExpensePeriodStatus.Draft)
             {
-                statement.TotalCharges = await dbContext.ExpenseCharges
-                    .AsNoTracking()
-                    .Where(x => !x.IsDeleted && x.ExpensePeriodId == statement.ExpensePeriodId && x.UnitId == unitId)
-                    .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+                statement.TotalCharges = chargesByPeriod.GetValueOrDefault(statement.ExpensePeriodId);
             }
         }
 
@@ -150,14 +168,12 @@ public class AccountStatementsController(ICondoDbContext dbContext, IAccessScope
             })
             .ToListAsync(cancellationToken);
 
+        var chargesByPeriod = await SumChargesByPeriodAsync(unitId, statements, cancellationToken);
         foreach (var s in statements)
         {
             if (s.Status != ExpensePeriodStatus.Draft)
             {
-                s.TotalCharges = await dbContext.ExpenseCharges
-                    .AsNoTracking()
-                    .Where(x => !x.IsDeleted && x.ExpensePeriodId == s.ExpensePeriodId && x.UnitId == unitId)
-                    .SumAsync(x => (decimal?)x.Amount, cancellationToken) ?? 0m;
+                s.TotalCharges = chargesByPeriod.GetValueOrDefault(s.ExpensePeriodId);
             }
             s.Balance = s.TotalCharges - s.TotalPayments;
         }
