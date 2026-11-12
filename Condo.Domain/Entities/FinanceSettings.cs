@@ -33,6 +33,9 @@ public class FinanceSettings : CompanyScopedEntity
     // Libro Diario: ultimo dia asentado. Lo anterior ya esta numerado y no se vuelve a asentar; solo avanza. Nulo = nada asentado todavia.
     public DateOnly? JournalPostedThrough { get; set; }
 
+    // Version de fila: si dos personas asientan el Libro Diario a la vez, la segunda no pisa «asentado hasta» de la primera.
+    public byte[] RowVersion { get; set; } = [];
+
     public bool SetupCompleted { get; set; }
     public DateTime? SetupCompletedAtUtc { get; set; }
     public Guid? SetupCompletedByUserId { get; set; }

@@ -211,6 +211,10 @@ public class CondoDbContext(DbContextOptions<CondoDbContext> options) : DbContex
         modelBuilder.Entity<Building>().Property(x => x.LateFeeAppliesToIndividual).HasDefaultValue(true).ValueGeneratedNever();
         modelBuilder.Entity<Building>().Property(x => x.ReserveUsePolicy).HasConversion<string>().HasMaxLength(40).HasDefaultValue(ReserveUsePolicy.FreeUse).ValueGeneratedNever();
         modelBuilder.Entity<FinanceSettings>().Property(x => x.BudgetWarnPercent).HasDefaultValue(10).ValueGeneratedNever();
+        if (Database.IsSqlServer())
+        {
+            modelBuilder.Entity<FinanceSettings>().Property(x => x.RowVersion).IsRowVersion();
+        }
         modelBuilder.Entity<Building>().Property(x => x.ReserveUseThreshold).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<Building>().Property(x => x.Jurisdiction).HasMaxLength(100);
         modelBuilder.Entity<Building>().Property(x => x.AdministratorRegistryNumber).HasMaxLength(50);

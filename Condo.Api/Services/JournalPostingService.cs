@@ -6,6 +6,7 @@ using Condo.Application.Models;
 using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Condo.Api.Services;
@@ -272,6 +273,9 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         var incomplete = entries.Count(e => !e.IsComplete) + differences.Count(d => d.Current is { IsComplete: false });
         var reasons = await ReasonsAsync(differences, ct);
         var drafts = await DraftPeriodNamesAsync(entries.Concat(differences.Where(d => d.Current is not null).Select(d => d.Current!)), ct);
+        var (excluded, excludedCount) = await accounting.ExcludedAsync(ctx, through, ct);
+        // Las correcciones llevan como fecha contable este dia: si cae en un mes cerrado se avisa (no se bloquea: el Libro Diario es inmutable).
+        var inClosedMonth = differences.Count > 0 && await new FinancePeriodGuard(dbContext).FindClosedAsync(ctx.BuildingId, through, ct) is not null;
 
         return (new JournalPreviewDto
         {
@@ -289,7 +293,10 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             Differences = differences.Select(d => ToDto(d, reasons)).ToList(),
             CorrectionEntryCount = differences.Sum(d => d.EntryCount),
             DraftPeriods = drafts,
-            CanPost = numbers.Count > 0 && incomplete == 0 && drafts.Count == 0
+            CanPost = numbers.Count > 0 && incomplete == 0 && drafts.Count == 0,
+            Excluded = excluded,
+            ExcludedCount = excludedCount,
+            ThroughInClosedMonth = inClosedMonth
         }, null);
     }
 
@@ -404,9 +411,11 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
         {
             await dbContext.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsConcurrencyConflict(ex))
         {
-            // Otra persona asento al mismo tiempo (choco el numero, el movimiento de origen o el contraasiento): no se guardo nada de esta tanda.
+            // Otra persona asento al mismo tiempo (choco el numero, el movimiento de origen, el contraasiento o la version de la
+            // configuracion): no se guardo nada de esta tanda. Cualquier otro error de base (por ejemplo el bloqueo del Libro Diario)
+            // se relanza: lo atiende GlobalExceptionMiddleware y no se disfraza de conflicto.
             return (null, "Otra persona asentó al mismo tiempo. No se guardó nada de este asentado: actualizá la pantalla y reintentá.", true);
         }
 
@@ -415,6 +424,14 @@ public class JournalPostingService(ICondoDbContext dbContext, AccountingEntriesS
             PostedCount = rows.Count, CorrectionEntryCount = correctionCount, FirstLabel = firstLabel, LastLabel = lastLabel, PostedThrough = through
         }, null, false);
     }
+
+    /// <summary>
+    /// Es un choque entre dos personas que asientan a la vez: indice unico violado en SQL Server (2601 o 2627), un conflicto de version de
+    /// fila (<see cref="DbUpdateConcurrencyException"/>) o, en las pruebas con SQLite, cualquier error que no sea de SQL Server. Un error de
+    /// SQL Server de otro tipo (trigger de inmutabilidad, timeout, etc.) no lo es.
+    /// </summary>
+    public static bool IsConcurrencyConflict(DbUpdateException ex) =>
+        ex is DbUpdateConcurrencyException || ex.InnerException is not SqlException sql || sql.Number is 2601 or 2627;
 
     /// <summary>
     /// Numera los asientos nuevos (en el orden dado, que ya es cronologico), los agrega al contexto y actualiza el ultimo numero de cada ejercicio.

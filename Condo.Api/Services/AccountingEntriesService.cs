@@ -340,6 +340,10 @@ public class AccountingEntriesService(ICondoDbContext dbContext, FinanceLedgerSe
         return AccountingEntryBuilder.Build(rows, input);
     }
 
+    /// <summary>Gastos que el libro no toma hasta ese dia, con el motivo (aviso de la vista previa del Libro Diario).</summary>
+    public Task<(List<JournalExcludedDto> Items, int Total)> ExcludedAsync(LedgerContext ctx, DateOnly through, CancellationToken ct) =>
+        ledger.GetExcludedExpensesAsync(ctx, through, ct);
+
     // La cuenta del plan de un rubro del libro; los cargos individuales no tienen funcion especial en el plan: van a la cuenta de «cargos a recuperar».
     private static LedgerCategory? RubroCategory(LedgerContext ctx, string key) =>
         key == FinanceChartTemplate.RecoveryIndividualKey ? RecoveryAccount(ctx) : ctx.CategoryFor(key);

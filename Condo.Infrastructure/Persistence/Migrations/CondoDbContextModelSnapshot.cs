@@ -2884,6 +2884,12 @@ namespace Condo.Infrastructure.Persistence.Migrations
                     b.Property<bool>("PeriodClosingEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<bool>("SetupCompleted")
                         .HasColumnType("bit");
 

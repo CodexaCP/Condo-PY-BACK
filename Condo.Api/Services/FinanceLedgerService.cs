@@ -1,4 +1,5 @@
 using Condo.Application.Abstractions;
+using Condo.Application.Models;
 using Condo.Application.Services;
 using Condo.Domain.Entities;
 using Condo.Domain.Enums;
@@ -344,6 +345,56 @@ public class FinanceLedgerService(ICondoDbContext dbContext)
             .ThenBy(r => r.Description, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(r => r.Signed)
             .ToList();
+    }
+
+    public const int MaxExcludedListed = 50;
+
+    /// <summary>
+    /// Gastos del edificio hasta <paramref name="through"/> que <see cref="GetRowsAsync"/> no toma (y por eso no llegan a ningun asiento), con el
+    /// motivo. Sirve para avisar en la vista previa del Libro Diario. Devuelve el total y como mucho <see cref="MaxExcludedListed"/> renglones.
+    /// </summary>
+    public async Task<(List<JournalExcludedDto> Items, int Total)> GetExcludedExpensesAsync(
+        LedgerContext ctx, DateOnly through, CancellationToken cancellationToken)
+    {
+        var buildingId = ctx.BuildingId;
+        var start = ctx.StartDate;
+        var list = await dbContext.BuildingExpenses.AsNoTracking()
+            .Where(e => !e.IsDeleted && e.BuildingId == buildingId
+                        && e.DistributionType != BuildingExpenseDistributionType.IndividualUnit
+                        && e.ExpenseDate <= through
+                        && (
+                            // reserva que no pago el fondo (cuenta en el rango del libro, pero ForExpense la descarta)
+                            (e.Category == BuildingExpenseCategory.ReserveFund && !e.PaidByReserveFund
+                                && (e.PaidAt != null || e.DueDate == null) && (e.PaidAt ?? e.ExpenseDate) >= start)
+                            // anterior al arranque
+                            || ((e.PaidAt != null || e.DueDate == null) && (e.PaidAt ?? e.ExpenseDate) < start)
+                            // con vencimiento y sin pagar
+                            || (e.PaidAt == null && e.DueDate != null)))
+            .Select(e => new
+            {
+                e.Id, e.ExpenseDate, e.PaidAt, e.DueDate, e.Amount, e.Description, e.Category, e.PaidByReserveFund
+            })
+            .OrderBy(e => e.ExpenseDate)
+            .ToListAsync(cancellationToken);
+
+        var items = list.Select(e =>
+        {
+            var effective = e.PaidAt ?? e.ExpenseDate;
+            var reason = e.PaidAt == null && e.DueDate != null ? JournalExcludedReason.UnpaidWithDueDate
+                : effective < start ? JournalExcludedReason.BeforeStartDate
+                : JournalExcludedReason.ReserveNotPaidByFund;
+            return new JournalExcludedDto
+            {
+                SourceId = e.Id, Reason = reason, Date = e.ExpenseDate, Amount = e.Amount,
+                Description = string.IsNullOrWhiteSpace(e.Description) ? "Gasto del edificio" : e.Description
+            };
+        })
+        // Primero lo que hay que revisar (reserva sin fondo), despues lo anterior al arranque y al final lo impago por vencer.
+        .OrderBy(i => i.Reason == JournalExcludedReason.ReserveNotPaidByFund ? 0 : i.Reason == JournalExcludedReason.BeforeStartDate ? 1 : 2)
+        .ThenBy(i => i.Date)
+        .ToList();
+
+        return (items.Take(MaxExcludedListed).ToList(), items.Count);
     }
 
     // Codigo de cada unidad pedida (para rotular a quien se le cobra un cargo individual).

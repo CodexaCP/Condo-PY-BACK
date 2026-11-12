@@ -271,6 +271,30 @@ public class JournalPreviewDto
     public IReadOnlyList<string> DraftPeriods { get; set; } = [];
     // Hay algo para asentar y todos los asientos estan completos.
     public bool CanPost { get; set; }
+    // Gastos que el libro NO toma y por eso no saldran en ningun asiento (aviso: no bloquea el asentado). Ver JournalExcludedReason.
+    public IReadOnlyList<JournalExcludedDto> Excluded { get; set; } = [];
+    public int ExcludedCount { get; set; }
+    // Dias de la fecha de asentado que caen en un mes cerrado: las correcciones llevan esa fecha contable (aviso, no bloquea).
+    public bool ThroughInClosedMonth { get; set; }
+}
+
+public enum JournalExcludedReason
+{
+    // Categoria «fondo de reserva» que no se pago con el fondo: el libro no la clasifica y queda fuera. Revisar.
+    ReserveNotPaidByFund = 1,
+    // Fechado antes del arranque de Finanzas: no cuenta (lo anterior entra como saldos iniciales).
+    BeforeStartDate = 2,
+    // Con vencimiento y sin pagar: criterio de caja, entra cuando se pague.
+    UnpaidWithDueDate = 3
+}
+
+public class JournalExcludedDto
+{
+    public Guid SourceId { get; set; }
+    public JournalExcludedReason Reason { get; set; }
+    public DateOnly Date { get; set; }
+    public decimal Amount { get; set; }
+    public string Description { get; set; } = string.Empty;
 }
 
 public class PostJournalRequest
