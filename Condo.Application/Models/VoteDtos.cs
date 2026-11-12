@@ -115,3 +115,55 @@ public class VoteCancelRequest
 {
     public string Reason { get; set; } = string.Empty;
 }
+
+// Vista del propietario: sin el voto de las demás unidades; resultados por opción solo al cerrar.
+public class OwnerVoteDto
+{
+    public Guid Id { get; set; }
+    public Guid BuildingId { get; set; }
+    public string BuildingName { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = "Open";
+    public string WeightType { get; set; } = "ByUnit";
+    public string MajorityRule { get; set; } = "Simple";
+    public bool IsInformative { get; set; }
+    public decimal QuorumPercentage { get; set; }
+    public DateTime? OpenedAtUtc { get; set; }
+    public DateTime? ClosedAtUtc { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public string? CancelReason { get; set; }
+    public int TotalUnits { get; set; }
+    public int ParticipatingUnits { get; set; }
+    public bool QuorumReached { get; set; }
+    public bool ResultsVisible { get; set; }
+    public Guid? ApprovedOptionId { get; set; }
+    public Guid? WinningOptionId { get; set; }
+    public bool IsTie { get; set; }
+    public List<OwnerVoteOptionDto> Options { get; set; } = [];
+    public List<OwnerVoteUnitDto> MyUnits { get; set; } = [];
+}
+
+public class OwnerVoteOptionDto
+{
+    public Guid Id { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+    // null mientras no se ven resultados (abierta o anulada).
+    public int? CastCount { get; set; }
+    public decimal? Percentage { get; set; }
+}
+
+public class OwnerVoteUnitDto
+{
+    public Guid UnitId { get; set; }
+    public string UnitCode { get; set; } = string.Empty;
+    public Guid? VotedOptionId { get; set; }
+    public string? VotedOptionLabel { get; set; }
+    public DateTime? CastAtUtc { get; set; }
+    // "Owner" | "Staff" | null
+    public string? CastSource { get; set; }
+    public bool CanVote { get; set; }
+    // Por qué no puede votar (null si puede): texto para mostrar tal cual.
+    public string? CannotVoteReason { get; set; }
+}

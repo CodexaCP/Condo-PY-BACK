@@ -360,8 +360,13 @@ public sealed class VoteService(
             .Include(x => x.Options)
             .Include(x => x.Casts)
             .FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, ct);
-        var access = await CheckAccessAsync(vote, manage: false, ct);
-        if (access is not null) return access;
+        // El canal del propietario valida la titularidad antes (CastAsOwnerAsync); el del personal, acceso al edificio y rol.
+        if (source == VoteCastSource.Staff)
+        {
+            var access = await CheckAccessAsync(vote, manage: false, ct);
+            if (access is not null) return access;
+        }
+        else if (vote is null) return VoteError.NotFound();
         if (source == VoteCastSource.Staff && !CanCast) return VoteError.Forbidden("No tenés permiso para cargar votos.");
         if (vote!.Status != VoteStatus.Open) return VoteError.BadRequest("La votación no está abierta.");
 
@@ -452,6 +457,128 @@ public sealed class VoteService(
         var saveError = await SaveAsync(ct, castConflict: true);
         if (saveError is not null) return saveError;
         return VoteResult<VoteDto>.Success(await LoadDetailAsync(vote.Id, ct));
+    }
+
+    // ── Canal del propietario ────────────────────────────────────────────────
+
+    private sealed record OwnerUnitLink(Guid UnitId, string UnitCode, Guid BuildingId, bool IsPrimary);
+
+    private async Task<List<OwnerUnitLink>> LoadOwnerLinksAsync(CancellationToken ct)
+    {
+        var rows = await db.UnitOwners.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.EndDate == null && x.OwnerId == tenant.UserId && x.Unit != null && !x.Unit.IsDeleted)
+            .Select(x => new { x.UnitId, x.Unit!.Code, x.Unit.BuildingId, x.IsPrimary })
+            .ToListAsync(ct);
+        return rows
+            .GroupBy(x => x.UnitId)
+            .Select(g => new OwnerUnitLink(g.Key, g.First().Code, g.First().BuildingId, g.Any(y => y.IsPrimary)))
+            .OrderBy(l => l.UnitCode)
+            .ToList();
+    }
+
+    public async Task<VoteResult<List<OwnerVoteDto>>> ListForOwnerAsync(CancellationToken ct)
+    {
+        var links = await LoadOwnerLinksAsync(ct);
+        if (links.Count == 0) return VoteResult<List<OwnerVoteDto>>.Success(new List<OwnerVoteDto>());
+
+        var buildingIds = links.Select(l => l.BuildingId).Distinct().ToList();
+        var ids = await db.Votes.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.Status != VoteStatus.Draft && buildingIds.Contains(x.BuildingId))
+            .OrderByDescending(x => x.OpenedAtUtc ?? x.CreatedAtUtc)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+
+        var result = new List<OwnerVoteDto>();
+        foreach (var id in ids)
+            result.Add(ToOwnerDto(await LoadDetailAsync(id, ct), links));
+
+        return VoteResult<List<OwnerVoteDto>>.Success(result.OrderBy(x => x.Status == "Open" ? 0 : 1).ToList());
+    }
+
+    public async Task<VoteResult<OwnerVoteDto>> GetForOwnerAsync(Guid id, CancellationToken ct)
+    {
+        var links = await LoadOwnerLinksAsync(ct);
+        var vote = await db.Votes.AsNoTracking().FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, ct);
+        if (vote is null || vote.Status == VoteStatus.Draft || links.All(l => l.BuildingId != vote.BuildingId))
+            return VoteError.NotFound();
+        return VoteResult<OwnerVoteDto>.Success(ToOwnerDto(await LoadDetailAsync(id, ct), links));
+    }
+
+    public async Task<VoteResult<OwnerVoteDto>> CastAsOwnerAsync(Guid id, VoteCastRequest request, CancellationToken ct)
+    {
+        var links = await LoadOwnerLinksAsync(ct);
+        var vote = await db.Votes.AsNoTracking().FirstOrDefaultAsync(x => !x.IsDeleted && x.Id == id, ct);
+        if (vote is null || vote.Status == VoteStatus.Draft || links.All(l => l.BuildingId != vote.BuildingId))
+            return VoteError.NotFound();
+
+        var link = links.FirstOrDefault(l => l.UnitId == request.UnitId);
+        if (link is null || link.BuildingId != vote.BuildingId) return VoteError.Forbidden("No sos propietario de esa unidad.");
+        if (!link.IsPrimary) return VoteError.Forbidden("Solo el propietario principal de la unidad puede votar.");
+
+        var existing = await db.VoteCasts.AsNoTracking().FirstOrDefaultAsync(x => x.VoteId == id && x.UnitId == request.UnitId, ct);
+        if (existing?.Source == VoteCastSource.Staff)
+            return VoteError.BadRequest("El voto de esta unidad lo cargó la administración en la asamblea; para cambiarlo hablá con el encargado.");
+
+        var result = await ApplyCastAsync(id, request.UnitId, request.VoteOptionId, VoteCastSource.Owner, ct);
+        if (!result.Ok) return VoteResult<OwnerVoteDto>.Fail(result.Error!);
+        return VoteResult<OwnerVoteDto>.Success(ToOwnerDto(result.Value!, links));
+    }
+
+    private static OwnerVoteDto ToOwnerDto(VoteDto d, IReadOnlyCollection<OwnerUnitLink> links)
+    {
+        var resultsVisible = d.Status == "Closed";
+        return new OwnerVoteDto
+        {
+            Id = d.Id,
+            BuildingId = d.BuildingId,
+            BuildingName = d.BuildingName,
+            Title = d.Title,
+            Description = d.Description,
+            Status = d.Status,
+            WeightType = d.WeightType,
+            MajorityRule = d.MajorityRule,
+            IsInformative = d.IsInformative,
+            QuorumPercentage = d.QuorumPercentage,
+            OpenedAtUtc = d.OpenedAtUtc,
+            ClosedAtUtc = d.ClosedAtUtc,
+            CancelledAtUtc = d.CancelledAtUtc,
+            CancelReason = d.CancelReason,
+            TotalUnits = d.TotalUnits,
+            ParticipatingUnits = d.ParticipatingUnits,
+            QuorumReached = d.QuorumReached,
+            ResultsVisible = resultsVisible,
+            ApprovedOptionId = resultsVisible ? d.ApprovedOptionId : null,
+            WinningOptionId = resultsVisible ? d.WinningOptionId : null,
+            IsTie = resultsVisible && d.IsTie,
+            Options = d.Options.OrderBy(o => o.DisplayOrder).Select(o => new OwnerVoteOptionDto
+            {
+                Id = o.Id,
+                Label = o.Label,
+                DisplayOrder = o.DisplayOrder,
+                CastCount = resultsVisible ? o.CastCount : null,
+                Percentage = resultsVisible ? o.Percentage : null
+            }).ToList(),
+            MyUnits = links.Where(l => l.BuildingId == d.BuildingId).Select(l =>
+            {
+                var s = d.Units.FirstOrDefault(u => u.UnitId == l.UnitId);
+                string? reason = null;
+                if (d.Status != "Open") reason = "La votación no está abierta.";
+                else if (s is null) reason = "La unidad no forma parte del padrón de esta votación.";
+                else if (!l.IsPrimary) reason = "Solo el propietario principal de la unidad puede votar.";
+                else if (s.CastSource == "Staff") reason = "El voto lo cargó la administración en la asamblea.";
+                return new OwnerVoteUnitDto
+                {
+                    UnitId = l.UnitId,
+                    UnitCode = s?.UnitCode ?? l.UnitCode,
+                    VotedOptionId = s?.VotedOptionId,
+                    VotedOptionLabel = s?.VotedOptionLabel,
+                    CastAtUtc = s?.CastAtUtc,
+                    CastSource = s?.CastSource,
+                    CanVote = reason is null,
+                    CannotVoteReason = reason
+                };
+            }).ToList()
+        };
     }
 
     // ── Auxiliares ───────────────────────────────────────────────────────────
